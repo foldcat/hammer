@@ -15,6 +15,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:mem"
+import mem_virtual "core:mem/virtual"
 import "core:os"
 import "core:strconv"
 
@@ -23,13 +24,13 @@ import sg "sokol:gfx"
 import sglue "sokol:glue"
 import slog "sokol:log"
 
-import "core/logging"
-import "core/lifecycle"
 import "core/errs"
+import "core/lifecycle"
+import "core/logging"
 import "platform"
 
-import config "core/config"
 import generated "config/generated"
+import config "core/config"
 
 State :: struct {
 	pass_action:     sg.Pass_Action,
@@ -53,16 +54,58 @@ app: lifecycle.App
 // interfaces; the core consumes only these proc pointers.
 services: platform.Services
 
-// track reports leaked/incorrectly-freed allocations at exit; every
-// context used by the app (main + callbacks) allocates through it.
-track: mem.Tracking_Allocator
+// Allocation layout (AGENTS.md §10.5, SPECS.md §17.4):
+//
+//   - `perm` is the permanent arena. Every allocation that lives for the
+//     whole program — logging sink data, config-derived strings, errors
+//     owned by the lifecycle — goes here and is released in one shot at
+//     the end of main.
+//   - `temp` is the frame-scratch arena, installed as
+//     `context.temp_allocator`; it is reset at the end of every frame.
+//     Nothing may borrow from it across frames.
+//   - Until `init_arenas` has succeeded, `permanent` returns the panic
+//     allocator: an allocation before arena setup is a loud bug, not a
+//     leak.
+perm: mem_virtual.Arena
+perm_ready := false
+
+temp: mem_virtual.Arena
+
+// permanent returns the allocator for program-lifetime data.
+permanent :: proc() -> mem.Allocator {
+	if !perm_ready {
+		return mem.panic_allocator()
+	}
+	return mem_virtual.arena_allocator(&perm)
+}
+
+// init_arenas reserves the permanent and frame-scratch arenas. It must
+// run before any other app code: `permanent` panics on use until it has
+// succeeded. Failure is fatal and reported with raw writes — formatting
+// would allocate, and the panic allocator is still in force here.
+init_arenas :: proc() -> bool {
+	if err := mem_virtual.arena_init_growing(&perm); err != nil {
+		os.write_string(os.stderr, "hammer: fatal: cannot create the permanent arena\n")
+		return false
+	}
+	perm_ready = true
+	if err := mem_virtual.arena_init_growing(&temp); err != nil {
+		mem_virtual.arena_destroy(&perm)
+		perm_ready = false
+		os.write_string(os.stderr, "hammer: fatal: cannot create the frame-scratch arena\n")
+		return false
+	}
+	return true
+}
 
 // app_context returns the context used by main and all Sokol callbacks:
-// default per-thread state, the tracking allocator, the editor logger,
-// and the panic reporter.
+// default per-thread state, the permanent arena as the default
+// allocator, the frame-scratch arena as the temp allocator, the editor
+// logger, and the panic reporter.
 app_context :: proc() -> runtime.Context {
 	ctx := runtime.default_context()
-	ctx.allocator = mem.tracking_allocator(&track)
+	ctx.allocator = permanent()
+	ctx.temp_allocator = mem_virtual.arena_allocator(&temp)
 	logging.install(&ctx)
 	return ctx
 }
@@ -79,10 +122,7 @@ request_quit :: proc(reason: lifecycle.Quit_Reason, source: string, err := errs.
 init :: proc "c" () {
 	context = app_context()
 
-	sg.setup({
-		environment = sglue.environment(),
-		logger = {func = slog.func},
-	})
+	sg.setup({environment = sglue.environment(), logger = {func = slog.func}})
 	if !sg.isvalid() {
 		request_quit(.Init_Failed, "init", errs.new(.Internal, "sokol gfx setup failed"))
 		return
@@ -101,14 +141,25 @@ init :: proc "c" () {
 	// First real consumption of the platform window service.
 	width, height := services.window.framebuffer_size(services.user)
 	scale := services.window.dpi_scale(services.user)
-	log.infof("window: %dx%d px, dpi_scale=%.2f, backend=%v", width, height, scale, sg.query_backend())
-	desc := config.describe(cfg)
-	defer delete(desc)
+	log.infof(
+		"window: %dx%d px, dpi_scale=%.2f, backend=%v",
+		width,
+		height,
+		scale,
+		sg.query_backend(),
+	)
+	desc := config.describe(cfg, context.temp_allocator)
 	log.info(desc)
 }
 
 frame :: proc "c" () {
 	context = app_context()
+
+	// Reclaim the frame scratch arena at the end of every frame. All
+	// frame-local allocations (log-line formatting, config.describe,
+	// env reads) land in `temp` via context.temp_allocator and must
+	// never be held across this reset (AGENTS.md §10.5).
+	defer mem_virtual.arena_free_all(&temp)
 
 	state.frame_count += 1
 
@@ -192,7 +243,9 @@ finalize_lifecycle :: proc() {
 // state directory. A file that cannot be opened is not fatal: init
 // leaves console logging active and reports the failure.
 setup_logging :: proc() -> errs.Error {
-	options := logging.Options{ident = "hammer"}
+	options := logging.Options {
+		ident = "hammer",
+	}
 	if path, found := os.lookup_env("HAMMER_LOG", context.temp_allocator); found {
 		options.file_path = path // "" disables file logging
 	} else {
@@ -203,11 +256,12 @@ setup_logging :: proc() -> errs.Error {
 		// reported by init itself.
 		os.make_directory_all(parent_dir(options.file_path))
 	}
-	return logging.init(options)
+	return logging.init(options, permanent())
 }
 
-// default_log_path returns the per-user log file path (scratch
-// allocation; borrowed until the next scratch reset). Falls back to ""
+// default_log_path returns the per-user log file path (frame-scratch
+// allocation; borrowed until the next frame reset — logging.init clones
+// it into the permanent arena before then). Falls back to ""
 // (console only) when no writable base can be determined.
 default_log_path :: proc() -> string {
 	if xdg, found := os.lookup_env("XDG_STATE_HOME", context.temp_allocator); found && xdg != "" {
@@ -234,8 +288,8 @@ parent_dir :: proc(path: string) -> string {
 // setup_services wires the Sokol-backed implementations into the
 // platform service table.
 setup_services :: proc() {
-	services = platform.Services{
-		window = platform.Window_Service{
+	services = platform.Services {
+		window = platform.Window_Service {
 			framebuffer_size = sokol_framebuffer_size,
 			dpi_scale = sokol_dpi_scale,
 		},
@@ -273,31 +327,19 @@ env_flag :: proc(name: string) -> bool {
 	return value != "" && value != "0" && value != "false"
 }
 
-// report_leaks prints exit-time allocation statistics to stderr. It runs
-// after logging shutdown (the logger's own allocations must already be
-// released, and stderr is the honest channel for terminal diagnostics —
-// the log file is closed by then).
-report_leaks :: proc(track: ^mem.Tracking_Allocator) {
-	if len(track.allocation_map) > 0 {
-		fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
-		for _, entry in track.allocation_map {
-			fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
-		}
-	}
-	if len(track.bad_free_array) > 0 {
-		fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
-		for entry in track.bad_free_array {
-			fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
-		}
-	}
-}
-
 main :: proc() {
-	mem.tracking_allocator_init(&track, context.allocator)
-	// Defers execute in reverse declaration order (LIFO):
-	// app_destroy -> logging.shutdown -> report_leaks -> tracking_destroy.
-	defer mem.tracking_allocator_destroy(&track)
-	defer report_leaks(&track)
+	if !init_arenas() {
+		os.exit(1)
+	}
+	// Defers execute in reverse declaration order (LIFO): app_destroy,
+	// logging.shutdown (the last log call precedes it), then a single
+	// free_all of the permanent arena (releasing every program-lifetime
+	// allocation at once), then the arena reservations themselves —
+	// every arena is free_all'ed and destroyed (AGENTS.md §10.5).
+	defer mem_virtual.arena_destroy(&temp)
+	defer mem_virtual.arena_free_all(&temp)
+	defer mem_virtual.arena_destroy(&perm)
+	defer mem_virtual.arena_free_all(&perm)
 	defer logging.shutdown()
 	defer lifecycle.app_destroy(&app)
 
@@ -318,17 +360,19 @@ main :: proc() {
 	setup_services()
 	lifecycle.app_enter_initializing(&app)
 
-	sapp.run({
-		init_cb = init,
-		frame_cb = frame,
-		cleanup_cb = cleanup,
-		event_cb = event,
-		width = 800,
-		height = 600,
-		window_title = "Hammer",
-		icon = {sokol_default = true},
-		logger = {func = slog.func},
-	})
+	sapp.run(
+		{
+			init_cb = init,
+			frame_cb = frame,
+			cleanup_cb = cleanup,
+			event_cb = event,
+			width = 800,
+			height = 600,
+			window_title = "Hammer",
+			icon = {sokol_default = true},
+			logger = {func = slog.func},
+		},
+	)
 
 	finalize_lifecycle()
 }

@@ -81,6 +81,15 @@ deferred by owner decision; see the M00.09 note and
 
 ### Notes
 
+- **Allocator migration done (2026-11-12 session).** Owner-directed
+  refactor (AGENTS.md §10.5, `docs/m01-alloc-arenas.md`): the product
+  now runs on two explicit `core:mem/virtual` arenas in `src/main.odin`
+  — a permanent arena (`perm`, one `free_all` at the end of main) and a
+  frame-scratch arena (`temp`, reset per frame, installed as
+  `context.temp_allocator`); the panic allocator remains only as the
+  pre-init sentinel. Validated 31/31 unit tests, debug/release Xvfb
+  smokes, panic path, console-only mode, Windows cross-build + Wine 11.
+  No spike touched.
 - **M01.02 done (2026-11-12 session).** Generated trusted configuration
   package (`docs/m01-02-config.md`): `src/core/config` (schema,
   oxocarbon defaults, strict YAML subset, resolve/validate, source

@@ -139,9 +139,10 @@ resolved :: proc(c: Config, source: Source, allocator := context.allocator) -> (
 // describe renders a one-line human-readable summary of the resolved
 // configuration. The result is owned by the caller (allocated with
 // `allocator`); free it with `delete`. There is deliberately no
-// scratch-arena default: the product has no frame arena yet, and
-// un-freed scratch allocations would accumulate for the process
-// lifetime (AGENTS.md §10.5).
+// scratch-arena default: the result may need to outlive a frame reset,
+// so the product passes an explicit allocator (its frame arena for
+// transient use, the permanent arena for retained strings) instead of
+// relying on an ambient one (AGENTS.md §10.5).
 describe :: proc(r: Resolved, allocator := context.allocator) -> string {
 	families, join_err := strings.join(r.Font_Families, ", ", allocator)
 	defer if join_err == nil {

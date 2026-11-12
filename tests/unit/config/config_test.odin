@@ -11,6 +11,7 @@ package config_test
 import "core:math"
 import "core:strings"
 import "core:testing"
+import mem_virtual "core:mem/virtual"
 
 import config "hammer:core/config"
 import errs "hammer:core/errs"
@@ -232,4 +233,38 @@ test_describe_summary :: proc(t: ^testing.T) {
 	defer delete(s)
 	testing.expect(t, strings.contains(s, "builtin defaults"))
 	testing.expect(t, strings.contains(s, "body_bg=#161616"))
+}
+
+@(test)
+test_arena_allocator_end_to_end :: proc(t: ^testing.T) {
+	// The product runs every program-lifetime allocation through one
+	// arena freed at exit (src/main.odin, AGENTS.md §10.5). The core
+	// packages must work under such an allocator: individual
+	// delete/destroy calls are safe no-ops on an arena, and a single
+	// free_all reclaims everything.
+	arena: mem_virtual.Arena
+	if err := mem_virtual.arena_init_growing(&arena); err != nil {
+		testing.expectf(t, false, "arena init failed: %v", err)
+		return
+	}
+	defer mem_virtual.arena_destroy(&arena)
+	defer mem_virtual.arena_free_all(&arena)
+	alloc := mem_virtual.arena_allocator(&arena)
+
+	r, err := config.resolve_from_yaml("font_size_points: 20\n", .File, alloc)
+	testing.expect(t, errs.ok(err))
+	defer config.resolved_destroy(&r, alloc)
+	testing.expect(t, r.Source == .File)
+	testing.expect(t, len(r.Font_Families) == 4)
+
+	e := errs.newf(.IO, "arena error %d", 7, allocator = alloc)
+	testing.expect(t, e.message == "arena error 7")
+	defer errs.destroy(&e)
+
+	s := config.describe(r, alloc)
+	testing.expect(t, strings.contains(s, "config file"))
+
+	// One reset reclaims every allocation made above.
+	mem_virtual.arena_free_all(&arena)
+	testing.expect(t, arena.total_used == 0)
 }
