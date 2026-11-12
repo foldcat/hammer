@@ -8,6 +8,7 @@
 // Test hooks (all ignored unless set):
 //   HAMMER_AUTOQUIT_FRAMES=<n>  request quit after n frames (headless smoke test)
 //   HAMMER_TEST_PANIC=1         panic during frame 2 (panic-reporting smoke test)
+//   HAMMER_RENDER_PROBE=1       log rendered pixel colors at frame 5 (render validation)
 //   HAMMER_LOG=<path>           log file path; empty string disables file logging
 package main
 
@@ -39,10 +40,14 @@ State :: struct {
 	frame_count:     i64,
 	autoquit_frames: i64, // 0 = disabled
 	test_panic:      bool,
+	// probe_frame is the frame at which the render probe fires
+	// (HAMMER_RENDER_PROBE); 0 = disabled.
+	probe_frame:     i64,
 	// scale is the editor-owned, always-valid physical/logical ratio
 	// (M01.04). window_metrics validates the backend value and falls
-	// back to 1.0; input normalization trusts this cached value, so
-	// the external input is validated once, at the boundary.
+	// back to 1.0; input normalization and rendering trust this
+	// cached value, so the external input is validated once, at the
+	// boundary.
 	scale:           f32,
 }
 
@@ -135,15 +140,19 @@ init :: proc "c" () {
 		return
 	}
 
-	// The window clear color is the configured body background: config
-	// edits visibly change the rendered output after a rebuild (M01
-	// acceptance). M01.06 replaces this with real column/tag/body
-	// rectangles painted from the same theme.
+	// The window clear color is the configured body background: the
+	// body rectangle (M01.06) paints the same color, and the clear
+	// covers the border padding around the tag/body rectangles, so
+	// config edits visibly change the rendered output after a
+	// rebuild (M01 acceptance).
 	c := cfg.Theme.Body_Bg
 	state.pass_action.colors[0] = {
 		load_action = .CLEAR,
 		clear_value = sg.Color{c[0], c[1], c[2], c[3]},
 	}
+
+	// M01.06: the basic column/tag/body rectangle renderer.
+	render_setup()
 
 	// First real consumption of the platform window service: physical
 	// framebuffer metrics converted to logical layout units through
@@ -199,6 +208,7 @@ frame :: proc "c" () {
 	}
 
 	sg.begin_pass({action = state.pass_action, swapchain = sglue.swapchain()})
+	render_frame()
 	sg.end_pass()
 	sg.commit()
 }
@@ -660,6 +670,21 @@ autoquit_frames_from_env :: proc() -> i64 {
 	return min(frames, 100_000)
 }
 
+// probe_frame_from_env reads HAMMER_RENDER_PROBE: the frame at which
+// the render probe fires. A bare non-empty value means frame 5; a
+// number selects the frame (useful to probe after a resize).
+probe_frame_from_env :: proc() -> i64 {
+	value, found := os.lookup_env("HAMMER_RENDER_PROBE", context.temp_allocator)
+	if !found || value == "" || value == "0" || value == "false" {
+		return 0
+	}
+	frames, ok := strconv.parse_i64(value)
+	if !ok || frames <= 0 {
+		return 5
+	}
+	return min(frames, 100_000)
+}
+
 // env_flag reports whether a boolean test hook is set ("1", "true",
 // anything non-empty except "0"/"false").
 env_flag :: proc(name: string) -> bool {
@@ -696,6 +721,7 @@ main :: proc() {
 
 	state.autoquit_frames = autoquit_frames_from_env()
 	state.test_panic = env_flag("HAMMER_TEST_PANIC")
+	state.probe_frame = probe_frame_from_env()
 	state.scale = 1.0 // replaced by window_metrics before any input event
 	cfg = generated.resolved
 

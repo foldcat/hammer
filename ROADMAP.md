@@ -29,8 +29,8 @@ stubs, validation actually run, platform claims recorded honestly.
 | ID  | Title                                              | Depends on     | Release cut | Status      |
 | --- | -------------------------------------------------- | -------------- | ----------- | ----------- |
 | M00 | Specification, feasibility spikes, build baseline  | —              | —           | Done        |
-| M01 | Application shell, platform layer, compiled config | M00            | Alpha A     | **Active**  |
-| M02 | Rope, transactions, anchors, headless core         | M01            | Alpha A     | Not started |
+| M01 | Application shell, platform layer, compiled config | M00            | Alpha A     | **Done**    |
+| M02 | Rope, transactions, anchors, headless core         | M01            | Alpha A     | **Active**  |
 | M03 | File loading, codecs, safe save, external changes  | M02            | Alpha A     | Not started |
 | M04 | Recovery journals, persistent history, shutdown    | M03            | Alpha A     | Not started |
 | M05 | Unicode text renderer, fonts, DPI                  | M02 (+M03/M04) | Alpha A     | Not started |
@@ -126,6 +126,17 @@ deferred by owner decision; see the M00.09 note and
   encoded (M02/M09 own the envelope). Validated 51/51 unit tests
   (MPSC stress with real threads ×10), `-no-crt` Windows cross-build
   of the package + Wine 11 run (exit 0); product smokes unchanged.
+- **M01.06 done (2026-11-12 session) — M01 complete.** Basic
+  column/tag/body rectangles (`docs/m01-06-render.md`): backend-free
+  `src/core/layout` (`Rect`/`Window` geometry, degenerate-size
+  collapse, `.Invalid_Input` validation) and the application-layer
+  renderer `src/render.odin` (embedded GLSL 410 colored-quad shader,
+  write-transient vertex buffer, per-frame layout recompute). A raw-GL
+  pixel probe (Linux/X11 test hook) proves headlessly that config
+  edits change rendered colors byte-exactly and font-size edits change
+  the tag strip height — the M01 acceptance — at scale 1.0/2.0 and
+  across live resizes. Validated 57/57 unit tests, debug/release/run
+  smokes, Windows cross-build + Wine 11 (renderer running, exit 0).
 - **M00.01 done.** Repository skeleton, `AGENTS.md` agent workflow, `SPECS.md`,
   `README.md`, `make.odin` build tool, `colorscheme.yaml`, `ols.json`,
   `.gitignore`/`.gitmodules`. Working tree clean at `3200a42`.
@@ -258,16 +269,17 @@ deferred by owner decision; see the M00.09 note and
 
 ## M01 — Application shell, platform layer, and compiled config
 
-**Status:** Active
+**Status:** Done (all six tasks validated headless; real-desktop and
+real-Windows validation remain the recorded follow-ups).
 **Depends on:** M00
-**Next task:** M01.06
+**Next task:** — (milestone complete; next is M02.01)
 
 - [x] M01.01 Implement lifecycle and error-reporting infrastructure.
 - [x] M01.02 Add generated trusted configuration package.
 - [x] M01.03 Create logical/physical coordinate conversion.
 - [x] M01.04 Add native input normalization.
 - [x] M01.05 Add worker/result queues with bounded capacity.
-- [ ] M01.06 Render basic column/tag/body rectangles.
+- [x] M01.06 Render basic column/tag/body rectangles.
 
 ### Notes
 
@@ -294,8 +306,9 @@ deferred by owner decision; see the M00.09 note and
 
 ## M02 — Rope, transactions, anchors, and headless core
 
-**Status:** Not started
+**Status:** Active
 **Depends on:** M01
+**Next task:** M02.01
 
 - [ ] M02.01 Implement immutable backing chunks.
 - [ ] M02.02 Implement leaves, metrics, and range iteration.

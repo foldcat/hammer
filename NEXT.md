@@ -3,25 +3,51 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M01.06 — Render basic column/tag/body rectangles
+## Current task: M02.01 — Immutable backing chunks
 
-See SPECS.md §18 M01 for deliverables and acceptance. M01.01–M01.05
-are done (see below); M01.06 is the last M01 task and the first
-rendering task: the basic column/tag/body layout painted from the
-compiled theme (M01.02) — the visible editor shell (M01 acceptance
-"configuration edits visibly change colors after rebuild"). It
-consumes the window service and `core/coords` (M01.03) for logical
-layout and `core/input` (M01.04) later for mouse hit-testing.
+M01 is done (all six tasks, see below); M02 (SPECS.md §18) is now
+active. M02.01 starts the rope: immutable, hash-consable backing
+chunks for buffer text — the foundation M02.02 (leaves/metrics/range
+iteration) and M02.03 (balancing/persistent roots) build on. The
+headless-core rule (SPECS.md §4.2) applies: no Sokol, testable
+without a window; follow the randomized differential-test discipline
+of SPECS.md §21 for text-model work.
 
 The M01.02 traps in `docs/m01-02-config.md` §Traps, the M01.03 traps
 in `docs/m01-03-coords.md` §Traps, the M01.04 traps in
-`docs/m01-04-input.md` §Traps, and the M01.05 traps in
-`docs/m01-05-queue.md` §Traps are required reading for new code in
+`docs/m01-04-input.md` §Traps, the M01.05 traps in
+`docs/m01-05-queue.md` §Traps, and the M01.06 traps in
+`docs/m01-06-render.md` §Traps are required reading for new code in
 `src/` (fmt brace escaping, block-scoped defer, relative import
 resolution, `%v` float formatting; Xlib async errors, no `odin fmt`,
 no `math.is_finite`; `#partial switch` needed for catch-alls, Odin
 procs are not closures; `-linker:lld` for Windows links, `core:sync`
-is libc-free).
+is libc-free; new-API sokol_gfx, imports are per-file).
+
+## M01 done (2026-11-12 session, M01.06)
+
+Render basic column/tag/body rectangles (`docs/m01-06-render.md`) —
+this closes M01:
+
+- New backend-free `src/core/layout`: `Rect`/`Window` (frame/tag/body)
+  geometry with degenerate-size collapse and `.Invalid_Input`
+  validation; `src/render.odin` (application layer) draws them with
+  sokol_gfx (embedded GLSL 410 colored-quad shader, write-transient
+  vertex buffer), recomputing the layout every frame from the window
+  metrics, cached scale, and configured theme/font size.
+- New render probe test hook (Linux/X11, raw-GL readback): proves
+  headlessly, byte-exactly, that config edits change rendered colors
+  and font sizes change the tag strip height — the M01 acceptance —
+  at scale 1.0/2.0, after live resizes, debug and release.
+- Validated: 57/57 unit tests leak-free (layout 6 new); pixel probes
+  (default config `tag=#262626 body=#161616`; custom config
+  `tag=#446688 body=#112233`; 21pt font flips the below-tag sample);
+  Windows cross-build + Wine 11 smoke with the renderer running
+  (exit 0). Real-desktop visual check remains the standing follow-up.
+
+M01 overall status: all six tasks done and validated headless;
+real-desktop and real-Windows validation stay recorded as the M01/D-02
+follow-ups.
 
 ## M01.05 done (2026-11-12 session)
 
