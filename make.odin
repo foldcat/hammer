@@ -4,6 +4,8 @@
 //     odin run make.odin -file                 # debug build
 //     odin run make.odin -file -- run          # debug build + run
 //     odin run make.odin -file -- --release    # optimized build
+//     odin run make.odin -file -- clipboard-spike  # M00.04 X11 spike
+//     odin run make.odin -file -- dpi-ime-spike    # M00.05 DPI/IME spike
 //
 // On Linux this tool also self-configures the Sokol dependency: it
 // downloads the pinned Sokol C sources (verified by sha256), checks the
@@ -20,6 +22,21 @@ SRC_DIR :: #directory + "/src"
 OUT_DIR :: #directory + "/build"
 BINARY_NAME :: "hammer"
 BINARY_PATH :: OUT_DIR + "/" + BINARY_NAME
+
+// M00.04 clipboard spike: a standalone X11 (Xlib) program with no Sokol
+// dependency, built by the `clipboard-spike` target.
+SPIKE_CLIPBOARD_DIR :: #directory + "/spike/clipboard"
+CLIPBOARD_SPIKE_PATH :: OUT_DIR + "/clipboard_spike"
+
+SPIKE_DIR :: #directory + "/spike"
+SPIKE_COLLECTION :: "-collection:spike=" + SPIKE_DIR
+
+// M00.05 DPI/IME spike: a native X11 probe plus a sapp probe app, built
+// by the `dpi-ime-spike` target.
+SPIKE_DPI_IME_DIR :: SPIKE_DIR + "/dpi_ime"
+SPIKE_DPI_IME_APP_DIR :: SPIKE_DPI_IME_DIR + "/app"
+DPI_IME_PATH :: OUT_DIR + "/dpi_ime"
+DPI_IME_APP_PATH :: OUT_DIR + "/dpi_ime_app"
 
 SOKOL_PKG_DIR :: #directory + "/third_party/sokol/sokol"
 SOKOL_COLLECTION :: "-collection:sokol=" + SOKOL_PKG_DIR
@@ -58,6 +75,42 @@ SOKOL_LIBS := []Sokol_Lib {
 
 main :: proc() {
 	args := os.args
+
+	// M00.04 clipboard spike: standalone X11 program, no Sokol needed.
+	if len(args) > 1 && args[1] == "clipboard-spike" {
+		fmt.println("[Build] Building clipboard spike -> " + CLIPBOARD_SPIKE_PATH + "...")
+		run_odin([]string {
+			"odin",
+			"build",
+			SPIKE_CLIPBOARD_DIR,
+			"-vet",
+			"-out:" + CLIPBOARD_SPIKE_PATH,
+		})
+		return
+	}
+
+	// M00.05 DPI/IME spike: native X11 probe + sapp probe app.
+	if len(args) > 1 && args[1] == "dpi-ime-spike" {
+		fmt.println("[Build] Building DPI/IME spike...")
+		run_odin([]string {
+			"odin",
+			"build",
+			SPIKE_DPI_IME_DIR,
+			SPIKE_COLLECTION,
+			"-vet",
+			"-out:" + DPI_IME_PATH,
+		})
+		run_odin([]string {
+			"odin",
+			"build",
+			SPIKE_DPI_IME_APP_DIR,
+			SOKOL_COLLECTION,
+			SPIKE_COLLECTION,
+			"-vet",
+			"-out:" + DPI_IME_APP_PATH,
+		})
+		return
+	}
 
 	when ODIN_OS == .Linux {
 		if !setup_sokol_linux() {
@@ -127,6 +180,12 @@ main :: proc() {
 		}
 	}
 
+	run_odin(cmd_args)
+}
+
+// run_odin executes an Odin invocation, forwards its output, and exits
+// nonzero if the command fails.
+run_odin :: proc(cmd_args: []string) {
 	desc := os.Process_Desc{command = cmd_args}
 	// Owned heap buffers: deleted after use.
 	state, stdout, stderr, err := os.process_exec(desc, context.allocator)

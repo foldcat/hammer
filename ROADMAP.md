@@ -65,13 +65,13 @@ stubs, validation actually run, platform claims recorded honestly.
 
 **Status:** Active
 **Depends on:** —
-**Next task:** M00.04
+**Next task:** M00.06
 
 - [x] M00.01 Create repository/docs/agent workflow.
 - [x] M00.02 Pin Odin, Sokol, shader tooling, and native dependencies.
 - [x] M00.03 Build/run a window (Linux/X11 done; Windows deferred by decision).
-- [ ] M00.04 Spike Unicode clipboard round-trip and large transfer.
-- [ ] M00.05 Spike mixed-DPI and text-input/IME integration.
+- [x] M00.04 Spike Unicode clipboard round-trip and large transfer.
+- [x] M00.05 Spike mixed-DPI and text-input/IME integration.
 - [ ] M00.06 Spike native Wayland feasibility for chosen backend (deferred by decision; to be closed as documentation).
 - [ ] M00.07 Spike PTY/ConPTY and asynchronous process output.
 - [ ] M00.08 Prove minimal FUSE/WinFsp adapter deployment.
@@ -97,6 +97,31 @@ stubs, validation actually run, platform claims recorded honestly.
   static libraries the bindings link against. Validated headless: debug
   and release builds, Xvfb smoke tests (window create, GL clear, clean
   shutdown, exit 0). Docs: `docs/m00-03-window.md`.
+- **M00.04 done.** Native X11 clipboard spike (`spike/clipboard/`, built
+  by the `clipboard-spike` target in `make.odin`): serve/get modes over
+  pinned `vendor:x11/xlib`, `UTF8_STRING` + GTK utf8 atom + `TARGETS`,
+  INCR for payloads > 64 KiB, CLIPBOARD and PRIMARY, explicit error
+  handling. Validated headless under Xvfb: byte-identical Unicode
+  round-trips (400 B and 3.2 MiB/50-chunk INCR on both selections),
+  TARGETS listing, no-owner/timeout/usage error paths, and the
+  post-exit persistence behavior (data dies with the owner; no clipboard
+  manager present). Findings recorded for M00.09/M06.04, including a
+  libX11 1.8.14 `XGetWindowProperty` NULL-out-param crash.
+  Docs: `docs/m00-04-clipboard.md`.
+- **M00.05 done.** Mixed-DPI and text-input/IME spike (`spike/dpi_ime/`,
+  built by the `dpi-ime-spike` target): a native probe (Xft.dpi resource,
+  mm-based DPI, RandR per-monitor data, XTEST), a sapp probe app, and an
+  XIM bridge prototype (`XOpenIM`/`XCreateIC`/`XFilterEvent`/
+  `XmbLookupString`) that demonstrates dead-key composition to `é`
+  headlessly via XTEST-fed keys. Validated under Xvfb: the pinned sapp's
+  X11 DPI model (Xft.dpi-only, `dpi_scale = Xft.dpi/96` always,
+  `high_dpi` no-op, pre-scaled window, mouse in framebuffer px), ASCII
+  CHAR events, and the XIM commit path. Preedit callbacks are implemented
+  but not validatable headless (no IM server; the built-in XIM advertises
+  no preedit-callback style) — recorded honestly for M06.07, along with
+  integration traps (XimLocal keymap caching, MappingNotify handling,
+  XN* string values, Xvfb's last-client state reset).
+  Docs: `docs/m00-05-dpi-ime.md`.
 - **Decision 2026-11-12 (owner).** Lock in on X11 for now; no Wayland and
   no Windows work this early. M00.06 will be closed as a documented
   decision; Windows halves of M00.03–M00.08 are deferred and must be

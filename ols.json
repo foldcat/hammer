@@ -3,6 +3,10 @@
     {
       "name": "sokol",
       "path": "./third_party/sokol/sokol/"
+    },
+    {
+      "name": "spike",
+      "path": "./spike/"
     }
   ]
 }

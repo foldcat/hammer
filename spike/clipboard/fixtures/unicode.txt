@@ -1,0 +1,11 @@
+Hammer clipboard spike — M00.04
+ASCII control-free text.
+Latin-1 accents: café, naïve, señor.
+Greek: λόγος, Ελληνικά.
+Cyrillic: Привет, мир.
+CJK: 漢字テスト、クリップボード。
+Combining: é (e + U+0301), å (a + U+030A).
+Emoji: 🎉🔨 (4-byte UTF-8 sequences).
+RTL: שלום עולם.
+Surrogates are deliberately absent (invalid in UTF-8).
+End of fixture.
