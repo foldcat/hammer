@@ -65,7 +65,7 @@ stubs, validation actually run, platform claims recorded honestly.
 
 **Status:** Active
 **Depends on:** —
-**Next task:** M00.07
+**Next task:** M00.09
 
 - [x] M00.01 Create repository/docs/agent workflow.
 - [x] M00.02 Pin Odin, Sokol, shader tooling, and native dependencies.
@@ -73,8 +73,8 @@ stubs, validation actually run, platform claims recorded honestly.
 - [x] M00.04 Spike Unicode clipboard round-trip and large transfer.
 - [x] M00.05 Spike mixed-DPI and text-input/IME integration.
 - [x] M00.06 Spike native Wayland feasibility for chosen backend.
-- [ ] M00.07 Spike PTY/ConPTY and asynchronous process output.
-- [ ] M00.08 Prove minimal FUSE/WinFsp adapter deployment.
+- [x] M00.07 Spike PTY/ConPTY and asynchronous process output.
+- [x] M00.08 Prove minimal FUSE/WinFsp adapter deployment.
 - [ ] M00.09 Record architecture decisions and compatibility inventory.
 
 ### Notes
@@ -144,9 +144,35 @@ stubs, validation actually run, platform claims recorded honestly.
   deferred: this machine has no Wine and no 32-bit multilib toolchain,
   and building one takes hours. The Windows halves of M00.03–M00.08 must
   be recorded as deferred in the M00.09 compatibility inventory.
+- **M00.07 done.** PTY + asynchronous process output spike (`spike/pty/`,
+  `pty-spike` target, `docs/m00-07-pty.md`): raw `core:sys/linux` syscalls,
+  no new deps. Verified headless: PTY allocation (TIOCSPTLCK unlock
+  required — locked slave opens fail EIO, differentially confirmed vs
+  python openpty; grantpt a no-op), fork/execve/setsid/TIOCSCTTY spawn,
+  PR_SET_PDEATHSIG, poll-driven non-blocking drain (1 MiB byte-exact, no
+  blocked ticks), split ANSI escape reassembly (chunk-safe decoding is a
+  real M10.01 requirement), ONLCR/ECHO line-discipline behavior + termios
+  raw mode, process-group SIGTERM→SIGKILL escalation with a
+  SIGTERM-blocked child, waitpid reaping/exit codes, EIO end-of-output,
+  TIOCSWINSZ/TIOCGWINSZ round-trip, no orphaned children. Not validated:
+  SIGWINCH delivery, multibyte UTF-8, ConPTY/Windows (no toolchain).
 - M00 acceptance (SPECS.md): both Tier-1 OS build paths work; no unverified
   claim about Wayland/clipboard/IME is treated as solved; FS mount deployment
   risk is understood before M19.
+- **M00.08 done (2026-11-12 session).** Minimal FUSE deployment proof
+  (`spike/fuse/`, `fuse-spike` target, `docs/m00-08-fuse.md`): raw
+  `core:sys/linux` FUSE 7.x daemon, no libfuse. Verified headless:
+  unprivileged mount via the setuid fusermount3 new-style protocol
+  (socketpair + `_FUSE_COMMFD` + SCM_RIGHTS fd handback; direct mount(2)
+  EPERM recorded; old-style fd inheritance rejected by fusermount3
+  3.18.3), protocol negotiation (kernel 7.45 → 7.31), byte-exact
+  multibyte + 280 KB multi-chunk reads through real ls/cat/stat/find/df,
+  ENOENT/EROFS paths, SIGTERM clean unmount, kill -9 → kernel abort →
+  `fusermount3 -uz` recovery, no leftover mounts. Mounts only in a
+  task-owned `mktemp -d` sandbox under /tmp/opencode/. Traps recorded:
+  the /dev/fuse read buffer must be ≥ 4096 + max_write (else EINVAL after
+  INIT) and the fusermount3 option whitelist. WinFsp/Windows deferred (no
+  toolchain).
 
 ---
 

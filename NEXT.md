@@ -3,32 +3,39 @@
 Complete the M00 section, one task per session, in order. Write your
 documentations in `/docs`.
 
-## Current task: M00.07 — Spike PTY (Linux) and asynchronous process output
+## Current task: M00.09 — Record architecture decisions and compatibility inventory
 
-ConPTY deferred. Details to be pinned at session start (see the M00.03–
-M00.06 docs for the spike format; keep the report honest about what is
-validated versus assumed).
+Write `/docs/m00-09-decisions.md` (or similar) recording: backend
+decisions (X11 locked in; native Wayland option documented; Windows
+deferred), pinned toolchain/dependency inventory, per-feature platform
+status (clipboard/DPI/IME/PTY/FUSE: implemented-and-tested vs
+implemented-not-tested vs unsupported vs blocked), and open follow-ups
+from the M00.03–M00.08 spikes (shader tooling pins, XGetWindowProperty
+crash workaround, weston headless seat trap, TIOCSPTLCK requirement,
+FUSE read-buffer invariant, fusermount3 new-style protocol, etc.).
 
-## M00.06 done (2026-11-12 session)
+## M00.08 done (2026-11-12 session)
 
-The Wayland deferral was reversed: the native Wayland feasibility spike
-was actually performed. `spike/wayland/` (GLFW-based, `vendor:glfw` +
-system libglfw3) plus `docs/m00-06-wayland.md`:
+`spike/fuse/` (`fuse-spike` target in `make.odin`) plus
+`docs/m00-08-fuse.md` — minimal FUSE deployment proof on Linux, raw
+`core:sys/linux` syscalls, no libfuse, no new dependencies:
 
-- Pinned sokol has no native Wayland backend; the product path is XWayland,
-  verified: hammer runs cleanly under weston + Xwayland, headless.
-- A native Wayland window (xdg-shell, EGL, frame loop) works today via the
-  pinned toolchain's `vendor:glfw`; validated headless under weston nested
-  in Xvfb, including the negative path (no compositor) and an X11 contrast.
-- Known traps recorded: weston's headless backend has no `wl_seat` and
-  crashes pinned GLFW 3.4; Wayland input is implemented but not validated
-  headless (no injection tool); GLFW has no Wayland IME support.
-- Windows stays deferred: no Wine and no 32-bit multilib toolchain on this
-  machine (building it would take hours; owner decision). The Windows
-  halves of M00.03–M00.08 must be recorded as deferred in the M00.09
-  compatibility inventory.
+- Unprivileged path verified end to end: direct mount(2) fails EPERM
+  (recorded); the working path is the **fusermount3 (libfuse 3.18.3)
+  new-style protocol** — socketpair + `_FUSE_COMMFD` env, helper opens
+  /dev/fuse itself and returns the connection fd via SCM_RIGHTS. The
+  old-style fd-inheritance protocol is rejected by this fusermount3.
+- Kernel protocol surface proven on kernel 6.18.50 (7.45 offered, 7.31
+  negotiated): INIT/LOOKUP/GETATTR/OPEN/READ/STATFS/RELEASE/FLUSH/
+  OPENDIR/READDIR/RELEASEDIR + SYNCFS(52)→ENOSYS; sha256-byte-exact
+  multibyte and 280 KB multi-chunk reads via real ls/cat/stat/find/df.
+- Hard trap recorded: /dev/fuse read buffer must be ≥ 4096+max_write
+  (else EINVAL one request after INIT); spike uses 256 KiB.
+- Lifecycle proven: SIGTERM clean unmount (fusermount3 -u), kill -9 →
+  kernel abort → fusermount3 -uz lazy recovery; no leftover mounts.
+- Sandbox: mounts only in a task-owned `mktemp -d` under /tmp/opencode/;
+  no real mount points touched. WinFsp/Windows deferred (no toolchain).
 
-## Next tasks after M00.07
+## Next tasks after M00.09
 
-- M00.08 Minimal FUSE deployment proof (needs an approved isolated mount).
-- M00.09 Record architecture decisions and compatibility inventory.
+- M01.01 Implement lifecycle and error-reporting infrastructure.

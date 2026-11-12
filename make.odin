@@ -7,6 +7,8 @@
 //     odin run make.odin -file -- clipboard-spike  # M00.04 X11 spike
 //     odin run make.odin -file -- dpi-ime-spike    # M00.05 DPI/IME spike
 //     odin run make.odin -file -- wayland-spike    # M00.06 Wayland spike
+//     odin run make.odin -file -- pty-spike        # M00.07 PTY spike
+//     odin run make.odin -file -- fuse-spike       # M00.08 FUSE spike
 //
 // On Linux this tool also self-configures the Sokol dependency: it
 // downloads the pinned Sokol C sources (verified by sha256), checks the
@@ -43,6 +45,19 @@ DPI_IME_APP_PATH :: OUT_DIR + "/dpi_ime_app"
 // linking the system libglfw3; needs a compositor at runtime).
 SPIKE_WAYLAND_DIR :: SPIKE_DIR + "/wayland"
 WAYLAND_SPIKE_PATH :: OUT_DIR + "/wayland_spike"
+
+// M00.07 PTY spike: parent spike plus the helper child it spawns on the
+// slave side of the pty.
+SPIKE_PTY_DIR :: SPIKE_DIR + "/pty"
+SPIKE_PTY_CHILD_DIR :: SPIKE_PTY_DIR + "/child"
+PTY_SPIKE_PATH :: OUT_DIR + "/pty_spike"
+PTY_CHILD_PATH :: OUT_DIR + "/pty_child"
+
+// M00.08 FUSE spike: a minimal raw-protocol FUSE filesystem daemon (no
+// libfuse), built by the `fuse-spike` target. Mounts via mount(2) when
+// privileged or the setuid fusermount3 helper otherwise.
+SPIKE_FUSE_DIR :: SPIKE_DIR + "/fuse"
+FUSE_SPIKE_PATH :: OUT_DIR + "/fuse_spike"
 
 SOKOL_PKG_DIR :: #directory + "/third_party/sokol/sokol"
 SOKOL_COLLECTION :: "-collection:sokol=" + SOKOL_PKG_DIR
@@ -127,6 +142,39 @@ main :: proc() {
 			SPIKE_WAYLAND_DIR,
 			"-vet",
 			"-out:" + WAYLAND_SPIKE_PATH,
+		})
+		return
+	}
+
+	// M00.07 PTY spike: parent spike plus the child helper it spawns.
+	if len(args) > 1 && args[1] == "pty-spike" {
+		fmt.println("[Build] Building PTY spike -> " + PTY_SPIKE_PATH + "...")
+		run_odin([]string {
+			"odin",
+			"build",
+			SPIKE_PTY_DIR,
+			"-vet",
+			"-out:" + PTY_SPIKE_PATH,
+		})
+		run_odin([]string {
+			"odin",
+			"build",
+			SPIKE_PTY_CHILD_DIR,
+			"-vet",
+			"-out:" + PTY_CHILD_PATH,
+		})
+		return
+	}
+
+	// M00.08 FUSE spike: standalone raw-protocol FUSE daemon, core only.
+	if len(args) > 1 && args[1] == "fuse-spike" {
+		fmt.println("[Build] Building FUSE spike -> " + FUSE_SPIKE_PATH + "...")
+		run_odin([]string {
+			"odin",
+			"build",
+			SPIKE_FUSE_DIR,
+			"-vet",
+			"-out:" + FUSE_SPIKE_PATH,
 		})
 		return
 	}
