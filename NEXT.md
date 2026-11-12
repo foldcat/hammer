@@ -3,26 +3,54 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M02.01 — Immutable backing chunks
+## Current task: M02.02 — Leaves, metrics, and range iteration
 
-M01 is done (all six tasks, see below); M02 (SPECS.md §18) is now
-active. M02.01 starts the rope: immutable, hash-consable backing
-chunks for buffer text — the foundation M02.02 (leaves/metrics/range
-iteration) and M02.03 (balancing/persistent roots) build on. The
-headless-core rule (SPECS.md §4.2) applies: no Sokol, testable
-without a window; follow the randomized differential-test discipline
-of SPECS.md §21 for text-model work.
+M02.01 is done (immutable backing chunks, see below); M02 (SPECS.md §18)
+is active. M02.02 builds the rope layer on `src/core/chunk`: leaves
+holding small collections of pieces (`store_id`, `byte_start`,
+`byte_length` over chunk ids), local metrics, and range iteration —
+M02.03 (balancing/persistent roots) then aggregates. The headless-core
+rule (SPECS.md §4.2) applies: no Sokol, testable without a window;
+follow the randomized differential-test discipline of SPECS.md §21
+for text-model work (the M02.01 xorshift64 + linear-scan reference
+model pattern is the template).
 
-The M01.02 traps in `docs/m01-02-config.md` §Traps, the M01.03 traps
-in `docs/m01-03-coords.md` §Traps, the M01.04 traps in
-`docs/m01-04-input.md` §Traps, the M01.05 traps in
-`docs/m01-05-queue.md` §Traps, and the M01.06 traps in
-`docs/m01-06-render.md` §Traps are required reading for new code in
-`src/` (fmt brace escaping, block-scoped defer, relative import
-resolution, `%v` float formatting; Xlib async errors, no `odin fmt`,
-no `math.is_finite`; `#partial switch` needed for catch-alls, Odin
-procs are not closures; `-linker:lld` for Windows links, `core:sync`
-is libc-free; new-API sokol_gfx, imports are per-file).
+Required reading for new code in `src/`: the traps in
+`docs/m01-02-config.md` §Traps, `docs/m01-03-coords.md` §Traps,
+`docs/m01-04-input.md` §Traps, `docs/m01-05-queue.md` §Traps,
+`docs/m01-06-render.md` §Traps, and now `docs/m02-01-chunks.md` §Traps
+(no `core:map` in the pinned Odin; `delete` on dynamic arrays takes no
+allocator; wrap default-parameter core procs for proc-type assignment;
+no `transmute` on string literals; xorshift not LCG-low-bits for test
+randomness; `odin check` of a library package needs `-no-entry-point`).
+
+## M02.01 done (2026-11-12 session)
+
+Immutable backing chunks (`docs/m02-01-chunks.md`) — the SPECS.md §7.1
+ByteStore layer, the foundation the rest of M02 builds on:
+
+- New backend-free `src/core/chunk`: `Store` owning immutable,
+  content-interned (hash-consed) byte chunks with stable `Chunk_ID`s.
+  `insert` splits input into `chunk_size` chunks (overflow-free) and
+  returns the id list (caller-owned); `data` returns borrowed views
+  stable for the store's lifetime; `destroy` releases everything
+  (arena-compatible no-op frees). Interning is a hand-rolled
+  open-addressing table (load ≤ 3/4, `h|1` hashes, byte-compare
+  collision resolution) — the pinned Odin has **no `core:map`**.
+  Allocation failures surface as `.Resource_Limit` and leave the store
+  consistent; error messages use the caller's allocator, never the
+  store's.
+- `tests/unit/chunk` added (9 tests): split/round-trip, dedup across
+  and within inserts, empty/nil edges, view stability across table
+  growth, constant-hash collision path, buffer-arena allocation-failure
+  injection, growing-arena end-to-end reclaim, and a 300-step seeded
+  differential property against a linear-scan reference model.
+- Validated: 9/9 chunk tests leak-free (×5, no flake); full suite via
+  `odin run make.odin -file -- test` (all packages clean); debug/release
+  builds; Xvfb release smoke (exit 0, clean lifecycle); `-no-crt`
+  Windows cross-build of a throwaway consumer + Wine 11 run (multibyte
+  round-trip, dedup, exit 0). No product consumer yet (M02.02 wires the
+  rope builder) — matches the M01.05 queue precedent.
 
 ## Build tool fix (2026-11-12 session)
 

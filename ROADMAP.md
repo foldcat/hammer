@@ -308,9 +308,9 @@ real-Windows validation remain the recorded follow-ups).
 
 **Status:** Active
 **Depends on:** M01
-**Next task:** M02.01
+**Next task:** M02.02
 
-- [ ] M02.01 Implement immutable backing chunks.
+- [x] M02.01 Implement immutable backing chunks.
 - [ ] M02.02 Implement leaves, metrics, and range iteration.
 - [ ] M02.03 Implement balancing and persistent root updates.
 - [ ] M02.04 Implement coordinate conversion.
@@ -318,6 +318,23 @@ real-Windows validation remain the recorded follow-ups).
 - [ ] M02.06 Implement anchor transformation.
 - [ ] M02.07 Implement branching in-memory undo.
 - [ ] M02.08 Add randomized differential tests and benchmarks.
+
+### Notes
+
+- **M02.01 done (2026-11-12 session).** Immutable backing chunks
+  (`docs/m02-01-chunks.md`): backend-free `src/core/chunk` — a `Store`
+  of immutable, content-interned (hash-consed) chunks with stable
+  `Chunk_ID`s (SPECS.md §7.1 ByteStore layer). `insert` splits input
+  into `chunk_size` chunks and returns the caller-owned id list;
+  `data` returns store-lifetime borrowed views; interning uses a
+  hand-rolled open-addressing table (the pinned Odin has no
+  `core:map`); allocation failures are `.Resource_Limit` with the
+  store left consistent. 9 new unit tests (incl. failure injection
+  and a 300-step differential property vs a linear-scan reference
+  model), all leak-free; full suite clean; debug/release builds;
+  Xvfb release smoke; `-no-crt` Windows cross-build + Wine 11
+  consumer run (exit 0). No product consumer yet (M02.02 wires the
+  rope builder).
 
 ## M03 — File loading, codecs, safe save, and external changes
 
