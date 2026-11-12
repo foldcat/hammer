@@ -1,5 +1,18 @@
 # Hammer
 
+<a href="http://0rwx.com/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/AI-X-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/AI-X-light.svg">
+    <img src="./assets/AI-X-light.png" alt="0rwx" width="50">
+  </picture>
+</a>
+
+I will NOT sugar coat. This project is completely vibe coded with minimal human 
+review made for my own personal use.
+
+---
+
 Plan9's `acme` is a great editor! It is said to do everything.
 
 I want to do everything too! However, just because it has a timeless editing model
