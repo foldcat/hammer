@@ -12,5 +12,5 @@ Thus Hammer is born. When all you have is a hammer, **treat everthing as nails**
 Use Odin itself to build this project.
 
 ```bash
-odin run build.odin
+odin run -file build.odin
 ```
