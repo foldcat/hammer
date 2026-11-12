@@ -3,22 +3,46 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M01.05 — Worker/result queues with bounded capacity
+## Current task: M01.06 — Render basic column/tag/body rectangles
 
-See SPECS.md §18 M01 for deliverables and acceptance. M01.01–M01.04
-are done (see below); M01.05 builds on the normalized `input.Event`
-union from M01.04 (the queue element type) and prepares the
-asynchronous infrastructure M09 (commands) and M12 (Tree-sitter) will
-use: bounded capacity, cancellation, stale-result validation
-(AGENTS.md §13), no unbounded retry.
+See SPECS.md §18 M01 for deliverables and acceptance. M01.01–M01.05
+are done (see below); M01.06 is the last M01 task and the first
+rendering task: the basic column/tag/body layout painted from the
+compiled theme (M01.02) — the visible editor shell (M01 acceptance
+"configuration edits visibly change colors after rebuild"). It
+consumes the window service and `core/coords` (M01.03) for logical
+layout and `core/input` (M01.04) later for mouse hit-testing.
 
 The M01.02 traps in `docs/m01-02-config.md` §Traps, the M01.03 traps
-in `docs/m01-03-coords.md` §Traps, and the M01.04 traps in
-`docs/m01-04-input.md` §Traps are required reading for new code in
+in `docs/m01-03-coords.md` §Traps, the M01.04 traps in
+`docs/m01-04-input.md` §Traps, and the M01.05 traps in
+`docs/m01-05-queue.md` §Traps are required reading for new code in
 `src/` (fmt brace escaping, block-scoped defer, relative import
 resolution, `%v` float formatting; Xlib async errors, no `odin fmt`,
 no `math.is_finite`; `#partial switch` needed for catch-alls, Odin
-procs are not closures).
+procs are not closures; `-linker:lld` for Windows links, `core:sync`
+is libc-free).
+
+## M01.05 done (2026-11-12 session)
+
+Worker/result queues with bounded capacity (`docs/m01-05-queue.md`):
+
+- New backend-free `src/core/queue`: `Queue(T)` ring buffer over
+  caller-owned storage (capacity fixed at init, zero allocation
+  after), `push` (blocking backpressure) / `try_push` (overflow
+  policy: `.Full`/`.Closed`), `pop`/`try_pop`, `close` (idempotent
+  cancellation: pushes fail, waiters wake, drain-then-false),
+  `capacity`/`count`/`is_closed`. Mutex + two cond vars; `core:sync`
+  only (libc-free on both platforms).
+- SPECS.md §4.3 revisioned-result contract documented on the package,
+  deliberately not encoded (no dead envelope types; M02/M09 own the
+  envelope).
+- `tests/unit/queue` added (6 tests: FIFO/capacity, wrap-around,
+  close, backpressure thread test, close-wakeup thread test, 4×250
+  MPSC stress). Validated: 51/51 unit tests leak-free, stress tests
+  run 10× without a flake, throwaway consumer cross-built for
+  windows_amd64 under `-no-crt` and run under Wine 11 (exit 0);
+  product debug/release/run/windows/panic smokes unchanged.
 
 ## M01.04 done (2026-11-12 session)
 

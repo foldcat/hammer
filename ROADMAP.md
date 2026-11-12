@@ -117,6 +117,15 @@ deferred by owner decision; see the M00.09 note and
   normalized `Key_Down`. Validated 45/45 unit tests, XTEST-fed input
   smokes at scale 1.0/2.0 (keys/modifiers/text/buttons/wheel/motion),
   Windows cross-build + Wine 11.
+- **M01.05 done (2026-11-12 session).** Bounded worker/result queues
+  (`docs/m01-05-queue.md`): backend-free `src/core/queue` — `Queue(T)`
+  over caller-owned storage (fixed capacity, zero allocation),
+  blocking `push` (backpressure) + `try_push` (`.Full`/`.Closed`
+  overflow policy), `pop`/`try_pop`, idempotent `close` (drain-then-
+  false). SPECS.md §4.3 revisioned-result contract documented, not
+  encoded (M02/M09 own the envelope). Validated 51/51 unit tests
+  (MPSC stress with real threads ×10), `-no-crt` Windows cross-build
+  of the package + Wine 11 run (exit 0); product smokes unchanged.
 - **M00.01 done.** Repository skeleton, `AGENTS.md` agent workflow, `SPECS.md`,
   `README.md`, `make.odin` build tool, `colorscheme.yaml`, `ols.json`,
   `.gitignore`/`.gitmodules`. Working tree clean at `3200a42`.
@@ -251,13 +260,13 @@ deferred by owner decision; see the M00.09 note and
 
 **Status:** Active
 **Depends on:** M00
-**Next task:** M01.05
+**Next task:** M01.06
 
 - [x] M01.01 Implement lifecycle and error-reporting infrastructure.
 - [x] M01.02 Add generated trusted configuration package.
 - [x] M01.03 Create logical/physical coordinate conversion.
 - [x] M01.04 Add native input normalization.
-- [ ] M01.05 Add worker/result queues with bounded capacity.
+- [x] M01.05 Add worker/result queues with bounded capacity.
 - [ ] M01.06 Render basic column/tag/body rectangles.
 
 ### Notes
