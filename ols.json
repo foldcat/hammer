@@ -7,6 +7,10 @@
     {
       "name": "spike",
       "path": "./spike/"
+    },
+    {
+      "name": "hammer",
+      "path": "./src/"
     }
   ]
 }

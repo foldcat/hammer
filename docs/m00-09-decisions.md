@@ -161,6 +161,14 @@ Each item is recorded in its spike doc; this is the ledger.
   - Run the product window once on a real X11 desktop (visual output, ESC
     close) — implemented, untested there (m00-03).
   - Commit CI config for the Xvfb/weston harnesses (m00-03, m00-06).
+  - Pinned Odin dev-2026-11 compiles `_test.odin` files of any package
+    into every build, including normal builds and as imports; test files
+    must live outside `src/` (`tests/unit/` + the `hammer` collection)
+    or the `-no-crt` Windows build pulls `core:testing` →
+    `core:c/libc` and fails (m01-01 Finding 1).
+  - The Odin test runner runs tests on several threads in parallel;
+    tests mutating global state must serialize themselves (m01-01
+    Finding 2).
 - **M00.03 / Windows build path (2026-11-12)**
   - Build and validate the sokol **D3D11** variant under Wine (the
     product default on Windows; needs `d3d11`/`dxgi`/`d3dcompiler_47`
@@ -169,6 +177,10 @@ Each item is recorded in its spike doc; this is the ledger.
     path untested under Wine (no input injection) (m00-03).
   - Only `windows_amd64` is buildable: the pinned sokol-odin bindings
     name only `windows_x64_*` libraries (m00-03).
+  - Wine launches WineDbg interactively on an unhandled `ud2` (Odin's
+    `trap()`), which hangs headless crash tests; the sandbox WINEPREFIX
+    has AeDebug set to auto-exit so crash runs terminate. Real-Windows
+    exit-code behavior unvalidated (m01-01 Finding 4).
 - **M05.01**
   - Pin shader tooling (`glslc`, shaderc-2026.3 present) and FreeType/
     HarfBuzz with licenses (m00-02 gap, m00-03).

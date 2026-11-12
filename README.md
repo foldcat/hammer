@@ -24,6 +24,7 @@ libraries):
 ```bash
 odin run make.odin -file                    # debug build
 odin run make.odin -file -- --release       # optimized build
+odin run make.odin -file -- test            # core unit tests (headless)
 ```
 
 Linux/X11 requirements: a C compiler, binutils, and the X11/GL development

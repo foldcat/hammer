@@ -3,18 +3,40 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M01.01 — Implement lifecycle and error-reporting infrastructure
+## Current task: M01.02 — Add generated trusted configuration package
 
-See SPECS.md §18 M01 for deliverables and acceptance. First task of the
-application shell: application lifecycle, logging, error reporting, and
-platform service interfaces (M01.01 per SPECS.md task list), on Linux/X11
-(Windows remains blocked by the D-02 deferral recorded in
-`docs/m00-09-decisions.md` §4).
+See SPECS.md §18 M01 for deliverables and acceptance. M01.01 is done;
+the application shell now has the lifecycle/logging/error/platform seam
+it builds on (see the entry below and `docs/m01-01-lifecycle.md`).
 
 Consult `docs/m00-09-decisions.md` before starting: it carries the
-architecture decisions (D-01…D-05) and the follow-ups owed by M01
+architecture decisions (D-01…D-05) and the follow-ups still owed by M01
 (real-desktop window run, CI config commit, sapp-DPI logical/physical
-conversion rule for M01.03).
+conversion rule for M01.03). Note the M01.01 traps recorded there
+(§5): `_test.odin` files are compiled into normal builds, and the test
+runner parallelizes tests across threads.
+
+## M01.01 done (2026-11-12 session)
+
+Lifecycle and error-reporting infrastructure (`docs/m01-01-lifecycle.md`):
+
+- `src/core/errs` (owned-message structured errors),
+  `src/core/logging` (console + bounded file sink, mutex-serialized
+  emission, panic reporter), `src/core/lifecycle` (phase state machine,
+  idempotent quit, cancel hook for the M04 dirty review),
+  `src/platform` (backend-free service interface table; the Sokol
+  implementation lives in `src/main.odin`).
+- Tests moved out of `src/` into `tests/unit/` (`hammer` collection):
+  pinned Odin compiles `_test.odin` files into normal builds, which
+  broke the `-no-crt` Windows cross-build (`core:testing` →
+  `core:c/libc`). Trap recorded in `docs/m00-09-decisions.md` §5.
+- Validated headless: 17/17 unit tests (leak-checked); Linux
+  debug/release Xvfb smokes (exit 0, clean tracking-allocator exit);
+  Linux panic path (exit 132, `[PANIC ]` line in the log); console-only
+  mode; Windows cross-build + Wine 11 smoke (lifecycle + logging under
+  `-no-crt`); Wine panic path (AeDebug auto-exit configured in the
+  task-owned WINEPREFIX). Real-desktop and real-Windows runs remain the
+  recorded M01/D-02 follow-ups.
 
 ## M00.03 Windows half done (2026-11-12 session)
 

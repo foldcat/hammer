@@ -11,6 +11,7 @@
 //     odin run make.odin -file -- fuse-spike       # M00.08 FUSE spike
 //     odin run make.odin -file -- windows          # M00.03 Windows cross-build
 //     odin run make.odin -file -- windows --release
+//     odin run make.odin -file -- test             # core unit tests
 //
 // The `windows` target cross-builds hammer.exe for windows_amd64 from
 // Linux (mingw-w64 + lld-link + the pinned Sokol C sources, GL backend);
@@ -67,6 +68,21 @@ FUSE_SPIKE_PATH :: OUT_DIR + "/fuse_spike"
 
 SOKOL_PKG_DIR :: #directory + "/third_party/sokol/sokol"
 SOKOL_COLLECTION :: "-collection:sokol=" + SOKOL_PKG_DIR
+
+// Core packages covered by the `test` target. All are backend-free:
+// the M01 acceptance rule "no dependency-specific code leaks into the
+// core" is enforced simply by this list never needing the Sokol
+// collection to build. Test packages live outside src/ (tests/unit) so
+// they are never compiled into product builds; the `hammer` collection
+// maps them back onto the source packages under test.
+HAMMER_COLLECTION :: "-collection:hammer=" + SRC_DIR
+
+CORE_TEST_PACKAGES := []string {
+	"tests/unit/errs",
+	"tests/unit/logging",
+	"tests/unit/lifecycle",
+	"tests/unit/platform",
+}
 
 // Windows cross-build (M00.03 Windows half): the mingw-w64 import
 // libraries, mirrored into a task-owned "Windows SDK root" as .lib-named
@@ -196,6 +212,18 @@ main :: proc() {
 	// M00.03 Windows half: cross-build hammer.exe for windows_amd64.
 	if len(args) > 1 && args[1] == "windows" {
 		windows_main(args[2:])
+		return
+	}
+
+	// Core unit tests (headless, no Sokol dependency in the core
+	// packages; each package tested separately so failures name the
+	// owning package). Test packages live under tests/unit and import
+	// the source packages through the `hammer` collection.
+	if len(args) > 1 && args[1] == "test" {
+		for pkg in CORE_TEST_PACKAGES {
+			fmt.printf("[Test] %s\n", pkg)
+			run_odin([]string{"odin", "test", pkg, "-vet", HAMMER_COLLECTION})
+		}
 		return
 	}
 

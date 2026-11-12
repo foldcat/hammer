@@ -215,14 +215,37 @@ deferred by owner decision; see the M00.09 note and
 
 **Status:** Active
 **Depends on:** M00
-**Next task:** M01.01
+**Next task:** M01.02
 
-- [ ] M01.01 Implement lifecycle and error-reporting infrastructure.
+- [x] M01.01 Implement lifecycle and error-reporting infrastructure.
 - [ ] M01.02 Add generated trusted configuration package.
 - [ ] M01.03 Create logical/physical coordinate conversion.
 - [ ] M01.04 Add native input normalization.
 - [ ] M01.05 Add worker/result queues with bounded capacity.
 - [ ] M01.06 Render basic column/tag/body rectangles.
+
+### Notes
+
+- **M01.01 done (2026-11-12 session).** Lifecycle, logging, structured
+  errors, and the platform service seam (`docs/m01-01-lifecycle.md`):
+  - `src/core/errs` (owned-message structured errors), `src/core/logging`
+    (console + bounded file sink, mutex-serialized emission, panic
+    reporter installed as `context.assertion_failure_proc`),
+    `src/core/lifecycle` (Uninitialized → Initializing → Running →
+    Quitting → Shutdown → Exited, idempotent quit, cancel for the M04
+    review), `src/platform` (backend-free service interface table;
+    Sokol impl lives in `src/main.odin`).
+  - Tests moved out of `src/` into `tests/unit/` with the `hammer`
+    collection: pinned Odin compiles `_test.odin` files into normal
+    builds, which broke the `-no-crt` Windows build via
+    `core:testing` → `core:c/libc` (recorded in
+    `docs/m00-09-decisions.md` §5). `make.odin -- test` runs 17 tests.
+  - Validated: unit tests (sandboxed, leak-checked), Linux debug/release
+    Xvfb smokes (exit 0, no leaks at exit), Linux panic path (exit 132,
+    panic line in log), console-only mode, Windows cross-build + Wine 11
+    smoke (lifecycle + console logging under `-no-crt`), Wine panic path
+    (AeDebug auto-exit in the sandbox prefix). Real desktop and real
+    Windows hardware remain the recorded M01/D-02 follow-ups.
 
 ## M02 — Rope, transactions, anchors, and headless core
 
