@@ -482,11 +482,13 @@ validate_range :: proc(s: ^Sequence, r: Byte_Range, allocator := context.allocat
 //   provisionally on both sides and is subtracted;
 // - a CRLF split across the boundary is one break: a's trailing lone
 //   CR stops being lone when b starts with LF;
-// - the merged boundary state comes from the non-empty side(s) —
-//   except when b consists entirely of continuation bytes that merge
-//   into a's pending scalar: the pending tail then carries over with
-//   `a.tail_expects - b.leading_continuations` continuations still
-//   needed.
+// - the merged boundary state comes from the non-empty side(s), with
+//   two carry cases: a pending scalar whose continuations are split
+//   across several runs carries its tail forward
+//   (`a.tail_expects - b.leading_continuations` when b is entirely
+//   continuation bytes), and symmetrically a leading continuation run
+//   split across runs carries forward (capped at 3, the longest a
+//   pending scalar can need).
 //
 // combine is associative over runs produced by `metrics_of`; the
 // property tests compare folded combines against `metrics_of` of the
@@ -503,6 +505,16 @@ combine :: proc(a, b: Metrics) -> Metrics {
 		// needs more).
 		tail = a.boundary.tail_expects - b.boundary.leading_continuations
 	}
+
+	lead := a.boundary.leading_continuations
+	if a.byte_count == 0 {
+		lead = b.boundary.leading_continuations
+	} else if int(a.boundary.leading_continuations) == a.byte_count {
+		// a is nothing but continuation bytes: its leading run
+		// continues into b (capped at 3).
+		lead = min(u8(3), a.boundary.leading_continuations + b.boundary.leading_continuations)
+	}
+
 	return Metrics {
 		byte_count = a.byte_count + b.byte_count,
 		scalar_count = a.scalar_count + b.scalar_count -
@@ -511,7 +523,7 @@ combine :: proc(a, b: Metrics) -> Metrics {
 		lone_cr_count = a.lone_cr_count + b.lone_cr_count -
 			(1 if a.boundary.ends_with_cr && b.boundary.starts_with_lf else 0),
 		boundary = Boundary {
-			leading_continuations = a.boundary.leading_continuations if a.byte_count > 0 else b.boundary.leading_continuations,
+			leading_continuations = lead,
 			tail_expects = tail,
 			starts_with_lf = a.boundary.starts_with_lf if a.byte_count > 0 else b.boundary.starts_with_lf,
 			ends_with_cr = b.boundary.ends_with_cr if b.byte_count > 0 else a.boundary.ends_with_cr,

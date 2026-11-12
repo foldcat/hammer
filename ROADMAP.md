@@ -308,11 +308,11 @@ real-Windows validation remain the recorded follow-ups).
 
 **Status:** Active
 **Depends on:** M01
-**Next task:** M02.03
+**Next task:** M02.04
 
 - [x] M02.01 Implement immutable backing chunks.
 - [x] M02.02 Implement leaves, metrics, and range iteration.
-- [ ] M02.03 Implement balancing and persistent root updates.
+- [x] M02.03 Implement balancing and persistent root updates.
 - [ ] M02.04 Implement coordinate conversion.
 - [ ] M02.05 Implement transactions and revision tracking.
 - [ ] M02.06 Implement anchor transformation.
@@ -321,6 +321,24 @@ real-Windows validation remain the recorded follow-ups).
 
 ### Notes
 
+- **M02.03 done (2026-11-12 session).** Balancing and persistent root
+  updates (`docs/m02-03-tree.md`): `tree.odin` in `src/core/rope` — a
+  persistent copy-on-write B-tree (`Node` kind-tagged leaf/internal,
+  single intrusive-link pool, `Tree` root+revision). Inserts splice
+  interned pieces and cascade leaf repacks + balanced internal splits;
+  deletes split boundary pieces, drop emptied leaves, merge under-full
+  internal children left-first, and collapse single-child roots;
+  snapshots stay byte-identical via `tree_read_root(_all)`;
+  `tree_check` validates bounds/depth/pieces/metrics. 8 new tree tests
+  (19 in the package) incl. a 500-step differential (content + metrics
+  vs `metrics_of` and the independent oracle + invariants + revision +
+  span iteration + snapshot probes) that caught three real bugs:
+  fixed-array slices including zeroed entries, a sibling-merge
+  ordering scramble (also the cause of a segfault), and a missing
+  `combine` leading-run carry. Validated 19/19 leak-free ×10, full
+  suite 84 tests clean, debug/release builds, Xvfb release smoke,
+  `-no-crt` Windows cross-build + Wine 11 consumer (snapshot
+  persistence, exit 0). No product consumer yet (M02.05).
 - **M02.02 done (2026-11-12 session).** Leaves, metrics, and range
   iteration (`docs/m02-02-leaves.md`): backend-free `src/core/rope` —
   `Piece` over chunk ids, pool-allocated `Leaf`s (≤8 inline pieces +

@@ -119,6 +119,8 @@ test_combine_split_invariance :: proc(t: ^testing.T) {
 		"leading\n",
 		"\xF0\x9F", // pending 4-byte lead + one continuation
 		"\xE2\x82\x82", // invalid: lead followed by two continuations
+		"\x82\x82x", // leading continuation run at the start
+		"\x82\x82\x82", // entirely continuation bytes
 	}
 	for text in texts {
 		data := bytes_of(text)

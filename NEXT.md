@@ -3,29 +3,65 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M02.03 — Balancing and persistent root updates
+## Current task: M02.04 — Coordinate conversion
 
-M02.01 (chunks) and M02.02 (leaves/metrics/range iteration) are done;
-M02 (SPECS.md §18) is active. M02.03 adds the tree: internal nodes with
-cumulative metrics over the M02.02 leaves, balancing, and persistent
-(copy-on-write) root updates — inserts/deletes must not mutate existing
-roots, and old snapshots must stay byte-identical (SPECS.md §7.1:
-Internal node / RopeRoot{root, revision}). Reuse `rope.combine`, the
-pool-allocated `Leaf`s, and span iteration. The headless-core rule
-(SPECS.md §4.2) applies: no Sokol, testable without a window; follow
-the randomized differential-test discipline of SPECS.md §21 (the
-M02.01/M02.02 xorshift64 + reference-model + independent-oracle
-pattern is the template).
+M02.01 (chunks), M02.02 (leaves/metrics/range iteration), and M02.03
+(balancing/persistent roots) are done; M02 (SPECS.md §18) is active.
+M02.04 adds coordinate conversion over the tree (SPECS.md §7.3):
+byte offsets ↔ Unicode scalar offsets ↔ line/column positions, using
+the M02.02 metrics (`lf_count`, `lone_cr_count`, boundary state) for
+line indexing — every conversion goes through the text module, and the
+distinct coordinate systems must not be interchanged (AGENTS.md §14.3).
+The headless-core rule (SPECS.md §4.2) applies: no Sokol, testable
+without a window; follow the randomized differential-test discipline of
+SPECS.md §21 (the M02.01–M02.03 xorshift + reference-model +
+independent-oracle pattern, single-threaded when debugging).
 
 Required reading for new code in `src/`: the traps in
 `docs/m01-02-config.md` §Traps, `docs/m01-03-coords.md` §Traps,
 `docs/m01-04-input.md` §Traps, `docs/m01-05-queue.md` §Traps,
-`docs/m01-06-render.md` §Traps, `docs/m02-01-chunks.md` §Traps, and
-`docs/m02-02-leaves.md` §Traps (intrusive-link pool API, pool memory
-invisible to tracking allocators, combine tail-carry + u8 underflow
-guard, independent-oracle differential testing, lone-CR vs lf_count,
-pool reuse vs persistent sharing, no `core:map`, xorshift for test
-randomness, `-no-entry-point` for library checks).
+`docs/m01-06-render.md` §Traps, `docs/m02-01-chunks.md` §Traps,
+`docs/m02-02-leaves.md` §Traps, and `docs/m02-03-tree.md` §Traps
+(slice node arrays `[:count]`; merge siblings left-first; combine's
+leading-run carry; tree_check cannot see ordering — content
+differentials are the ordering oracle; mirror reference models exactly;
+`-define:ODIN_TEST_THREADS=1` to separate races from logic bugs;
+`inject_at_elems`/`remove_range` are builtins; no `core:map`).
+
+## M02.03 done (2026-11-12 session)
+
+Balancing and persistent root updates (`docs/m02-03-tree.md`) — the
+SPECS.md §7.1 Internal node / RopeRoot layer:
+
+- New `tree.odin` in `src/core/rope`: a persistent copy-on-write
+  B-tree — one kind-tagged `Node` type (leaf pieces or internal
+  children, both inline) from a single `core:container/pool` (intrusive
+  link; nodes never recycled while any root references them), `Tree`
+  (root + revision). Inserts splice interned pieces (boundary piece
+  split) and cascade leaf repacks and balanced internal splits;
+  deletes split boundary pieces (a same-piece split can leave 9
+  survivors → leaf splits), drop emptied leaves, merge under-full
+  internal children left-sibling-first, and collapse single-child
+  roots. Old roots stay byte-identical (`tree_read_root(_all)`);
+  revision bumps exactly once per successful mutation. `tree_check`
+  validates bounds, uniform leaf depth, piece validity, and metric
+  recomputation; span iteration walks snapshot roots.
+- `tests/unit/rope/tree_test.odin` added (8 tests; 19 total in the
+  package): build/insert/delete vs the reference model, full-leaf
+  split cases, snapshot persistence across edit rounds, validation
+  errors, and a 500-step seeded differential (content + metrics vs
+  `metrics_of` AND the independent oracle + invariants + revision +
+  span iteration + snapshot probes after every op). The differential
+  caught three real bugs inspection missed: fixed-array slices
+  including zeroed entries, a sibling-merge ordering scramble (which
+  also caused a segfault), and a missing `combine` leading-run carry.
+- Validated: 19/19 rope tests leak-free (×10 runs, no flake; also
+  single-threaded); full suite via `odin run make.odin -file -- test`
+  (84 tests, all packages clean); debug/release builds; Xvfb release
+  smoke (exit 0, no PANIC/ERROR); `-no-crt` Windows cross-build of a
+  throwaway consumer + Wine 11 run (snapshot persistence, revision
+  accounting, tree_check clean, exit 0). No product consumer yet
+  (M02.05 wires the buffer registry).
 
 ## M02.02 done (2026-11-12 session)
 
