@@ -1,0 +1,8 @@
+{
+  "collections": [
+    {
+      "name": "sokol",
+      "path": "./third_party/sokol/"
+    }
+  ]
+}

@@ -11,6 +11,14 @@ Thus Hammer is born. When all you have is a hammer, **treat everthing as nails**
 
 Use Odin itself to build this project.
 
+Remember to setup the submodule:
+
 ```bash
-odin run -file build.odin
+git submodule update --init --recursive
+```
+
+Run the build script:
+
+```bash
+odin run -file make.odin
 ```

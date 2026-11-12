@@ -5,7 +5,11 @@ import "core:os"
 import "core:strings"
 
 SRC_DIR :: "./src"
+OUT_DIR :: "./build"
 BINARY_NAME :: "hammer"
+BINARY_PATH :: OUT_DIR + "/" + BINARY_NAME
+
+SOKOL_COLLECTION :: "-collection:sokol=./third_party/sokol"
 
 main :: proc() {
 	args := os.args
@@ -39,25 +43,43 @@ main :: proc() {
 	switch mode {
 	case "run":
 		fmt.println("[Build] Running project (Debug)...")
-		cmd_args = []string{"odin", "run", SRC_DIR, "-debug"}
+		cmd_args = []string{"odin", "run", SRC_DIR, SOKOL_COLLECTION, "-vet", "-debug"}
 	case "build":
-		fmt.println("[Build] Building project (Debug) -> " + BINARY_NAME + "...")
-		cmd_args = []string{"odin", "build", SRC_DIR, "-out:" + BINARY_NAME, "-debug"}
+		fmt.println("[Build] Building project (Debug) -> " + BINARY_PATH + "...")
+		cmd_args = []string {
+			"odin",
+			"build",
+			SRC_DIR,
+			SOKOL_COLLECTION,
+			"-vet",
+			"-out:" + BINARY_PATH,
+			"-debug",
+		}
 	case "release":
 		fmt.println(
-			"[Build] Building project (Release with optimizations) -> " + BINARY_NAME + "...",
+			"[Build] Building project (Release with optimizations) -> " + BINARY_PATH + "...",
 		)
 		cmd_args = []string {
 			"odin",
 			"build",
 			SRC_DIR,
-			"-out:" + BINARY_NAME,
+			SOKOL_COLLECTION,
+			"-vet",
+			"-out:" + BINARY_PATH,
 			"-o:speed",
 			"-no-bounds-check",
 		}
 	case:
-		fmt.println("[Build] Building project (Debug default) -> " + BINARY_NAME + "...")
-		cmd_args = []string{"odin", "build", SRC_DIR, "-out:" + BINARY_NAME, "-debug"}
+		fmt.println("[Build] Building project (Debug default) -> " + BINARY_PATH + "...")
+		cmd_args = []string {
+			"odin",
+			"build",
+			SRC_DIR,
+			SOKOL_COLLECTION,
+			"-vet",
+			"-out:" + BINARY_PATH,
+			"-debug",
+		}
 	}
 
 	desc := os.Process_Desc {
