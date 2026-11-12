@@ -325,15 +325,34 @@ grow_table :: proc(s: ^Store) -> mem.Allocator_Error {
 	return .None
 }
 
+// lookup returns the content of chunk `id` and whether the id exists
+// in the store. The nil id (0) is never a published chunk: it returns
+// ok=false. This is the non-asserting query for callers that validate
+// ids (e.g. the rope layer validating pieces); `data` asserts on the
+// ids it is handed.
+lookup :: proc(s: ^Store, id: Chunk_ID) -> (d: []byte, ok: bool) {
+	if id == 0 {
+		return {}, false
+	}
+	// Valid ids are 1..=len(chunks); compare as u64 first so a huge
+	// bogus id cannot wrap through the int conversion.
+	if u64(id) > u64(len(s.chunks)) {
+		return {}, false
+	}
+	return s.chunks[int(id) - 1].data, true
+}
+
 // data returns the immutable content of chunk `id`, borrowed for the
 // store's lifetime. The nil id (0) returns an empty slice. Any other
-// id not produced by this store is a programmer error and asserts.
+// id not produced by this store is a programmer error and asserts;
+// use `lookup` to validate ids without asserting.
 data :: proc(s: ^Store, id: Chunk_ID) -> []byte {
 	if id == 0 {
 		return {}
 	}
-	assert(int(id) > 0 && int(id) <= len(s.chunks), "chunk: invalid chunk id")
-	return s.chunks[int(id) - 1].data
+	d, found := lookup(s, id)
+	assert(found, "chunk: invalid chunk id")
+	return d
 }
 
 // chunk_size returns the target chunk size the store splits at.

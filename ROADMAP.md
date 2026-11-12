@@ -308,10 +308,10 @@ real-Windows validation remain the recorded follow-ups).
 
 **Status:** Active
 **Depends on:** M01
-**Next task:** M02.02
+**Next task:** M02.03
 
 - [x] M02.01 Implement immutable backing chunks.
-- [ ] M02.02 Implement leaves, metrics, and range iteration.
+- [x] M02.02 Implement leaves, metrics, and range iteration.
 - [ ] M02.03 Implement balancing and persistent root updates.
 - [ ] M02.04 Implement coordinate conversion.
 - [ ] M02.05 Implement transactions and revision tracking.
@@ -321,6 +321,21 @@ real-Windows validation remain the recorded follow-ups).
 
 ### Notes
 
+- **M02.02 done (2026-11-12 session).** Leaves, metrics, and range
+  iteration (`docs/m02-02-leaves.md`): backend-free `src/core/rope` —
+  `Piece` over chunk ids, pool-allocated `Leaf`s (≤8 inline pieces +
+  local metrics, `core:container/pool` with intrusive link), the flat
+  `Sequence` (leaf list + totals, target leaf size, append-only
+  builder), boundary-aware `Metrics`/`combine` (multi-byte scalars and
+  CRLF split across pieces count once, incl. a tail-carry case), and
+  flatten-free `read`/`read_all`/`Span_Iter`. Plus a non-asserting
+  `chunk.lookup` for piece validation. 11 new unit tests incl. a
+  300-step differential property checked against both `metrics_of` of
+  the flattened reference and an independent oracle implementation
+  (caught two real combine/decode bugs). 76 tests total leak-free;
+  debug/release builds; Xvfb release smoke; `-no-crt` Windows
+  cross-build + Wine 11 consumer run (exit 0). No product consumer
+  yet (M02.05 wires the buffer registry).
 - **M02.01 done (2026-11-12 session).** Immutable backing chunks
   (`docs/m02-01-chunks.md`): backend-free `src/core/chunk` — a `Store`
   of immutable, content-interned (hash-consed) chunks with stable
@@ -333,8 +348,8 @@ real-Windows validation remain the recorded follow-ups).
   and a 300-step differential property vs a linear-scan reference
   model), all leak-free; full suite clean; debug/release builds;
   Xvfb release smoke; `-no-crt` Windows cross-build + Wine 11
-  consumer run (exit 0). No product consumer yet (M02.02 wires the
-  rope builder).
+  consumer run (exit 0). No product consumer yet (M02.02 wired the
+  rope builder; M02.05 wires the buffer registry).
 
 ## M03 — File loading, codecs, safe save, and external changes
 

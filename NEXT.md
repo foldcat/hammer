@@ -3,26 +3,64 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M02.02 — Leaves, metrics, and range iteration
+## Current task: M02.03 — Balancing and persistent root updates
 
-M02.01 is done (immutable backing chunks, see below); M02 (SPECS.md §18)
-is active. M02.02 builds the rope layer on `src/core/chunk`: leaves
-holding small collections of pieces (`store_id`, `byte_start`,
-`byte_length` over chunk ids), local metrics, and range iteration —
-M02.03 (balancing/persistent roots) then aggregates. The headless-core
-rule (SPECS.md §4.2) applies: no Sokol, testable without a window;
-follow the randomized differential-test discipline of SPECS.md §21
-for text-model work (the M02.01 xorshift64 + linear-scan reference
-model pattern is the template).
+M02.01 (chunks) and M02.02 (leaves/metrics/range iteration) are done;
+M02 (SPECS.md §18) is active. M02.03 adds the tree: internal nodes with
+cumulative metrics over the M02.02 leaves, balancing, and persistent
+(copy-on-write) root updates — inserts/deletes must not mutate existing
+roots, and old snapshots must stay byte-identical (SPECS.md §7.1:
+Internal node / RopeRoot{root, revision}). Reuse `rope.combine`, the
+pool-allocated `Leaf`s, and span iteration. The headless-core rule
+(SPECS.md §4.2) applies: no Sokol, testable without a window; follow
+the randomized differential-test discipline of SPECS.md §21 (the
+M02.01/M02.02 xorshift64 + reference-model + independent-oracle
+pattern is the template).
 
 Required reading for new code in `src/`: the traps in
 `docs/m01-02-config.md` §Traps, `docs/m01-03-coords.md` §Traps,
 `docs/m01-04-input.md` §Traps, `docs/m01-05-queue.md` §Traps,
-`docs/m01-06-render.md` §Traps, and now `docs/m02-01-chunks.md` §Traps
-(no `core:map` in the pinned Odin; `delete` on dynamic arrays takes no
-allocator; wrap default-parameter core procs for proc-type assignment;
-no `transmute` on string literals; xorshift not LCG-low-bits for test
-randomness; `odin check` of a library package needs `-no-entry-point`).
+`docs/m01-06-render.md` §Traps, `docs/m02-01-chunks.md` §Traps, and
+`docs/m02-02-leaves.md` §Traps (intrusive-link pool API, pool memory
+invisible to tracking allocators, combine tail-carry + u8 underflow
+guard, independent-oracle differential testing, lone-CR vs lf_count,
+pool reuse vs persistent sharing, no `core:map`, xorshift for test
+randomness, `-no-entry-point` for library checks).
+
+## M02.02 done (2026-11-12 session)
+
+Leaves, metrics, and range iteration (`docs/m02-02-leaves.md`) — the
+SPECS.md §7.1 Piece/Leaf/local-metrics layer on top of M02.01:
+
+- New backend-free `src/core/rope`: `Piece` (store_id + byte_start +
+  byte_length over chunk ids), pool-allocated `Leaf` (≤ 8 inline
+  pieces + local `Metrics`; `core:container/pool` with an intrusive
+  `link` field — stable pointers, libc-free), `Sequence` (leaf list +
+  totals + target leaf size, append-only builder closing leaves by
+  piece count or byte bound), `Metrics`/`Boundary` with exact
+  boundary-aware `combine` (multi-byte scalars and CRLF split across
+  piece boundaries count once, including a tail-carry case for
+  all-continuation runs), and flatten-free range reads: `read`
+  (caller-buffered partial fills), `read_all`, and a `Span_Iter`
+  yielding borrowed chunk slices. `.Invalid_Input` for bad ranges and
+  pieces (via a new non-asserting `chunk.lookup`), `.Resource_Limit`
+  for allocation failure with the sequence left consistent.
+- `tests/unit/rope` added (11 tests): hand-checked metrics cases,
+  combine split-invariance at every split point (incl. invalid lead
+  sequences), tail-carry/broken-completion merges, append+flatten,
+  leaf splitting (piece count and byte bound) with per-leaf metrics
+  recomputation, partial reads, span iteration, validation errors,
+  arena lifetime, allocation-failure injection, and a 300-step seeded
+  differential property checked against BOTH `metrics_of` of the
+  flattened reference AND an independent oracle implementation (the
+  differential test caught two real combine/decode bugs that inspection
+  and single-implementation checks missed).
+- Validated: 11/11 rope tests leak-free (×5, no flake); full suite via
+  `odin run make.odin -file -- test` (76 tests, all packages clean);
+  debug/release builds; Xvfb release smoke (exit 0, no PANIC/ERROR);
+  `-no-crt` Windows cross-build of a throwaway consumer + Wine 11 run
+  (multibyte+CRLF split-chunk round-trip, metrics, exit 0). No product
+  consumer yet (M02.05 wires the buffer registry).
 
 ## M02.01 done (2026-11-12 session)
 

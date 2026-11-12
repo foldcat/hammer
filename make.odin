@@ -95,6 +95,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/queue",
 	"tests/unit/layout",
 	"tests/unit/chunk",
+	"tests/unit/rope",
 }
 
 // Windows cross-build (M00.03 Windows half): the mingw-w64 import
