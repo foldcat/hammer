@@ -30,6 +30,7 @@ import "core/logging"
 import "platform"
 
 import generated "config/generated"
+import coords "core/coords"
 import config "core/config"
 
 State :: struct {
@@ -138,16 +139,27 @@ init :: proc "c" () {
 		clear_value = sg.Color{c[0], c[1], c[2], c[3]},
 	}
 
-	// First real consumption of the platform window service.
-	width, height := services.window.framebuffer_size(services.user)
-	scale := services.window.dpi_scale(services.user)
-	log.infof(
-		"window: %dx%d px, dpi_scale=%.2f, backend=%v",
-		width,
-		height,
-		scale,
-		sg.query_backend(),
-	)
+	// First real consumption of the platform window service: physical
+	// framebuffer metrics converted to logical layout units through
+	// core/coords (M01.03). A garbage scale degrades to 1.0 instead of
+	// crashing (M01 acceptance).
+	_, _, scale := window_metrics("window")
+
+	// The font point size through the §9.6 chain: points → logical px
+	// (×96/72) → physical px (× scale). M05 turns this into the
+	// rendering font size; logging it now pins the wiring end to end.
+	font_px, ferr := coords.points_to_physical_px(cfg.Font_Size_Points, scale)
+	if errs.ok(ferr) {
+		log.infof(
+			"font: %vpt = %v logical px = %v physical px",
+			cfg.Font_Size_Points,
+			coords.points_to_logical_px(cfg.Font_Size_Points),
+			font_px,
+		)
+	} else {
+		log.warnf("font: %v (using points → logical px only)", errs.describe(ferr))
+		errs.destroy(&ferr)
+	}
 	desc := config.describe(cfg, context.temp_allocator)
 	log.info(desc)
 }
@@ -198,9 +210,9 @@ event :: proc "c" (ev: ^sapp.Event) {
 		// dirty-buffer review before this unconditional quit.
 		request_quit(.User_Request, "window-close")
 	case .RESIZED:
-		width, height := services.window.framebuffer_size(services.user)
-		scale := services.window.dpi_scale(services.user)
-		log.debugf("window resized: %dx%d px, dpi_scale=%.2f", width, height, scale)
+		// Resize must survive any scale value the backend reports
+		// (M01 acceptance): the conversion validates and falls back.
+		window_metrics("window resized", log.Level.Debug)
 	}
 }
 
@@ -302,6 +314,45 @@ sokol_framebuffer_size :: proc(user: rawptr) -> (width, height: i32) {
 
 sokol_dpi_scale :: proc(user: rawptr) -> f32 {
 	return sapp.dpi_scale()
+}
+
+// window_metrics fetches the physical window metrics from the backend
+// and converts them to logical layout units with core/coords (M01.03).
+// An invalid scale (zero, negative, non-finite, absurd) is reported
+// and falls back to 1.0 — logical equals physical — so a broken DPI
+// value degrades instead of crashing (M01 acceptance).
+window_metrics :: proc(
+	what: string,
+	level := log.Level.Info,
+) -> (
+	physical: coords.Physical_Size,
+	logical: coords.Logical_Size,
+	scale: f32,
+) {
+	width, height := services.window.framebuffer_size(services.user)
+	scale = services.window.dpi_scale(services.user)
+	physical = coords.Physical_Size{f32(width), f32(height)}
+	converted, err := coords.to_logical_size(physical, scale)
+	if !errs.ok(err) {
+		log.logf(log.Level.Error, "window: %v (falling back to scale 1.0)", errs.describe(err))
+		errs.destroy(&err)
+		logical = coords.Logical_Size{physical.width, physical.height}
+		scale = 1.0
+	} else {
+		logical = converted
+	}
+	log.logf(
+		level,
+		"%s: %vx%v px, %vx%v logical, dpi_scale=%.2f, backend=%v",
+		what,
+		width,
+		height,
+		logical.width,
+		logical.height,
+		scale,
+		sg.query_backend(),
+	)
+	return
 }
 
 // Test hook used by the headless smoke test; unset in normal use.

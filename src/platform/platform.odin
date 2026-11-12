@@ -9,8 +9,9 @@
 // The surface grows milestone by milestone, each time with a real
 // consumer:
 //
-// - M01.01: window metrics (consumed by startup/resize diagnostics;
-//   M01.03 builds logical/physical coordinate conversion on top).
+// - M01.01: window metrics (consumed by startup/resize diagnostics).
+// - M01.03: `core/coords` consumes the metrics for logical/physical
+//   coordinate conversion.
 // - M06.04: the clipboard service.
 // - M06.07: IME preedit/commit.
 //
@@ -21,8 +22,9 @@
 package platform
 
 // Window_Service exposes the physical window metrics the editor needs
-// for layout. All sizes are framebuffer pixels; M01.03 defines the
-// conversion to logical coordinates (divide by dpi_scale).
+// for layout. All sizes are framebuffer pixels; convert them to
+// logical layout units with `core/coords` (M01.03) — divide by
+// dpi_scale, never apply DPI twice (SPECS.md §9.6).
 Window_Service :: struct {
 	// framebuffer_size returns the current framebuffer size in
 	// physical pixels.

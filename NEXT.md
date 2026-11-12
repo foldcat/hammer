@@ -3,20 +3,40 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M01.03 — Logical/physical coordinate conversion
+## Current task: M01.04 — Native input normalization
 
-See SPECS.md §18 M01 for deliverables and acceptance. M01.01 and
-M01.02 are done (see below); M01.03 builds on the platform window
-service (`framebuffer_size`, `dpi_scale`) and consumes the compiled
-config from M01.02.
+See SPECS.md §18 M01 for deliverables and acceptance. M01.01–M01.03
+are done (see below); M01.04 builds on the window service and
+`core/coords` (M01.03: mouse events arrive in framebuffer pixels and
+must be converted with `coords.to_logical_point` before any layout or
+hit-testing — never apply DPI twice).
 
-The conversion rule is recorded in `docs/m00-09-decisions.md` §5
-(M05.06/M01.03): divide sapp values by `dpi_scale` for logical layout;
-editor-owned per-monitor RandR tracking and mixed-DPI handoff
-validation need a real dual-monitor desktop (recorded follow-up). The
-M01.02 traps in `docs/m01-02-config.md` §Traps are required reading for
-new code in `src/` (fmt brace escaping, block-scoped defer, relative
-import resolution, `%v` float formatting).
+The M01.02 traps in `docs/m01-02-config.md` §Traps and the M01.03
+traps in `docs/m01-03-coords.md` §Traps are required reading for new
+code in `src/` (fmt brace escaping, block-scoped defer, relative
+import resolution, `%v` float formatting; Xlib async errors, no
+`odin fmt` in the pinned compiler, no `math.is_finite`).
+
+## M01.03 done (2026-11-12 session)
+
+Logical/physical coordinate conversion (`docs/m01-03-coords.md`):
+
+- New backend-free `src/core/coords`: distinct `Physical_*`/`Logical_*`
+  size/point structs, validated conversions both directions (divide /
+  multiply by `dpi_scale`, finite 0 < scale ≤ 32, `.Invalid_Input` on
+  garbage — no assertion on external input), points ↔ logical px
+  (×96/72, SPECS.md §9.6), and `points_to_physical_px` as the full
+  §9.6 chain.
+- `src/main.odin` consumes it: `window_metrics` (startup info + RESIZED
+  debug, scale-invalid → warn + fallback to 1.0), startup font log
+  (12pt = 16 logical px = 32 physical px at 2×). Window service docs
+  updated; `tests/unit/coords` added (8 tests).
+- Validated: 39/39 unit tests leak-free; debug/release/run smokes;
+  scale 1.0 and 2.0 (Xft.dpi 192); real X11 resize events at both
+  scales fed by a task-owned throwaway resizer (not committed);
+  custom-config font chain; panic path (132); Windows cross-build +
+  Wine 11 smoke (exit 0). Real desktop and mixed-DPI dual-monitor
+  remain the recorded follow-ups (M05.06/M01).
 
 ## Allocator migration done (2026-11-12 session)
 
