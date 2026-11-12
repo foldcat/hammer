@@ -10,7 +10,7 @@ about _what_ a task is, SPECS.md wins; this file only records _status_.
 
 Per SPECS.md §19.1, exactly one milestone is active at a time. The
 active task, allowed scope, and acceptance criteria for the current
-session live in `NEXT.md` (to be created for M00.03).
+session live in `NEXT.md`.
 
 ## Status legend
 
@@ -65,14 +65,14 @@ stubs, validation actually run, platform claims recorded honestly.
 
 **Status:** Active
 **Depends on:** —
-**Next task:** M00.03
+**Next task:** M00.04
 
 - [x] M00.01 Create repository/docs/agent workflow.
 - [x] M00.02 Pin Odin, Sokol, shader tooling, and native dependencies.
-- [ ] M00.03 Build/run a window on Windows and Linux.
+- [x] M00.03 Build/run a window (Linux/X11 done; Windows deferred by decision).
 - [ ] M00.04 Spike Unicode clipboard round-trip and large transfer.
 - [ ] M00.05 Spike mixed-DPI and text-input/IME integration.
-- [ ] M00.06 Spike native Wayland feasibility for chosen backend.
+- [ ] M00.06 Spike native Wayland feasibility for chosen backend (deferred by decision; to be closed as documentation).
 - [ ] M00.07 Spike PTY/ConPTY and asynchronous process output.
 - [ ] M00.08 Prove minimal FUSE/WinFsp adapter deployment.
 - [ ] M00.09 Record architecture decisions and compatibility inventory.
@@ -89,9 +89,18 @@ stubs, validation actually run, platform claims recorded honestly.
   - Open follow-up: shader tooling and native dependency pins
     (FreeType/HarfBuzz/Tree-sitter) are not yet recorded anywhere in the
     repo; record them when M00.03/M05.01 touches them.
-- **M00.03 pending.** `src/main.odin` is currently a tracking-allocator
-  harness only; no Sokol window exists yet. Create `NEXT.md` for this task
-  (SPECS.md §19.1).
+- **M00.03 done.** Minimal Sokol window (`src/main.odin`, `sokol_app` +
+  `sokol_gfx` + `sokol_glue`) with an `HAMMER_AUTOQUIT_FRAMES` test hook.
+  `make.odin` now self-configures Sokol on Linux: fetches the pinned
+  floooh/sokol C sources (commit `93aa187`, sha256-verified) into
+  `third_party/sokol-c/`, detects missing system deps, and builds the
+  static libraries the bindings link against. Validated headless: debug
+  and release builds, Xvfb smoke tests (window create, GL clear, clean
+  shutdown, exit 0). Docs: `docs/m00-03-window.md`.
+- **Decision 2026-11-12 (owner).** Lock in on X11 for now; no Wayland and
+  no Windows work this early. M00.06 will be closed as a documented
+  decision; Windows halves of M00.03–M00.08 are deferred and must be
+  recorded as such in the M00.09 compatibility inventory.
 - M00 acceptance (SPECS.md): both Tier-1 OS build paths work; no unverified
   claim about Wayland/clipboard/IME is treated as solved; FS mount deployment
   risk is understood before M19.

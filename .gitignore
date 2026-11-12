@@ -5,3 +5,5 @@ build
 build.exe
 make
 make.exe
+# Fetched pinned Sokol C sources (managed by make.odin)
+third_party/sokol-c/

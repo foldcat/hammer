@@ -17,8 +17,21 @@ Remember to setup the submodule:
 git submodule update --init --recursive
 ```
 
-Run the build script:
+Run the build script (on the first Linux run it also downloads the pinned
+Sokol C sources, verifies their checksum, and compiles the Sokol static
+libraries):
 
 ```bash
-odin run -file make.odin
+odin run make.odin -file                    # debug build
+odin run make.odin -file -- --release       # optimized build
+```
+
+Linux/X11 requirements: a C compiler, binutils, and the X11/GL development
+packages. `make.odin` detects missing pieces and prints the packages to
+install.
+
+Headless smoke test (window create/render/shutdown, needs `xvfb-run`):
+
+```bash
+xvfb-run -a env HAMMER_AUTOQUIT_FRAMES=10 ./build/hammer
 ```
