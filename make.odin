@@ -281,10 +281,12 @@ main :: proc() {
 	}
 
 	cmd_args: []string
+	inherit_stdio := false
 	switch mode {
 	case "run":
 		fmt.println("[Build] Running project (Debug)...")
 		cmd_args = []string{"odin", "run", SRC_DIR, SOKOL_COLLECTION, "-vet", "-debug"}
+		inherit_stdio = true
 	case "build":
 		fmt.println("[Build] Building project (Debug) -> " + BINARY_PATH + "...")
 		cmd_args = []string {
@@ -321,7 +323,7 @@ main :: proc() {
 		}
 	}
 
-	run_odin(cmd_args)
+	run_odin(cmd_args, inherit_stdio)
 }
 
 // --- Configuration staging (M01.02) ------------------------------------
@@ -410,9 +412,38 @@ init_config :: proc(path: string) {
 	fmt.printf("[Config] wrote example config to %s\n", path)
 }
 
-// run_odin executes an Odin invocation, forwards its output, and exits
-// nonzero if the command fails.
-run_odin :: proc(cmd_args: []string) {
+// run_odin executes an Odin invocation and exits nonzero if the command
+// fails. By default stdout/stderr are captured through pipes and replayed
+// only after the child exits (fine for one-shot builds). With
+// `inherit_stdio` the child writes straight to hammer's own stdout/stderr
+// instead, so long-running children stream their output live — without
+// this, every log line from the `run` target only appeared once the
+// window was closed. os.process_exec can only capture (it asserts the
+// desc streams are nil), so this path uses process_start directly.
+run_odin :: proc(cmd_args: []string, inherit_stdio := false) {
+	if inherit_stdio {
+		desc := os.Process_Desc {
+			command = cmd_args,
+			stdout = os.stdout,
+			stderr = os.stderr,
+		}
+		child, err := os.process_start(desc)
+		if err != nil {
+			fmt.eprintf("[Build] Failed to execute process: %v\n", err)
+			os.exit(1)
+		}
+		state, werr := os.process_wait(child)
+		if werr != nil {
+			fmt.eprintf("[Build] Failed to wait for process: %v\n", werr)
+			os.exit(1)
+		}
+		if state.exit_code != 0 {
+			fmt.eprintf("[Build] Command exited with code %d\n", state.exit_code)
+			os.exit(int(state.exit_code))
+		}
+		return
+	}
+
 	desc := os.Process_Desc{command = cmd_args}
 	// Owned heap buffers: deleted after use.
 	state, stdout, stderr, err := os.process_exec(desc, context.allocator)

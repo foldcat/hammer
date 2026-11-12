@@ -24,6 +24,18 @@ no `math.is_finite`; `#partial switch` needed for catch-alls, Odin
 procs are not closures; `-linker:lld` for Windows links, `core:sync`
 is libc-free; new-API sokol_gfx, imports are per-file).
 
+## Build tool fix (2026-11-12 session)
+
+`odin run make.odin -file -- run` no longer buffers the app's output:
+`run_odin` captured stdout/stderr with `os.process_exec` (which asserts
+the desc streams are nil and can only replay after the child exits), so
+every runtime log line appeared only once the window was closed. The
+`run` target now uses `os.process_start` with `stdout = os.stdout` /
+`stderr = os.stderr` so logs stream live; build/test targets keep the
+capture path. Verified live under Xvfb (wrapper stdout had `[INFO]`
+lines while the app was still running) plus 57/57 unit tests and the
+`build` capture path.
+
 ## M01 done (2026-11-12 session, M01.06)
 
 Render basic column/tag/body rectangles (`docs/m01-06-render.md`) —
