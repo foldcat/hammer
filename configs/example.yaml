@@ -1,0 +1,51 @@
+# Hammer configuration example.
+#
+# Copy this file to your config location to customize hammer:
+#
+#   odin run make.odin -file -- --init-config /path/to/config.yaml
+#
+# or place it at the discovered per-user path (~/.config/hammer/config.yaml
+# on Linux, %APPDATA%/hammer/config.yaml on Windows) and plain `make`
+# picks it up. Explicit is always safer:
+#
+#   odin run make.odin -file -- --config /path/to/config.yaml
+#
+# Trust boundary: this is data, not code. The build tool parses and
+# validates it, then stages the result into a generated package compiled
+# into the binary. Nothing here runs at build time or at runtime, and
+# the editor never auto-loads a project-local config.
+#
+# Any key not listed below fails the build (with the line number); keys
+# from the planned-but-unimplemented schema (keybindings, terminal,
+# recovery_interval, ...) fail with a "not yet supported" error rather
+# than being silently ignored.
+
+# Font stack, tried in order (maximum 4). Defaults to the built-in
+# JetBrains Mono / DejaVu Sans Mono / Liberation Mono / monospace list.
+font_families:
+  - "JetBrains Mono"
+  - "DejaVu Sans Mono"
+  - "monospace"
+
+# Font size in points (4..72). Default 12.
+font_size_points: 13
+
+# Line height multiplier (0.5..3.0). Default 1.4.
+line_height: 1.5
+
+# Render ligatures where the font provides them. Default false.
+ligatures: false
+
+# The oxocarbon-derived theme (colorscheme.yaml). Either all ten colors
+# or none; partial themes are rejected. Colors are "#RRGGBB".
+theme:
+  body_bg:      "#161616"
+  body_fg:      "#f2f4f8"
+  tag_bg:       "#262626"
+  tag_fg:       "#d0e1e6"
+  selection_bg: "#33b1ff"
+  selection_fg: "#161616"
+  caret:        "#f2f4f8"
+  git_added:    "#42be65"
+  git_modified: "#ee5396"
+  git_deleted:  "#ff7eb6"

@@ -27,6 +27,22 @@ odin run make.odin -file -- --release       # optimized build
 odin run make.odin -file -- test            # core unit tests (headless)
 ```
 
+### Configuration
+
+Hammer's configuration is compiled into the binary (SPECS.md §14). The
+build tool stages a trusted config file into a generated package on
+every build; built-in oxocarbon defaults apply when none exists:
+
+```bash
+odin run make.odin -file -- --init-config ~/.config/hammer/config.yaml  # write an example
+# edit the file, then rebuild — colors and font size change:
+odin run make.odin -file -- --config ~/.config/hammer/config.yaml
+```
+
+`HAMMER_CONFIG=<path>` works like `--config`; `--no-config` forces the
+built-in defaults. Malformed configs fail the build with file:line
+errors. Project-local configs are never picked up automatically.
+
 Linux/X11 requirements: a C compiler, binutils, and the X11/GL development
 packages. `make.odin` detects missing pieces and prints the packages to
 install.

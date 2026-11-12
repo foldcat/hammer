@@ -3,18 +3,44 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M01.02 — Add generated trusted configuration package
+## Current task: M01.03 — Logical/physical coordinate conversion
 
-See SPECS.md §18 M01 for deliverables and acceptance. M01.01 is done;
-the application shell now has the lifecycle/logging/error/platform seam
-it builds on (see the entry below and `docs/m01-01-lifecycle.md`).
+See SPECS.md §18 M01 for deliverables and acceptance. M01.01 and
+M01.02 are done (see below); M01.03 builds on the platform window
+service (`framebuffer_size`, `dpi_scale`) and consumes the compiled
+config from M01.02.
 
-Consult `docs/m00-09-decisions.md` before starting: it carries the
-architecture decisions (D-01…D-05) and the follow-ups still owed by M01
-(real-desktop window run, CI config commit, sapp-DPI logical/physical
-conversion rule for M01.03). Note the M01.01 traps recorded there
-(§5): `_test.odin` files are compiled into normal builds, and the test
-runner parallelizes tests across threads.
+The conversion rule is recorded in `docs/m00-09-decisions.md` §5
+(M05.06/M01.03): divide sapp values by `dpi_scale` for logical layout;
+editor-owned per-monitor RandR tracking and mixed-DPI handoff
+validation need a real dual-monitor desktop (recorded follow-up). The
+M01.02 traps in `docs/m01-02-config.md` §Traps are required reading for
+new code in `src/` (fmt brace escaping, block-scoped defer, relative
+import resolution, `%v` float formatting).
+
+## M01.02 done (2026-11-12 session)
+
+Generated trusted configuration package (`docs/m01-02-config.md`):
+
+- `src/core/config` (backend-free): schema (SPECS.md §14.2 fonts/theme
+  structs, exported fields, bounds), oxocarbon defaults from
+  `colorscheme.yaml`, a strict YAML-subset parser (no new dependency),
+  resolve/validate/default-fill with owned deep-copied results,
+  `generate_source` + atomic `write_staged`, config discovery
+  (`--config`/`HAMMER_CONFIG`/per-user path, never project-local).
+- Staged package `src/config/generated` (gitignored, regenerated on
+  every build, `SCHEMA_VERSION`-asserted); `configs/example.yaml`;
+  `--init-config`/`--no-config` make targets; every malformed config
+  fails the build with file:line errors (unknown/reserved keys,
+  partial themes, bad colors, out-of-range values, tabs).
+- `src/main.odin` binds `generated.resolved`; the clear color is the
+  configured `theme.body_bg` and the startup log prints the resolved
+  summary — config edits visibly change colors after rebuild (M01
+  acceptance).
+- Tests moved to `tests/unit/config` (13); 30/30 unit tests leak-free.
+  Validated: debug/release/run builds, full custom-config pipeline,
+  every error path, Windows cross-build + Wine 11 smoke (config under
+  `-no-crt`). Traps recorded in `docs/m01-02-config.md` §Traps.
 
 ## M01.01 done (2026-11-12 session)
 

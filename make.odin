@@ -28,10 +28,17 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 
+import config "src/core/config"
+import errs "src/core/errs"
+
 SRC_DIR :: #directory + "/src"
 OUT_DIR :: #directory + "/build"
 BINARY_NAME :: "hammer"
 BINARY_PATH :: OUT_DIR + "/" + BINARY_NAME
+
+// M01.02 generated configuration package: make.odin stages the trusted
+// user config into this file before every build (see stage_config).
+GENERATED_CONFIG_PATH :: SRC_DIR + "/config/generated/generated.odin"
 
 // M00.04 clipboard spike: a standalone X11 (Xlib) program with no Sokol
 // dependency, built by the `clipboard-spike` target.
@@ -82,6 +89,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/logging",
 	"tests/unit/lifecycle",
 	"tests/unit/platform",
+	"tests/unit/config",
 }
 
 // Windows cross-build (M00.03 Windows half): the mingw-w64 import
@@ -126,6 +134,16 @@ SOKOL_LIBS := []Sokol_Lib {
 
 main :: proc() {
 	args := os.args
+
+	// M01.02: --init-config <path> writes a commented example config.
+	if len(args) > 1 && args[1] == "--init-config" {
+		path := "config.yaml"
+		if len(args) > 2 {
+			path = args[2]
+		}
+		init_config(path)
+		return
+	}
 
 	// M00.04 clipboard spike: standalone X11 program, no Sokol needed.
 	if len(args) > 1 && args[1] == "clipboard-spike" {
@@ -211,6 +229,7 @@ main :: proc() {
 
 	// M00.03 Windows half: cross-build hammer.exe for windows_amd64.
 	if len(args) > 1 && args[1] == "windows" {
+		stage_config(args[2:])
 		windows_main(args[2:])
 		return
 	}
@@ -226,6 +245,9 @@ main :: proc() {
 		}
 		return
 	}
+
+	// M01.02: stage the configuration before every product build.
+	stage_config(args[1:])
 
 	when ODIN_OS == .Linux {
 		if !setup_sokol_linux() {
@@ -296,6 +318,92 @@ main :: proc() {
 	}
 
 	run_odin(cmd_args)
+}
+
+// --- Configuration staging (M01.02) ------------------------------------
+
+// stage_config resolves the trusted user config (--config / HAMMER_CONFIG
+// / the per-user path / built-in defaults), validates it, and regenerates
+// the staged configuration package compiled into the product. Any error
+// fails the build: a malformed config must never be silently ignored,
+// and the trust boundary (SPECS.md §14.4) is enforced by `discover`.
+stage_config :: proc(args: []string) {
+	explicit := ""
+	no_config := false
+	for arg in args {
+		if strings.has_prefix(arg, "--config=") {
+			explicit = strings.trim_prefix(arg, "--config=")
+		} else if arg == "--no-config" {
+			no_config = true
+		}
+	}
+
+	res := config.discover(explicit, no_config)
+	if !errs.ok(res.err) {
+		config_fail(res.err)
+	}
+	defer delete(res.path)
+
+	r: config.Resolved
+	// NOTE: this defer must be proc-scoped, not block-scoped — Odin
+	// defers run at the end of their block, and `r` is consumed after
+	// the if/else below (describe + write_staged).
+	defer config.resolved_destroy(&r)
+	if res.found {
+		resolved, resolve_err := config.resolve_from_path(res.path)
+		if !errs.ok(resolve_err) {
+			config_fail(resolve_err)
+		}
+		r = resolved
+		fmt.printf("[Config] using %s\n", res.path)
+	} else {
+		builtin, builtin_err := config.builtin()
+		if !errs.ok(builtin_err) {
+			config_fail(builtin_err)
+		}
+		r = builtin
+		fmt.println(
+			"[Config] no config file found; staging built-in defaults (--init-config <path> writes an example)",
+		)
+	}
+	desc := config.describe(r)
+	fmt.printf("[Config] %v\n", desc)
+	delete(desc)
+
+	if werr := config.write_staged(r, GENERATED_CONFIG_PATH); !errs.ok(werr) {
+		config_fail(werr)
+	}
+}
+
+// config_fail reports a configuration error and exits. The described
+// text is an owned allocation (context.allocator), freed before exit —
+// no scratch-arena accumulation (AGENTS.md §10.5).
+config_fail :: proc(e: errs.Error) {
+	desc := errs.describe(e, context.allocator)
+	fmt.eprintf("[Config] %v\n", desc)
+	delete(desc, context.allocator)
+	os.exit(1)
+}
+
+// init_config writes the commented example config to `path`. An existing
+// file is never overwritten (AGENTS.md §6.1).
+init_config :: proc(path: string) {
+	if os.exists(path) {
+		fmt.eprintf("[Config] %s already exists; not overwriting\n", path)
+		os.exit(1)
+	}
+	example := #directory + "/configs/example.yaml"
+	data, read_err := os.read_entire_file(example, context.allocator)
+	defer delete(data, context.allocator)
+	if read_err != nil {
+		fmt.eprintf("[Config] cannot read the example config: %v\n", read_err)
+		os.exit(1)
+	}
+	if werr := os.write_entire_file(path, data); werr != nil {
+		fmt.eprintf("[Config] cannot write %s: %v\n", path, werr)
+		os.exit(1)
+	}
+	fmt.printf("[Config] wrote example config to %s\n", path)
 }
 
 // run_odin executes an Odin invocation, forwards its output, and exits

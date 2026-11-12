@@ -169,6 +169,20 @@ Each item is recorded in its spike doc; this is the ledger.
   - The Odin test runner runs tests on several threads in parallel;
     tests mutating global state must serialize themselves (m01-01
     Finding 2).
+  - **M01.02 traps** (m01-02, apply to all new `src/` code): Odin fmt
+    treats `{`/`}` as Python-like format syntax (double them in
+    `fmt.aprintf` templates; `%.9g` precision is unsupported — use
+    `%v`); `defer` is block-scoped (a defer inside an `if` runs at the
+    end of that block); relative imports resolve against the importing
+    file's directory, so `src/core/config` reaches
+    `src/config/generated` as `../../config/generated` and make.odin
+    (repo root) imports `src/core/config` with no extra collection
+    flag; `strconv.parse_f64` returns `(f64, bool)`; a `[]string`
+    global must be `@(rodata) var` (not `::`) to be returnable; no
+    `context.temp_allocator` use without an owning `free_all` boundary
+    (the product has no frame arena yet — scratch allocations made now
+    live for the process lifetime; per-frame scratch waits for an
+    explicit arena in M01.06).
 - **M00.03 / Windows build path (2026-11-12)**
   - Build and validate the sokol **D3D11** variant under Wine (the
     product default on Windows; needs `d3d11`/`dxgi`/`d3dcompiler_47`

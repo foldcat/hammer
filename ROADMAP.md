@@ -81,6 +81,17 @@ deferred by owner decision; see the M00.09 note and
 
 ### Notes
 
+- **M01.02 done (2026-11-12 session).** Generated trusted configuration
+  package (`docs/m01-02-config.md`): `src/core/config` (schema,
+  oxocarbon defaults, strict YAML subset, resolve/validate, source
+  generation + atomic staging, config discovery), the gitignored staged
+  package `src/config/generated`, `configs/example.yaml`, make.odin
+  staging (`--config`, `HAMMER_CONFIG`, `--no-config`, `--init-config`),
+  13 new unit tests (30/30 leak-free). Config edits change the compiled
+  colors/font size after rebuild (M01 acceptance). Validated debug/
+  release/run, all error paths, Windows cross-build + Wine 11. Traps:
+  Odin fmt brace escaping, block-scoped defer, relative import
+  resolution (`docs/m01-02-config.md` §Traps).
 - **M00.01 done.** Repository skeleton, `AGENTS.md` agent workflow, `SPECS.md`,
   `README.md`, `make.odin` build tool, `colorscheme.yaml`, `ols.json`,
   `.gitignore`/`.gitmodules`. Working tree clean at `3200a42`.
@@ -215,10 +226,10 @@ deferred by owner decision; see the M00.09 note and
 
 **Status:** Active
 **Depends on:** M00
-**Next task:** M01.02
+**Next task:** M01.03
 
 - [x] M01.01 Implement lifecycle and error-reporting infrastructure.
-- [ ] M01.02 Add generated trusted configuration package.
+- [x] M01.02 Add generated trusted configuration package.
 - [ ] M01.03 Create logical/physical coordinate conversion.
 - [ ] M01.04 Add native input normalization.
 - [ ] M01.05 Add worker/result queues with bounded capacity.

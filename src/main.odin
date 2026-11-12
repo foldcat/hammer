@@ -28,6 +28,9 @@ import "core/lifecycle"
 import "core/errs"
 import "platform"
 
+import config "core/config"
+import generated "config/generated"
+
 State :: struct {
 	pass_action:     sg.Pass_Action,
 	frame_count:     i64,
@@ -36,6 +39,11 @@ State :: struct {
 }
 
 state: State
+
+// cfg is the configuration compiled into the binary (M01.02): the
+// generated package staged by make.odin from the trusted user config.
+// It is static data owned by the generated package; never freed.
+cfg: config.Resolved
 
 // app is the single lifecycle owner for the process (AGENTS.md §13:
 // one mutation owner). All transitions go through the lifecycle procs.
@@ -80,15 +88,23 @@ init :: proc "c" () {
 		return
 	}
 
+	// The window clear color is the configured body background: config
+	// edits visibly change the rendered output after a rebuild (M01
+	// acceptance). M01.06 replaces this with real column/tag/body
+	// rectangles painted from the same theme.
+	c := cfg.Theme.Body_Bg
 	state.pass_action.colors[0] = {
 		load_action = .CLEAR,
-		clear_value = {0.10, 0.12, 0.15, 1.0},
+		clear_value = sg.Color{c[0], c[1], c[2], c[3]},
 	}
 
 	// First real consumption of the platform window service.
 	width, height := services.window.framebuffer_size(services.user)
 	scale := services.window.dpi_scale(services.user)
 	log.infof("window: %dx%d px, dpi_scale=%.2f, backend=%v", width, height, scale, sg.query_backend())
+	desc := config.describe(cfg)
+	defer delete(desc)
+	log.info(desc)
 }
 
 frame :: proc "c" () {
@@ -295,6 +311,7 @@ main :: proc() {
 
 	state.autoquit_frames = autoquit_frames_from_env()
 	state.test_panic = env_flag("HAMMER_TEST_PANIC")
+	cfg = generated.resolved
 
 	log.infof("hammer starting (pid=%d, os=%v, arch=%v)", os.get_pid(), ODIN_OS, ODIN_ARCH)
 
