@@ -14,13 +14,13 @@ Sources: SPECS.md §1.2 (platform promise) and §18 (M00 acceptance),
 
 ## 1. Decision log
 
-| ID   | Decision                                                             | Status          | Revisit trigger                                             |
-| ---- | -------------------------------------------------------------------- | --------------- | ----------------------------------------------------------- |
-| D-01 | **X11 is the product backend** (sokol_app X11/GLX).                  | Active          | Tier-1 "Linux on Wayland" gate (SPECS.md §1.2)              |
-| D-02 | **Windows work deferred at M00** (no toolchain on this machine).     | Active (block)  | A Windows toolchain/CI becomes available                    |
-| D-03 | **Native Wayland is a documented option, not a commitment.**         | Deferred option | Tier-1 Wayland decision due; re-spike on real compositors   |
-| D-04 | **IPC/FS architecture: canonical local IPC + FUSE/WinFsp mount.**    | Active          | M19 design work                                             |
-| D-05 | **Spikes use raw `core:sys/linux`; no new dependencies (no libfuse).** | Active          | M09/M10/M19 implementation                                 |
+| ID   | Decision                                                                                                                     | Status                   | Revisit trigger                                           |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------- |
+| D-01 | **X11 is the product backend** (sokol_app X11/GLX).                                                                          | Active                   | Tier-1 "Linux on Wayland" gate (SPECS.md §1.2)            |
+| D-02 | **Windows work deferred at M00** (no toolchain on this machine); M00.03 Windows half unblocked and done via Wine 2026-11-12. | Active (partial unblock) | A Windows toolchain/CI becomes available                  |
+| D-03 | **Native Wayland is a documented option, not a commitment.**                                                                 | Deferred option          | Tier-1 Wayland decision due; re-spike on real compositors |
+| D-04 | **IPC/FS architecture: canonical local IPC + FUSE/WinFsp mount.**                                                            | Active                   | M19 design work                                           |
+| D-05 | **Spikes use raw `core:sys/linux`; no new dependencies (no libfuse).**                                                       | Active                   | M09/M10/M19 implementation                                |
 
 Details:
 
@@ -29,10 +29,17 @@ Details:
   Finding 1), so on Wayland sessions the product runs through XWayland —
   verified working (M00.06 Finding 2). Supersedes the original
   "Windows and Linux" wording of M00.03 for this milestone pass.
-- **D-02 (2026-11-12, owner).** No Wine and no 32-bit multilib toolchain
-  exist on this machine; building one takes hours. The Windows halves of
-  M00.03–M00.08 and the Windows CI deliverable are deferred (see §4 for
-  exactly what is blocked).
+- **D-02 (2026-11-12, owner; revised 2026-11-12, later session).** No
+  Wine and no 32-bit multilib toolchain existed on this machine; building
+  one takes hours. The Windows halves of M00.03–M00.08 and the Windows CI
+  deliverable were deferred (see §4 for exactly what is blocked). The owner
+  then installed Wine 11 and the mingw-w64 cross toolchain (64- and
+  32-bit); the M00.03 Windows half was unblocked and executed the same
+  day: hammer.exe now cross-builds from Linux (mingw-built Sokol libs,
+  lld-link, mingw import libs as the `-windows-sdk-root`) and runs under
+  Wine (window, GL, clean shutdown — validated headless). The remaining
+  Windows halves (M00.04 clipboard, M00.05 DPI/IME, M00.07 ConPTY,
+  M00.08 WinFsp) and the Windows CI runner stay deferred per §4.
 - **D-03 (2026-11-12, owner, revised).** The original decision to close
   M00.06 as documentation-only was reversed and the native Wayland spike
   was actually performed. Result: native Wayland is feasible (pinned
@@ -56,26 +63,26 @@ Details:
 
 Pinned (recorded in-repo, verified this session):
 
-| Component      | Pin                                                                                        | Where recorded                          |
-| -------------- | ------------------------------------------------------------------------------------------ | --------------------------------------- |
-| Odin toolchain | `dev-2026-11` (`/home/user/Builds/odin/odin`)                                              | ROADMAP M00.02; verified `odin version` |
-| Sokol bindings | sokol-odin submodule `ae94aa54d4ecbd7503e299694fa8dc328607d255`                            | `.gitmodules`; `git submodule status`   |
-| Sokol C        | floooh/sokol `93aa187b5d387cc24b7290b3ca3f13f61e139e7c`, sha256 `3e5a1b36…785c9`, zlib     | `make.odin`; `third_party/sokol-c/SOURCE_COMMIT` |
+| Component      | Pin                                                                                    | Where recorded                                   |
+| -------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Odin toolchain | `dev-2026-11` (`/home/user/Builds/odin/odin`)                                          | ROADMAP M00.02; verified `odin version`          |
+| Sokol bindings | sokol-odin submodule `ae94aa54d4ecbd7503e299694fa8dc328607d255`                        | `.gitmodules`; `git submodule status`            |
+| Sokol C        | floooh/sokol `93aa187b5d387cc24b7290b3ca3f13f61e139e7c`, sha256 `3e5a1b36…785c9`, zlib | `make.odin`; `third_party/sokol-c/SOURCE_COMMIT` |
 
 System (present on this machine, recorded versions; the repo has no
 runtime pin for them yet — see follow-ups):
 
-| Component             | Version (this machine) | Used by                                        |
-| --------------------- | ---------------------- | ---------------------------------------------- |
-| C toolchain           | gcc 16.2.1, binutils 2.47 | Sokol static-lib build (`make.odin`)        |
-| X11/GL dev libs       | libX11/libXi/libXcursor/libGL dev symlinks present | product + clipboard/DPI spikes      |
-| libX11                | 1.8.14                 | clipboard/DPI/IME spikes; has the `XGetWindowProperty` NULL-out-param bug (M00.04) |
-| GLFW                  | system libglfw3 3.4.0   | Wayland spike only — not a product dependency |
-| Weston                | 14 (reference compositor, `headless xwayland` USE) | Wayland spike harness                  |
-| shaderc/glslc         | shaderc-2026.3         | not yet pinned (M05.01)                        |
-| kernel / FUSE         | 6.18.50; FUSE protocol 7.45 offered | FUSE spike                                 |
-| fusermount3           | libfuse 3.18.3, setuid root | FUSE deployment helper                     |
-| Mesa                  | 26.1.8 (llvmpipe software GL used headless) | all GL validation                         |
+| Component       | Version (this machine)                             | Used by                                                                            |
+| --------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| C toolchain     | gcc 16.2.1, binutils 2.47                          | Sokol static-lib build (`make.odin`)                                               |
+| X11/GL dev libs | libX11/libXi/libXcursor/libGL dev symlinks present | product + clipboard/DPI spikes                                                     |
+| libX11          | 1.8.14                                             | clipboard/DPI/IME spikes; has the `XGetWindowProperty` NULL-out-param bug (M00.04) |
+| GLFW            | system libglfw3 3.4.0                              | Wayland spike only — not a product dependency                                      |
+| Weston          | 14 (reference compositor, `headless xwayland` USE) | Wayland spike harness                                                              |
+| shaderc/glslc   | shaderc-2026.3                                     | not yet pinned (M05.01)                                                            |
+| kernel / FUSE   | 6.18.50; FUSE protocol 7.45 offered                | FUSE spike                                                                         |
+| fusermount3     | libfuse 3.18.3, setuid root                        | FUSE deployment helper                                                             |
+| Mesa            | 26.1.8 (llvmpipe software GL used headless)        | all GL validation                                                                  |
 
 Not yet pinned anywhere (explicit gap; owners below): shader tooling
 (`glslc`), font/shaping libraries (FreeType/HarfBuzz) → M05.01;
@@ -91,16 +98,16 @@ Statuses per SPECS.md §19/AGENTS.md §22:
 code exists but not runtime-validated; **unsupported** = known gap;
 **blocked** = deferred by decision (D-02) or by missing tooling.
 
-| Feature                  | Linux/X11                                          | Linux/Wayland                                   | Windows            |
-| ------------------------ | -------------------------------------------------- | ----------------------------------------------- | ------------------ |
-| Window + GL              | **tested** (Xvfb + llvmpipe; real desktop pending) | via XWayland **tested** (M00.06); native via GLFW **tested** (spike only) | **blocked**        |
-| Clipboard                | **tested** headless (UTF-8, INCR 3.2 MiB, TARGETS, no-owner paths) | **unsupported** (needs native `wl_data_device`; no `wl-copy` shelling) | **blocked**        |
-| DPI                      | **tested** (sapp Xft.dpi model, scale 1.0/2.0, high_dpi no-op, mouse coords); per-monitor RandR source **implemented** | **unsupported**                                 | **blocked**        |
-| IME / text input         | XIM commit path (dead-key `é`) **tested**; preedit callbacks **implemented** (no IM server headless); sapp has no XIC hook (pending decision, §5) | **unsupported** (GLFW has no Wayland IME; native needs `zwp_text_input_v3`) | **blocked**        |
-| PTY                      | **tested** (M00.07: spawn, async drain, ANSI chunking, kill, winsize, raw) | (terminal/PTY independent of compositor)        | **blocked** (ConPTY; no toolchain) |
-| Filesystem mount         | **tested** (M00.08: FUSE mount/readdir/read/statfs, clean + crash lifecycle) | (same as X11)                                   | **blocked** (WinFsp; no toolchain) |
-| Input events (mouse/key) | **tested** (XTEST-fed, sapp CHAR/KEY/MOUSE events) | **implemented** (GLFW callbacks; no injection tool exists on this machine) | **blocked**        |
-| CI / headless validation | Harnesses exist (Xvfb; nested weston); **no CI config committed** | same                                             | **blocked**        |
+| Feature                  | Linux/X11                                                                                                                                         | Linux/Wayland                                                               | Windows                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Window + GL              | **tested** (Xvfb + llvmpipe; real desktop pending)                                                                                                | via XWayland **tested** (M00.06); native via GLFW **tested** (spike only)   | **tested via Wine 11** (cross-build + Xvfb/llvmpipe; real Windows hardware untested) |
+| Clipboard                | **tested** headless (UTF-8, INCR 3.2 MiB, TARGETS, no-owner paths)                                                                                | **unsupported** (needs native `wl_data_device`; no `wl-copy` shelling)      | **blocked**                                                                          |
+| DPI                      | **tested** (sapp Xft.dpi model, scale 1.0/2.0, high_dpi no-op, mouse coords); per-monitor RandR source **implemented**                            | **unsupported**                                                             | **blocked**                                                                          |
+| IME / text input         | XIM commit path (dead-key `é`) **tested**; preedit callbacks **implemented** (no IM server headless); sapp has no XIC hook (pending decision, §5) | **unsupported** (GLFW has no Wayland IME; native needs `zwp_text_input_v3`) | **blocked**                                                                          |
+| PTY                      | **tested** (M00.07: spawn, async drain, ANSI chunking, kill, winsize, raw)                                                                        | (terminal/PTY independent of compositor)                                    | **blocked** (ConPTY; no toolchain)                                                   |
+| Filesystem mount         | **tested** (M00.08: FUSE mount/readdir/read/statfs, clean + crash lifecycle)                                                                      | (same as X11)                                                               | **blocked** (WinFsp; no toolchain)                                                   |
+| Input events (mouse/key) | **tested** (XTEST-fed, sapp CHAR/KEY/MOUSE events)                                                                                                | **implemented** (GLFW callbacks; no injection tool exists on this machine)  | **blocked**                                                                          |
+| CI / headless validation | Harnesses exist (Xvfb; nested weston); **no CI config committed**                                                                                 | same                                                                        | **blocked**                                                                          |
 
 Notes behind the matrix:
 
@@ -127,22 +134,24 @@ Notes behind the matrix:
 
 Deferred (all blocked by no toolchain on this machine):
 
-- M00.03–M00.08 Windows halves: window (D3D/GL), Win32 clipboard,
-  Windows DPI/IME, ConPTY, WinFsp.
-- M00 deliverables "Linux and Windows CI" (Windows part) and the M00
-  acceptance item "Both Tier-1 OS build paths work" (Windows path).
-- Nothing about Windows behavior is claimed anywhere in the spike docs.
+- M00.04–M00.08 Windows halves: Win32 clipboard, Windows DPI/IME, ConPTY,
+  WinFsp. (M00.03's Windows half was unblocked 2026-11-12 and is done —
+  see `docs/m00-03-window.md` §Windows.)
+- M00 deliverables "Linux and Windows CI" (Windows part).
+- Nothing about Windows behavior is claimed anywhere in the spike docs
+  beyond what `docs/m00-03-window.md` records as Wine-validated.
 
 Explicit blocking statement (per SPECS.md §18 M00 acceptance, "a clear
 platform limitation either resolves or explicitly blocks the affected
-release tier"): **Windows release gates are blocked until a Windows
-toolchain and CI environment exist; every Windows-dependent milestone
-(M01.01 platform layer, M05, M06.04, M10.05 ConPTY, M19.05 WinFsp,
-M20 release matrix) inherits this block.**
+release tier"): **Windows release gates are blocked until a Windows CI
+runner exists; the M00.03 Windows build path is now unblocked and
+validated under Wine, but the remaining Windows halves (M00.04/05/07/08)
+and real-Windows runtime validation still inherit this block.**
 
-Unblock conditions: a Windows toolchain (native or Wine-based, owner
-approval) + a Windows CI runner; then re-run the deferred spike halves
-before the relevant milestone gates.
+Unblock conditions (toolchain half now met): Wine 11 + mingw-w64 (owner
+installed, 2026-11-12). Still needed: a Windows CI runner (or equivalent
+real-Windows validation) before the remaining spike halves and the
+Windows release gates are cleared.
 
 ## 5. Consolidated follow-ups (owners and feeds)
 
@@ -152,6 +161,14 @@ Each item is recorded in its spike doc; this is the ledger.
   - Run the product window once on a real X11 desktop (visual output, ESC
     close) — implemented, untested there (m00-03).
   - Commit CI config for the Xvfb/weston harnesses (m00-03, m00-06).
+- **M00.03 / Windows build path (2026-11-12)**
+  - Build and validate the sokol **D3D11** variant under Wine (the
+    product default on Windows; needs `d3d11`/`dxgi`/`d3dcompiler_47`
+    imports; GL variant is what is validated today) (m00-03).
+  - Validate on real Windows hardware / a Windows CI runner; ESC-close
+    path untested under Wine (no input injection) (m00-03).
+  - Only `windows_amd64` is buildable: the pinned sokol-odin bindings
+    name only `windows_x64_*` libraries (m00-03).
 - **M05.01**
   - Pin shader tooling (`glslc`, shaderc-2026.3 present) and FreeType/
     HarfBuzz with licenses (m00-02 gap, m00-03).
@@ -201,13 +218,13 @@ Each item is recorded in its spike doc; this is the ledger.
 
 ## 6. M00 acceptance review (SPECS.md §18, honest)
 
-| Criterion                                              | Status                                                                                         |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| Both Tier-1 OS build paths work                       | **Not met.** Linux/X11: works (build + headless validation). Windows: blocked by D-02; recorded in §4. |
-| No unverified Wayland/clipboard/IME claim is "solved" | **Met.** Every spike doc separates tested / implemented / unsupported; consolidated in §3.      |
-| Platform limitation resolved or explicitly blocks     | **Met.** Windows deferral explicitly blocks Windows release gates (§4).                         |
-| FS mount deployment risk understood before M19        | **Met.** M00.08 proved the Linux FUSE deployment path, its invariants, and its crash recovery.  |
-| Deliverables                                           | Repo/docs/build baseline/feasibility notes: done. "Linux and Windows CI": Linux harnesses exist, CI config and Windows CI missing (recorded). "IPC and filesystem design decision": SPECS.md §16 + D-04. "Acme compatibility matrix": first cut lives in SPECS.md; the executable matrix is M08.08/M20.01 work. |
+| Criterion                                             | Status                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Both Tier-1 OS build paths work                       | **Met (build paths), partial (runtime validation).** Linux/X11: works (build + headless validation). Windows: cross-build works and runs under Wine 11 headless (m00-03 §Windows); real Windows hardware untested — recorded in §4.                                                                             |
+| No unverified Wayland/clipboard/IME claim is "solved" | **Met.** Every spike doc separates tested / implemented / unsupported; consolidated in §3.                                                                                                                                                                                                                      |
+| Platform limitation resolved or explicitly blocks     | **Met.** Windows deferral explicitly blocks Windows release gates (§4).                                                                                                                                                                                                                                         |
+| FS mount deployment risk understood before M19        | **Met.** M00.08 proved the Linux FUSE deployment path, its invariants, and its crash recovery.                                                                                                                                                                                                                  |
+| Deliverables                                          | Repo/docs/build baseline/feasibility notes: done. "Linux and Windows CI": Linux harnesses exist, CI config and Windows CI missing (recorded). "IPC and filesystem design decision": SPECS.md §16 + D-04. "Acme compatibility matrix": first cut lives in SPECS.md; the executable matrix is M08.08/M20.01 work. |
 
 M00 is complete except the Windows build-path acceptance item, which is
 explicitly blocked and deferred by owner decision rather than silently

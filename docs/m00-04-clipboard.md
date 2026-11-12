@@ -38,14 +38,14 @@ Sokol; it links `system:X11` only).
 
 ## Protocol coverage (what this spike implements)
 
-| Feature                        | Served/handled?                             |
-| ------------------------------ | ------------------------------------------- |
-| `TARGETS`                      | Served: `TARGETS`, `UTF8_STRING`, `text/plain;charset=utf-8` |
-| `UTF8_STRING`                  | Served and requested; payload validated as UTF-8 on receipt |
-| GTK `text/plain;charset=utf-8` | Served and accepted as a reply type         |
-| INCR                           | Served for payloads > 64 KiB in 64 KiB chunks; followed by the requestor with a 10 s deadline |
-| CLIPBOARD and PRIMARY          | Both exercised                              |
-| `TIMESTAMP`, `MULTIPLE`, `XA_STRING`, `COMPOUND_TEXT` | Not implemented; requests are refused explicitly (property `None`) |
+| Feature                                               | Served/handled?                                                                               |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `TARGETS`                                             | Served: `TARGETS`, `UTF8_STRING`, `text/plain;charset=utf-8`                                  |
+| `UTF8_STRING`                                         | Served and requested; payload validated as UTF-8 on receipt                                   |
+| GTK `text/plain;charset=utf-8`                        | Served and accepted as a reply type                                                           |
+| INCR                                                  | Served for payloads > 64 KiB in 64 KiB chunks; followed by the requestor with a 10 s deadline |
+| CLIPBOARD and PRIMARY                                 | Both exercised                                                                                |
+| `TIMESTAMP`, `MULTIPLE`, `XA_STRING`, `COMPOUND_TEXT` | Not implemented; requests are refused explicitly (property `None`)                            |
 
 Deliberate exclusions, recorded for the M00.09 inventory:
 
@@ -103,7 +103,7 @@ received 3276800 bytes from CLIPBOARD via INCR (UTF-8 valid)
 Additional checks run manually:
 
 - No owner: `get` exits 1 with `error: conversion refused or no owner for
-  <sel>`.
+<sel>`.
 - Unknown selection name: exit 2 with a usage error.
 - `-o outfile` writes and matches the source.
 - Timeout: with the owner frozen (`kill -STOP`), `get --timeout-ms 1500`
@@ -144,11 +144,11 @@ Additional checks run manually:
 
 ## Platform status (honest)
 
-| Platform      | Status                                                                 |
-| ------------- | ---------------------------------------------------------------------- |
+| Platform      | Status                                                                                                                                                               |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Linux/X11     | Validated headless (Xvfb): UTF-8 round-trip, INCR, both selections, TARGETS, error paths. Not yet run on a real desktop session or against a real clipboard manager. |
-| Linux/Wayland | Deferred by decision (2026-11-12). `OpenDisplay` is X11-only; nothing claimed. |
-| Windows       | Deferred by decision (2026-11-12). Nothing claimed.                    |
+| Linux/Wayland | Deferred by decision (2026-11-12). `OpenDisplay` is X11-only; nothing claimed.                                                                                       |
+| Windows       | Deferred by decision (2026-11-12). Nothing claimed.                                                                                                                  |
 
 ## Open follow-ups (feed M00.09 / M06.04)
 

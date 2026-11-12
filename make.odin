@@ -9,6 +9,12 @@
 //     odin run make.odin -file -- wayland-spike    # M00.06 Wayland spike
 //     odin run make.odin -file -- pty-spike        # M00.07 PTY spike
 //     odin run make.odin -file -- fuse-spike       # M00.08 FUSE spike
+//     odin run make.odin -file -- windows          # M00.03 Windows cross-build
+//     odin run make.odin -file -- windows --release
+//
+// The `windows` target cross-builds hammer.exe for windows_amd64 from
+// Linux (mingw-w64 + lld-link + the pinned Sokol C sources, GL backend);
+// the binary is validated under Wine. See docs/m00-03-window.md.
 //
 // On Linux this tool also self-configures the Sokol dependency: it
 // downloads the pinned Sokol C sources (verified by sha256), checks the
@@ -61,6 +67,14 @@ FUSE_SPIKE_PATH :: OUT_DIR + "/fuse_spike"
 
 SOKOL_PKG_DIR :: #directory + "/third_party/sokol/sokol"
 SOKOL_COLLECTION :: "-collection:sokol=" + SOKOL_PKG_DIR
+
+// Windows cross-build (M00.03 Windows half): the mingw-w64 import
+// libraries, mirrored into a task-owned "Windows SDK root" as .lib-named
+// symlinks, serve as the -windows-sdk-root for cross-linking. All of this
+// is generated under build/ (gitignored); see docs/m00-03-window.md.
+WINDOWS_BINARY_PATH :: OUT_DIR + "/hammer.exe"
+WINDOWS_SDK_DIR :: OUT_DIR + "/windows-sdk"
+WINDOWS_LLD_SHIM :: OUT_DIR + "/lld-link-shim"
 
 // Pinned Sokol C sources (floooh/sokol), the revision tracked by the
 // pinned sokol-odin bindings (third_party/sokol, commit ae94aa5).
@@ -176,6 +190,12 @@ main :: proc() {
 			"-vet",
 			"-out:" + FUSE_SPIKE_PATH,
 		})
+		return
+	}
+
+	// M00.03 Windows half: cross-build hammer.exe for windows_amd64.
+	if len(args) > 1 && args[1] == "windows" {
+		windows_main(args[2:])
 		return
 	}
 
@@ -472,6 +492,293 @@ build_sokol_libs :: proc() -> bool {
 
 sokol_lib_path :: proc(name, pkg, variant: string) -> string {
 	return fmt.tprintf(SOKOL_PKG_DIR + "/%s/%s_linux_x64_gl_%s.a", pkg, name, variant)
+}
+
+// --- Windows cross-build (M00.03 Windows half) ---------------------------
+
+// Win32 + CRT libraries the Sokol GL static libraries resolve against at
+// final link. They are passed as plain linker inputs rather than
+// /defaultlib flags: the lld-link used here honors only the last
+// /defaultlib argument (verified; see docs/m00-03-window.md §Windows).
+WINDOWS_SYSTEM_LIBS := []string {
+	"user32.lib",
+	"kernel32.lib",
+	"gdi32.lib",
+	"shell32.lib",
+	"ucrtbase.lib", // UCRT: malloc/free/memcpy/fputs/abort/... from the mingw build
+	"libgcc.lib", // ___chkstk_ms and friends (symlinked into the SDK root)
+	"mingwex.lib", // _assert from the mingw build (lib prefix stripped like the other imports)
+}
+
+// windows_main cross-builds hammer.exe for windows_amd64. Modes: debug by
+// default, release with --release (mirrors the Linux build modes).
+windows_main :: proc(args: []string) {
+	fmt.println("[Build] Windows cross-build (windows_amd64, Sokol GL)...")
+	if !setup_windows() {
+		fmt.eprintln("[Build] Windows cross-build setup failed; cannot continue.")
+		os.exit(1)
+	}
+
+	mode := "debug"
+	for arg in args {
+		if strings.contains(arg, "--release") {
+			mode = "release"
+			break
+		}
+	}
+
+	lib_flags := "/libpath:" + WINDOWS_SDK_DIR
+	for lib in WINDOWS_SYSTEM_LIBS {
+		lib_flags = fmt.tprintf("%s %s", lib_flags, lib)
+	}
+
+	cmd_args: [dynamic]string
+	append(&cmd_args, "odin", "build", SRC_DIR)
+	append(&cmd_args, "-target:windows_amd64")
+	append(&cmd_args, "-linker:lld")
+	append(&cmd_args, "-windows-sdk-root:" + WINDOWS_SDK_DIR)
+	append(&cmd_args, "-no-crt", "-no-thread-local")
+	append(&cmd_args, SOKOL_COLLECTION)
+	append(&cmd_args, "-define:SOKOL_USE_GL=true")
+	append(&cmd_args, fmt.tprintf("-extra-linker-flags:%s", lib_flags))
+	append(&cmd_args, "-vet")
+	if mode == "release" {
+		fmt.println("[Build] Building project (Release) -> " + WINDOWS_BINARY_PATH + "...")
+		append(&cmd_args, "-o:speed", "-no-bounds-check")
+	} else {
+		fmt.println("[Build] Building project (Debug) -> " + WINDOWS_BINARY_PATH + "...")
+		append(&cmd_args, "-debug")
+	}
+	append(&cmd_args, "-out:" + WINDOWS_BINARY_PATH)
+
+	run_odin(cmd_args[:])
+	fmt.println("[Build] Windows build done. Smoke test under Wine:")
+	fmt.println("[Build]   xvfb-run -a env HAMMER_AUTOQUIT_FRAMES=10 wine " + WINDOWS_BINARY_PATH)
+}
+
+// setup_windows verifies the mingw-w64 toolchain, assembles the Windows SDK
+// root, builds the Sokol Windows static libraries, and locates a native
+// lld-link (exported to the odin subprocess via ODIN_LLD_PATH).
+setup_windows :: proc() -> bool {
+	if !run_tool([]string{"x86_64-w64-mingw32-gcc", "--version"}, true) {
+		fmt.eprintln("[Setup] missing x86_64-w64-mingw32-gcc (Gentoo: cross-x86_64-w64-mingw32/gcc)")
+		return false
+	}
+	if !run_tool([]string{"x86_64-w64-mingw32-ar", "--version"}, true) {
+		fmt.eprintln("[Setup] missing x86_64-w64-mingw32-ar (Gentoo: cross-x86_64-w64-mingw32/binutils)")
+		return false
+	}
+
+	sysroot, sysroot_ok := tool_output([]string{"x86_64-w64-mingw32-gcc", "-print-sysroot"})
+	if !sysroot_ok || sysroot == "" {
+		fmt.eprintln("[Setup] cannot determine the mingw-w64 sysroot")
+		return false
+	}
+	libgcc_path, libgcc_ok := tool_output([]string{"x86_64-w64-mingw32-gcc", "-print-file-name=libgcc.a"})
+	if !libgcc_ok || libgcc_path == "" || !os.exists(libgcc_path) {
+		fmt.eprintln("[Setup] cannot locate libgcc.a")
+		return false
+	}
+
+	if !setup_windows_sdk(sysroot, libgcc_path) {
+		return false
+	}
+	if !build_sokol_libs_windows() {
+		return false
+	}
+
+	lld_path, lld_ok := find_lld_link()
+	if !lld_ok {
+		fmt.eprintln("[Setup] no native lld-link found. Install one of:")
+		fmt.eprintln("[Setup]   - llvm-core/lld (provides lld-link)")
+		fmt.eprintln("[Setup]   - a Rust toolchain (rust-lld; auto-discovered under ~/.rustup)")
+		fmt.eprintln("[Setup]   - set ODIN_LLD_PATH to a native lld-link binary")
+		return false
+	}
+	// The odin subprocess execs this path as its linker.
+	if set_err := os.set_env("ODIN_LLD_PATH", lld_path); set_err != nil {
+		fmt.eprintf("[Setup] cannot set ODIN_LLD_PATH: %v\n", set_err)
+		return false
+	}
+	return true
+}
+
+// setup_windows_sdk populates WINDOWS_SDK_DIR with .lib-named symlinks to
+// the mingw import libraries. Odin's -windows-sdk-root scans this tree
+// case-insensitively to resolve bare system library names, and lld-link
+// resolves the plain names through /libpath. Existing symlinks are reused
+// so repeated runs stay cheap.
+setup_windows_sdk :: proc(sysroot, libgcc_path: string) -> bool {
+	lib_dir := fmt.tprintf("%s/x86_64-w64-mingw32/lib", sysroot)
+	os.make_directory_all(WINDOWS_SDK_DIR)
+
+	dir, derr := os.open(lib_dir)
+	if derr != nil {
+		fmt.eprintf("[Setup] cannot open %s: %v\n", lib_dir, derr)
+		return false
+	}
+	defer os.close(dir)
+	entries, rerr := os.read_all_directory(dir, context.temp_allocator)
+	if rerr != nil {
+		fmt.eprintf("[Setup] cannot read %s: %v\n", lib_dir, rerr)
+		return false
+	}
+	prefix := "lib"
+	suffix := ".a"
+	for entry in entries {
+		name := entry.name
+		if strings.has_prefix(name, prefix) && strings.has_suffix(name, suffix) {
+			link_name := fmt.tprintf("%s.lib", name[len(prefix):len(name)-len(suffix)])
+			dst := fmt.tprintf("%s/%s", WINDOWS_SDK_DIR, link_name)
+			if !os.exists(dst) {
+				if lerr := os.symlink(entry.fullpath, dst); lerr != nil {
+					fmt.eprintf("[Setup] cannot symlink %s: %v\n", dst, lerr)
+					return false
+				}
+			}
+		}
+	}
+
+	// libgcc.a (___chkstk_ms and friends) lives outside the import lib dir.
+	libgcc_dst := WINDOWS_SDK_DIR + "/libgcc.lib"
+	if !os.exists(libgcc_dst) {
+		if lerr := os.symlink(libgcc_path, libgcc_dst); lerr != nil {
+			fmt.eprintf("[Setup] cannot symlink %s: %v\n", libgcc_dst, lerr)
+			return false
+		}
+	}
+	return true
+}
+
+// build_sokol_libs_windows compiles the pinned Sokol C sources for
+// windows_amd64 with the mingw-w64 compiler and archives them as the .lib
+// files the sokol-odin bindings expect for the GL variant
+// (third_party/sokol/sokol/<pkg>/sokol_<pkg>_windows_x64_gl_<variant>.lib,
+// gitignored by the submodule). GL backend only for now; the D3D11 variant
+// is a recorded follow-up (docs/m00-03-window.md).
+build_sokol_libs_windows :: proc() -> bool {
+	missing_any := false
+	for lib in SOKOL_LIBS {
+		for variant in SOKOL_VARIANTS {
+			if !os.exists(sokol_lib_path_windows(lib.pkg, variant)) {
+				missing_any = true
+			}
+		}
+	}
+	if !missing_any {
+		return true
+	}
+
+	os.make_directory_all(SOKOL_GEN_DIR)
+	fmt.println("[Setup] Building Sokol Windows static libraries (one-time)...")
+
+	for lib in SOKOL_LIBS {
+		// Same translation unit as the Linux build: the impl defines are
+		// resolved per-target at compile time.
+		tu := fmt.tprintf("%s/%s.c", SOKOL_GEN_DIR, lib.name)
+		src := fmt.tprintf("#define %s\n", lib.impl_define)
+		for header in lib.pre_includes {
+			src = fmt.tprintf("%s#include \"%s\"\n", src, header)
+		}
+		src = fmt.tprintf("%s#include \"%s.h\"\n", src, lib.name)
+		if werr := os.write_entire_file(tu, src); werr != nil {
+			fmt.eprintf("[Setup] cannot write %s: %v\n", tu, werr)
+			return false
+		}
+
+		for variant in SOKOL_VARIANTS {
+			lib_path := sokol_lib_path_windows(lib.pkg, variant)
+			if os.exists(lib_path) {
+				continue
+			}
+			obj := fmt.tprintf("%s/%s_windows_%s.o", SOKOL_GEN_DIR, lib.name, variant)
+			flags: []string
+			if variant == "debug" {
+				flags = []string {
+					"x86_64-w64-mingw32-gcc",
+					"-c",
+					"-g",
+					"-O0",
+					"-DSOKOL_GLCORE",
+					"-DSOKOL_NO_ENTRY",
+					"-I" + SOKOL_C_DIR,
+					tu,
+					"-o",
+					obj,
+				}
+			} else {
+				flags = []string {
+					"x86_64-w64-mingw32-gcc",
+					"-c",
+					"-O2",
+					"-DNDEBUG",
+					"-DSOKOL_GLCORE",
+					"-DSOKOL_NO_ENTRY",
+					"-I" + SOKOL_C_DIR,
+					tu,
+					"-o",
+					obj,
+				}
+			}
+			if !run_tool(flags) {
+				fmt.eprintf("[Setup] failed to compile %s (%s) for windows\n", lib.name, variant)
+				return false
+			}
+			if !run_tool([]string{"x86_64-w64-mingw32-ar", "rcs", lib_path, obj}) {
+				fmt.eprintf("[Setup] failed to archive %s (%s) for windows\n", lib.name, variant)
+				return false
+			}
+		}
+	}
+	fmt.println("[Setup] Sokol Windows libraries ready.")
+	return true
+}
+
+sokol_lib_path_windows :: proc(pkg, variant: string) -> string {
+	return fmt.tprintf(SOKOL_PKG_DIR + "/%s/sokol_%s_windows_x64_gl_%s.lib", pkg, pkg, variant)
+}
+
+// find_lld_link returns the path of a usable native lld-link: the
+// ODIN_LLD_PATH env var if set, `lld-link` on PATH, or a generated wrapper
+// around a Rust toolchain's rust-lld (-flavor link selects lld-link).
+find_lld_link :: proc() -> (string, bool) {
+	if env, found := os.lookup_env("ODIN_LLD_PATH", context.temp_allocator); found && env != "" && os.exists(env) {
+		return env, true
+	}
+	if path, path_ok := tool_output([]string{"sh", "-c", "command -v lld-link"}); path_ok && path != "" {
+		return path, true
+	}
+	if home, found := os.lookup_env("HOME", context.temp_allocator); found && home != "" {
+		glob := fmt.tprintf("%s/.rustup/toolchains/*/lib/rustlib/*/bin/rust-lld", home)
+		rust_path, rust_ok := tool_output([]string{"sh", "-c", fmt.tprintf("ls %s 2>/dev/null | head -n 1", glob)})
+		if rust_ok && rust_path != "" {
+			shim := fmt.tprintf("#!/bin/sh\n# generated by make.odin\n\nexec \"%s\" -flavor link \"$@\"\n", rust_path)
+			if werr := os.write_entire_file(WINDOWS_LLD_SHIM, transmute([]byte)shim); werr != nil {
+				fmt.eprintf("[Setup] cannot write %s: %v\n", WINDOWS_LLD_SHIM, werr)
+				return "", false
+			}
+			// The shim is exec'd directly by odin, so it needs the exec bit.
+			if cerr := os.chmod(WINDOWS_LLD_SHIM, {.Read_User, .Write_User, .Execute_User}); cerr != nil {
+				fmt.eprintf("[Setup] cannot chmod %s: %v\n", WINDOWS_LLD_SHIM, cerr)
+				return "", false
+			}
+			fmt.printf("[Setup] using rust-lld via generated shim %s\n", WINDOWS_LLD_SHIM)
+			return WINDOWS_LLD_SHIM, true
+		}
+	}
+	return "", false
+}
+
+// tool_output runs a command and returns its stdout trimmed on success.
+// The result is borrowed from context.temp_allocator; it is only valid
+// until the next scratch reset.
+tool_output :: proc(args: []string) -> (string, bool) {
+	desc := os.Process_Desc{command = args}
+	state, stdout, _, err := os.process_exec(desc, context.temp_allocator)
+	if err != nil || state.exit_code != 0 {
+		return "", false
+	}
+	return strings.trim_space(string(stdout)), true
 }
 
 run_tool :: proc(args: []string, quiet := false) -> bool {

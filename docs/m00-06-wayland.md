@@ -31,7 +31,7 @@ headless demo harness:
   path (see below). `make.odin` gained a `wayland-spike` target.
 - System additions (approved): `dev-libs/weston` (`headless xwayland` USE)
   and `media-libs/glfw` (`wayland X`) via
-  `/etc/portage/package.use/hammer`. Weston is the *reference* compositor;
+  `/etc/portage/package.use/hammer`. Weston is the _reference_ compositor;
   nothing here claims validation on sway/labwc/KDE/etc.
 
 This is spike code, not the product implementation. The product path
@@ -76,7 +76,7 @@ physical display):
   (both non-NULL, asserted by the harness).
 - **EGL context**: created successfully (Mesa 26.1.8, GL 4.6
   compatibility profile via software rendering). The `libEGL warning:
-  failed to get driver name / failed to create dri2 screen` lines are
+failed to get driver name / failed to create dri2 screen` lines are
   Mesa's initial hardware-probe noise before it falls back to software;
   they do not affect the context.
 - **Frame loop**: clear/swap per frame, frame callbacks delivered, 5

@@ -63,14 +63,15 @@ stubs, validation actually run, platform claims recorded honestly.
 
 ## M00 — Specification, feasibility spikes, and build baseline
 
-**Status:** Done (Windows build-path acceptance item deferred by owner
-decision; see the M00.09 note and `docs/m00-09-decisions.md` §4).
+**Status:** Done (Windows runtime validation on real hardware remains
+deferred by owner decision; see the M00.09 note and
+`docs/m00-09-decisions.md` §4).
 **Depends on:** —
 **Next task:** — (all tasks complete; next milestone is M01.01)
 
 - [x] M00.01 Create repository/docs/agent workflow.
 - [x] M00.02 Pin Odin, Sokol, shader tooling, and native dependencies.
-- [x] M00.03 Build/run a window (Linux/X11 done; Windows deferred by decision).
+- [x] M00.03 Build/run a window (Linux/X11 done; Windows cross-build + Wine validation done 2026-11-12).
 - [x] M00.04 Spike Unicode clipboard round-trip and large transfer.
 - [x] M00.05 Spike mixed-DPI and text-input/IME integration.
 - [x] M00.06 Spike native Wayland feasibility for chosen backend.
@@ -98,6 +99,19 @@ decision; see the M00.09 note and `docs/m00-09-decisions.md` §4).
   static libraries the bindings link against. Validated headless: debug
   and release builds, Xvfb smoke tests (window create, GL clear, clean
   shutdown, exit 0). Docs: `docs/m00-03-window.md`.
+- **M00.03 Windows half done (2026-11-12 session).** The owner installed
+  Wine 11 and the mingw-w64 cross toolchain, unblocking the toolchain half
+  of the D-02 deferral. `odin run make.odin -file -- windows` now
+  cross-builds `build/hammer.exe` for `windows_amd64` on Linux: mingw-built
+  Sokol GL static libs, a native lld-link (rust-lld shim or
+  `ODIN_LLD_PATH`), mingw import libs mirrored into `build/windows-sdk/`
+  as the `-windows-sdk-root`, `-no-crt -no-thread-local`. Validated under
+  Wine 11 headless (Xvfb + llvmpipe): window create, GL clear, clean
+  shutdown, exit 0, debug + release. Traps recorded in
+  `docs/m00-03-window.md` §Windows (last-`/defaultlib`-only lld quirk,
+  explicit Win32/UCRT import list, `-windows-sdk-root` requirement,
+  x64-only bindings naming). D3D11 variant and real-Windows validation
+  remain open follow-ups.
 - **M00.04 done.** Native X11 clipboard spike (`spike/clipboard/`, built
   by the `clipboard-spike` target in `make.odin`): serve/get modes over
   pinned `vendor:x11/xlib`, `UTF8_STRING` + GTK utf8 atom + `TARGETS`,
@@ -187,12 +201,13 @@ decision; see the M00.09 note and `docs/m00-09-decisions.md` §4).
   Windows build path is blocked by the D-02 deferral and explicitly
   blocks Windows release gates; Linux/X11 path works. M00 is marked done
   with that item recorded, not dropped.
-- **Windows deferral (D-02, still open).** The Windows halves of
-  M00.03–M00.08, the Windows CI deliverable, and the Windows build-path
-  acceptance item are deferred: no Wine and no 32-bit multilib toolchain
-  on this machine. Unblock: a Windows toolchain + CI runner (owner
-  approval), then re-run the deferred spike halves before the relevant
-  milestone gates.
+- **Windows deferral (D-02, revised 2026-11-12).** Toolchain half
+  unblocked (owner installed Wine 11 + mingw-w64 32/64); M00.03 Windows
+  half done (cross-build + Wine validation). Still deferred: the Windows
+  halves of M00.04–M00.08 (clipboard, DPI/IME, ConPTY, WinFsp), the
+  Windows CI deliverable, and real-Windows runtime validation. Unblock:
+  a Windows CI runner (owner approval), then re-run the deferred spike
+  halves before the relevant milestone gates.
 
 ---
 

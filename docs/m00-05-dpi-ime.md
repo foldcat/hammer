@@ -41,12 +41,12 @@ Code paths in the pinned `third_party/sokol-c/sokol_app.h`
 - **Source of truth: the `Xft.dpi` resource.** sapp reads it from the
   root `RESOURCE_MANAGER` property **once at init** and falls back to
   96.0 with a warning. The mm-based screen DPI (the GLFW-style
-  computation) is *deliberately commented out* in sapp.
+  computation) is _deliberately commented out_ in sapp.
 - **`sapp.dpi_scale()` = Xft.dpi / 96, always, on X11** — it is not gated
   by the `high_dpi` flag. `sapp_desc.high_dpi` is a **no-op on X11**
   (verified: with the flag set, scale stays 1.0, window unscaled).
 - **The physical window is pre-scaled** at creation: `physical =
-  desc_size * scale`. `sapp.width()/height()` report the framebuffer
+desc_size * scale`. `sapp.width()/height()` report the framebuffer
   size, which equals the physical size on X11 (scale 2.0 → 400x300 desc
   becomes a physical 800x600 window and `sapp.width()` returns 800).
 - **Mouse coordinates arrive in framebuffer pixels**, consistent with
@@ -60,7 +60,7 @@ Code paths in the pinned `third_party/sokol-c/sokol_app.h`
 Consequence for the editor: on X11, sapp has already applied the DPI
 scale to the window, framebuffer, and (implicitly) coordinates — "never
 apply DPI twice" (§9.6) means the editor must treat `sapp.width()` as
-*scaled* and divide by `sapp.dpi_scale()` for logical layout, then
+_scaled_ and divide by `sapp.dpi_scale()` for logical layout, then
 recompute fonts/atlas at scale changes. Per-monitor DPI would need the
 editor's own RandR tracking (`XRRGetMonitors` per-monitor `mwidth/mheight`
 — demonstrated available via the probe; a window-move watcher is not in
@@ -115,7 +115,7 @@ Integration gotchas discovered (each is a documented trap for M06.07):
 5. **The `XN*` macros are plain strings** without the `XN` prefix
    (`XNQueryInputStyle` == `"queryInputStyle"`, etc.).
 6. **Odin block-scoped defers** (AGENTS.md §10.6): a restore-defer placed
-   inside an `if` block fired at *block* exit and restored the keymap
+   inside an `if` block fired at _block_ exit and restored the keymap
    before the XIM ever read it — the spike's most instructive bug.
 7. `XTestFlush` lives in **libXext**, while the other `XTest*` calls live
    in libXtst.
@@ -177,11 +177,11 @@ ALL OK
 
 ## Platform status (honest)
 
-| Platform      | Status                                                                 |
-| ------------- | ---------------------------------------------------------------------- |
+| Platform      | Status                                                                                                                                                                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Linux/X11     | Validated headless (Xvfb): sapp DPI model at Xft.dpi 96/192, high_dpi no-op, mouse-coordinate semantics, ASCII CHAR events, XIM dead-key commit path. Not run on a real desktop, not against a real IM server, no real mixed-DPI monitor pair. |
-| Linux/Wayland | Deferred by decision (2026-11-12). Nothing claimed.                    |
-| Windows       | Deferred by decision (2026-11-12). Nothing claimed.                    |
+| Linux/Wayland | Deferred by decision (2026-11-12). Nothing claimed.                                                                                                                                                                                            |
+| Windows       | Deferred by decision (2026-11-12). Nothing claimed.                                                                                                                                                                                            |
 
 ## Open follow-ups (feed M00.09 / M01.03 / M05.06 / M06.07)
 
