@@ -1839,6 +1839,7 @@ Therefore:
 - Only explicitly trusted user configuration is compiled.
 - Never automatically compile a project-local config just because a repository contains one.
 - Project layout/session files should use a non-executable format.
+- By default, use the modified oxocarbon colorscheme. See `colorscheme.yaml`.
 
 ## 14.5 EditorConfig
 
