@@ -65,14 +65,14 @@ stubs, validation actually run, platform claims recorded honestly.
 
 **Status:** Active
 **Depends on:** —
-**Next task:** M00.06
+**Next task:** M00.07
 
 - [x] M00.01 Create repository/docs/agent workflow.
 - [x] M00.02 Pin Odin, Sokol, shader tooling, and native dependencies.
 - [x] M00.03 Build/run a window (Linux/X11 done; Windows deferred by decision).
 - [x] M00.04 Spike Unicode clipboard round-trip and large transfer.
 - [x] M00.05 Spike mixed-DPI and text-input/IME integration.
-- [ ] M00.06 Spike native Wayland feasibility for chosen backend (deferred by decision; to be closed as documentation).
+- [x] M00.06 Spike native Wayland feasibility for chosen backend.
 - [ ] M00.07 Spike PTY/ConPTY and asynchronous process output.
 - [ ] M00.08 Prove minimal FUSE/WinFsp adapter deployment.
 - [ ] M00.09 Record architecture decisions and compatibility inventory.
@@ -122,10 +122,28 @@ stubs, validation actually run, platform claims recorded honestly.
   integration traps (XimLocal keymap caching, MappingNotify handling,
   XN* string values, Xvfb's last-client state reset).
   Docs: `docs/m00-05-dpi-ime.md`.
-- **Decision 2026-11-12 (owner).** Lock in on X11 for now; no Wayland and
-  no Windows work this early. M00.06 will be closed as a documented
-  decision; Windows halves of M00.03–M00.08 are deferred and must be
-  recorded as such in the M00.09 compatibility inventory.
+- **M00.06 done (2026-11-12 session; decision revised by owner).** The
+  Wayland deferral was reversed and the native Wayland feasibility spike
+  was actually performed. `spike/wayland/` (GLFW-based: pinned
+  `vendor:glfw` + system libglfw3 3.4, installed with the `wayland` USE
+  flag) plus `docs/m00-06-wayland.md`. Validated headless: native Wayland
+  window + EGL under weston 14 nested in Xvfb (platform auto-selection,
+  live `wl_display`/`wl_surface`, GL clear/swap loop, clean autoquit), the
+  no-compositor negative path, an X11 contrast run, and the product path —
+  pinned-sokol hammer running under weston + Xwayland (X11-only sokol has
+  no native Wayland backend; XWayland verified working, GLX via glamor).
+  Traps recorded: weston's headless backend advertises no `wl_seat` and
+  crashes pinned GLFW 3.4 (headless CI needs a seated compositor, e.g.
+  weston x11-backend in Xvfb); Wayland input is implemented but not
+  validated headless (no injection tool); GLFW has no Wayland IME
+  support. Native-Wayland options for later (sokol backend / GLFW+EGL /
+  SDL3) are left as future decisions for M00.09.
+- **Decision 2026-11-12 (owner, revised).** X11 remains the locked-in
+  backend; a native Wayland spike is now done (M00.06) and native Wayland
+  stays a documented option, not a commitment. Windows work remains
+  deferred: this machine has no Wine and no 32-bit multilib toolchain,
+  and building one takes hours. The Windows halves of M00.03–M00.08 must
+  be recorded as deferred in the M00.09 compatibility inventory.
 - M00 acceptance (SPECS.md): both Tier-1 OS build paths work; no unverified
   claim about Wayland/clipboard/IME is treated as solved; FS mount deployment
   risk is understood before M19.

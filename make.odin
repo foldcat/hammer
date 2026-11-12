@@ -6,6 +6,7 @@
 //     odin run make.odin -file -- --release    # optimized build
 //     odin run make.odin -file -- clipboard-spike  # M00.04 X11 spike
 //     odin run make.odin -file -- dpi-ime-spike    # M00.05 DPI/IME spike
+//     odin run make.odin -file -- wayland-spike    # M00.06 Wayland spike
 //
 // On Linux this tool also self-configures the Sokol dependency: it
 // downloads the pinned Sokol C sources (verified by sha256), checks the
@@ -37,6 +38,11 @@ SPIKE_DPI_IME_DIR :: SPIKE_DIR + "/dpi_ime"
 SPIKE_DPI_IME_APP_DIR :: SPIKE_DPI_IME_DIR + "/app"
 DPI_IME_PATH :: OUT_DIR + "/dpi_ime"
 DPI_IME_APP_PATH :: OUT_DIR + "/dpi_ime_app"
+
+// M00.06 Wayland spike: a GLFW-based native Wayland window (vendor:glfw
+// linking the system libglfw3; needs a compositor at runtime).
+SPIKE_WAYLAND_DIR :: SPIKE_DIR + "/wayland"
+WAYLAND_SPIKE_PATH :: OUT_DIR + "/wayland_spike"
 
 SOKOL_PKG_DIR :: #directory + "/third_party/sokol/sokol"
 SOKOL_COLLECTION :: "-collection:sokol=" + SOKOL_PKG_DIR
@@ -108,6 +114,19 @@ main :: proc() {
 			SPIKE_COLLECTION,
 			"-vet",
 			"-out:" + DPI_IME_APP_PATH,
+		})
+		return
+	}
+
+	// M00.06 Wayland spike: GLFW-based native Wayland window.
+	if len(args) > 1 && args[1] == "wayland-spike" {
+		fmt.println("[Build] Building Wayland spike -> " + WAYLAND_SPIKE_PATH + "...")
+		run_odin([]string {
+			"odin",
+			"build",
+			SPIKE_WAYLAND_DIR,
+			"-vet",
+			"-out:" + WAYLAND_SPIKE_PATH,
 		})
 		return
 	}
