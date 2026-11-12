@@ -1,18 +1,45 @@
 # What to do?
 
-Complete the M00 section, one task per session, in order. Write your
-documentations in `/docs`.
+Work through the active milestone one task per session, in order. Write
+your documentation in `/docs`.
 
-## Current task: M00.09 — Record architecture decisions and compatibility inventory
+## Current task: M01.01 — Implement lifecycle and error-reporting infrastructure
 
-Write `/docs/m00-09-decisions.md` (or similar) recording: backend
-decisions (X11 locked in; native Wayland option documented; Windows
-deferred), pinned toolchain/dependency inventory, per-feature platform
-status (clipboard/DPI/IME/PTY/FUSE: implemented-and-tested vs
-implemented-not-tested vs unsupported vs blocked), and open follow-ups
-from the M00.03–M00.08 spikes (shader tooling pins, XGetWindowProperty
-crash workaround, weston headless seat trap, TIOCSPTLCK requirement,
-FUSE read-buffer invariant, fusermount3 new-style protocol, etc.).
+See SPECS.md §18 M01 for deliverables and acceptance. First task of the
+application shell: application lifecycle, logging, error reporting, and
+platform service interfaces (M01.01 per SPECS.md task list), on Linux/X11
+(Windows remains blocked by the D-02 deferral recorded in
+`docs/m00-09-decisions.md` §4).
+
+Consult `docs/m00-09-decisions.md` before starting: it carries the
+architecture decisions (D-01…D-05) and the follow-ups owed by M01
+(real-desktop window run, CI config commit, sapp-DPI logical/physical
+conversion rule for M01.03).
+
+## M00.09 done (2026-11-12 session)
+
+`docs/m00-09-decisions.md` — the consolidated architecture decision log
+and compatibility inventory for M00:
+
+- Decision log: D-01 X11 product backend (sokol/X11); D-02 Windows
+  deferred (no toolchain) and explicitly blocking Windows release gates;
+  D-03 native Wayland a documented option, not a commitment (three
+  candidate paths listed for the Tier-1 gate); D-04 IPC + FUSE/WinFsp
+  architecture; D-05 spikes use raw `core:sys/linux`, no libfuse.
+- Verified toolchain/dependency inventory (Odin dev-2026-11, sokol-odin
+  `ae94aa5`, sokol C `93aa187`, system versions) with explicit
+  not-yet-pinned gaps (glslc/M05.01, FreeType/HarfBuzz/M05.01,
+  Tree-sitter/M12.01, WinFsp/M19.05).
+- Honest feature/platform status matrix (tested vs implemented vs
+  unsupported vs blocked) covering window/GL, clipboard, DPI, IME, PTY,
+  FUSE, input, CI.
+- Consolidated follow-up ledger: every M00.03–M00.08 trap (libX11
+  XGetWindowProperty, XIM keymap/MappingNotify traps, weston headless
+  seat crash, TIOCSPTLCK, FUSE read-buffer invariant, fusermount3
+  new-style protocol, etc.) mapped to its owning milestone.
+- M00 acceptance review: all criteria met except the Windows build path
+  (blocked by D-02, recorded not dropped). M00 marked done with that
+  item; M01 is now active.
 
 ## M00.08 done (2026-11-12 session)
 
@@ -35,7 +62,3 @@ FUSE read-buffer invariant, fusermount3 new-style protocol, etc.).
   kernel abort → fusermount3 -uz lazy recovery; no leftover mounts.
 - Sandbox: mounts only in a task-owned `mktemp -d` under /tmp/opencode/;
   no real mount points touched. WinFsp/Windows deferred (no toolchain).
-
-## Next tasks after M00.09
-
-- M01.01 Implement lifecycle and error-reporting infrastructure.

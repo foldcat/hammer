@@ -28,8 +28,8 @@ stubs, validation actually run, platform claims recorded honestly.
 
 | ID  | Title                                              | Depends on     | Release cut | Status      |
 | --- | -------------------------------------------------- | -------------- | ----------- | ----------- |
-| M00 | Specification, feasibility spikes, build baseline  | —              | —           | **Active**  |
-| M01 | Application shell, platform layer, compiled config | M00            | Alpha A     | Not started |
+| M00 | Specification, feasibility spikes, build baseline  | —              | —           | Done        |
+| M01 | Application shell, platform layer, compiled config | M00            | Alpha A     | **Active**  |
 | M02 | Rope, transactions, anchors, headless core         | M01            | Alpha A     | Not started |
 | M03 | File loading, codecs, safe save, external changes  | M02            | Alpha A     | Not started |
 | M04 | Recovery journals, persistent history, shutdown    | M03            | Alpha A     | Not started |
@@ -63,9 +63,10 @@ stubs, validation actually run, platform claims recorded honestly.
 
 ## M00 — Specification, feasibility spikes, and build baseline
 
-**Status:** Active
+**Status:** Done (Windows build-path acceptance item deferred by owner
+decision; see the M00.09 note and `docs/m00-09-decisions.md` §4).
 **Depends on:** —
-**Next task:** M00.09
+**Next task:** — (all tasks complete; next milestone is M01.01)
 
 - [x] M00.01 Create repository/docs/agent workflow.
 - [x] M00.02 Pin Odin, Sokol, shader tooling, and native dependencies.
@@ -75,7 +76,7 @@ stubs, validation actually run, platform claims recorded honestly.
 - [x] M00.06 Spike native Wayland feasibility for chosen backend.
 - [x] M00.07 Spike PTY/ConPTY and asynchronous process output.
 - [x] M00.08 Prove minimal FUSE/WinFsp adapter deployment.
-- [ ] M00.09 Record architecture decisions and compatibility inventory.
+- [x] M00.09 Record architecture decisions and compatibility inventory.
 
 ### Notes
 
@@ -173,13 +174,33 @@ stubs, validation actually run, platform claims recorded honestly.
   the /dev/fuse read buffer must be ≥ 4096 + max_write (else EINVAL after
   INIT) and the fusermount3 option whitelist. WinFsp/Windows deferred (no
   toolchain).
+- **M00.09 done (2026-11-12 session).** Architecture decisions and
+  compatibility inventory recorded in `docs/m00-09-decisions.md`:
+  decision log (D-01 X11 product backend; D-02 Windows deferred — see
+  below; D-03 native Wayland a documented option, not a commitment;
+  D-04 IPC+FUSE/WinFsp architecture; D-05 no-new-dependency spikes),
+  pinned toolchain/dependency inventory with verified versions,
+  honest per-feature per-platform status matrix, the consolidated
+  follow-up ledger (all M00.03–M00.08 traps, each with an owning
+  milestone), and an M00 acceptance review. Acceptance review result:
+  all criteria met except "both Tier-1 OS build paths work" — the
+  Windows build path is blocked by the D-02 deferral and explicitly
+  blocks Windows release gates; Linux/X11 path works. M00 is marked done
+  with that item recorded, not dropped.
+- **Windows deferral (D-02, still open).** The Windows halves of
+  M00.03–M00.08, the Windows CI deliverable, and the Windows build-path
+  acceptance item are deferred: no Wine and no 32-bit multilib toolchain
+  on this machine. Unblock: a Windows toolchain + CI runner (owner
+  approval), then re-run the deferred spike halves before the relevant
+  milestone gates.
 
 ---
 
 ## M01 — Application shell, platform layer, and compiled config
 
-**Status:** Not started
+**Status:** Active
 **Depends on:** M00
+**Next task:** M01.01
 
 - [ ] M01.01 Implement lifecycle and error-reporting infrastructure.
 - [ ] M01.02 Add generated trusted configuration package.
