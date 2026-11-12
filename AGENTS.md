@@ -79,6 +79,10 @@ or major dependency merely to complete a small task.
 
 Architecture changes require a documented decision.
 
+You may take a look at `/home/user/Builds/p9p`, which contains the
+plan9 port source code. Use it for reference only. Do not port it
+line by line into Odin as this is a reimagination, not a recode.
+
 ---
 
 ## 4. Start-of-session procedure
