@@ -32,12 +32,18 @@ import "platform"
 import generated "config/generated"
 import coords "core/coords"
 import config "core/config"
+import input "core/input"
 
 State :: struct {
 	pass_action:     sg.Pass_Action,
 	frame_count:     i64,
 	autoquit_frames: i64, // 0 = disabled
 	test_panic:      bool,
+	// scale is the editor-owned, always-valid physical/logical ratio
+	// (M01.04). window_metrics validates the backend value and falls
+	// back to 1.0; input normalization trusts this cached value, so
+	// the external input is validated once, at the boundary.
+	scale:           f32,
 }
 
 state: State
@@ -201,8 +207,17 @@ event :: proc "c" (ev: ^sapp.Event) {
 	context = app_context()
 
 	#partial switch ev.type {
-	case .KEY_DOWN:
-		if ev.key_code == .ESCAPE {
+	case .KEY_DOWN, .KEY_UP, .CHAR, .MOUSE_DOWN, .MOUSE_UP, .MOUSE_MOVE, .MOUSE_SCROLL:
+		// M01.04: normalize the backend event into an editor input
+		// event (logical coordinates, editor keys, validated text)
+		// and dispatch. M06/M07 replace the ESC handling with the
+		// shortcut and chord layers.
+		e, ok := normalize_sapp_event(ev)
+		if !ok {
+			return
+		}
+		log_input_event(e)
+		if kd, is_down := e.(input.Key_Down); is_down && !kd.repeat && kd.key == .Escape {
 			request_quit(.User_Request, "esc")
 		}
 	case .QUIT_REQUESTED:
@@ -341,6 +356,9 @@ window_metrics :: proc(
 	} else {
 		logical = converted
 	}
+	// The cached, always-valid scale that input normalization uses
+	// (M01.04); refreshed here and only here.
+	state.scale = scale
 	log.logf(
 		level,
 		"%s: %vx%v px, %vx%v logical, dpi_scale=%.2f, backend=%v",
@@ -353,6 +371,280 @@ window_metrics :: proc(
 		sg.query_backend(),
 	)
 	return
+}
+
+// ---- Input normalization (M01.04) --------------------------------------
+//
+// The application layer owns every backend-specific mapping; the core
+// input package carries only editor semantics (M01 acceptance: no
+// dependency-specific code leaks into the core).
+
+// sokol_key_map translates sokol_app keycodes into editor keys. Gaps
+// and unknown keycodes read as input.Key.Invalid; WORLD_1/WORLD_2 are
+// layout-dependent non-US keys and stay unmapped on purpose.
+sokol_key_map := [int(sapp.Keycode.MENU) + 1]input.Key {
+	int(sapp.Keycode.SPACE) = .Space,
+	int(sapp.Keycode.APOSTROPHE) = .Apostrophe,
+	int(sapp.Keycode.COMMA) = .Comma,
+	int(sapp.Keycode.MINUS) = .Minus,
+	int(sapp.Keycode.PERIOD) = .Period,
+	int(sapp.Keycode.SLASH) = .Slash,
+	int(sapp.Keycode._0) = .D0,
+	int(sapp.Keycode._1) = .D1,
+	int(sapp.Keycode._2) = .D2,
+	int(sapp.Keycode._3) = .D3,
+	int(sapp.Keycode._4) = .D4,
+	int(sapp.Keycode._5) = .D5,
+	int(sapp.Keycode._6) = .D6,
+	int(sapp.Keycode._7) = .D7,
+	int(sapp.Keycode._8) = .D8,
+	int(sapp.Keycode._9) = .D9,
+	int(sapp.Keycode.SEMICOLON) = .Semicolon,
+	int(sapp.Keycode.EQUAL) = .Equal,
+	int(sapp.Keycode.A) = .A,
+	int(sapp.Keycode.B) = .B,
+	int(sapp.Keycode.C) = .C,
+	int(sapp.Keycode.D) = .D,
+	int(sapp.Keycode.E) = .E,
+	int(sapp.Keycode.F) = .F,
+	int(sapp.Keycode.G) = .G,
+	int(sapp.Keycode.H) = .H,
+	int(sapp.Keycode.I) = .I,
+	int(sapp.Keycode.J) = .J,
+	int(sapp.Keycode.K) = .K,
+	int(sapp.Keycode.L) = .L,
+	int(sapp.Keycode.M) = .M,
+	int(sapp.Keycode.N) = .N,
+	int(sapp.Keycode.O) = .O,
+	int(sapp.Keycode.P) = .P,
+	int(sapp.Keycode.Q) = .Q,
+	int(sapp.Keycode.R) = .R,
+	int(sapp.Keycode.S) = .S,
+	int(sapp.Keycode.T) = .T,
+	int(sapp.Keycode.U) = .U,
+	int(sapp.Keycode.V) = .V,
+	int(sapp.Keycode.W) = .W,
+	int(sapp.Keycode.X) = .X,
+	int(sapp.Keycode.Y) = .Y,
+	int(sapp.Keycode.Z) = .Z,
+	int(sapp.Keycode.LEFT_BRACKET) = .Left_Bracket,
+	int(sapp.Keycode.BACKSLASH) = .Backslash,
+	int(sapp.Keycode.RIGHT_BRACKET) = .Right_Bracket,
+	int(sapp.Keycode.GRAVE_ACCENT) = .Grave_Accent,
+	int(sapp.Keycode.ESCAPE) = .Escape,
+	int(sapp.Keycode.ENTER) = .Enter,
+	int(sapp.Keycode.TAB) = .Tab,
+	int(sapp.Keycode.BACKSPACE) = .Backspace,
+	int(sapp.Keycode.INSERT) = .Insert,
+	int(sapp.Keycode.DELETE) = .Delete,
+	int(sapp.Keycode.RIGHT) = .Right,
+	int(sapp.Keycode.LEFT) = .Left,
+	int(sapp.Keycode.DOWN) = .Down,
+	int(sapp.Keycode.UP) = .Up,
+	int(sapp.Keycode.PAGE_UP) = .Page_Up,
+	int(sapp.Keycode.PAGE_DOWN) = .Page_Down,
+	int(sapp.Keycode.HOME) = .Home,
+	int(sapp.Keycode.END) = .End,
+	int(sapp.Keycode.CAPS_LOCK) = .Caps_Lock,
+	int(sapp.Keycode.SCROLL_LOCK) = .Scroll_Lock,
+	int(sapp.Keycode.NUM_LOCK) = .Num_Lock,
+	int(sapp.Keycode.PRINT_SCREEN) = .Print_Screen,
+	int(sapp.Keycode.PAUSE) = .Pause,
+	int(sapp.Keycode.F1) = .F1,
+	int(sapp.Keycode.F2) = .F2,
+	int(sapp.Keycode.F3) = .F3,
+	int(sapp.Keycode.F4) = .F4,
+	int(sapp.Keycode.F5) = .F5,
+	int(sapp.Keycode.F6) = .F6,
+	int(sapp.Keycode.F7) = .F7,
+	int(sapp.Keycode.F8) = .F8,
+	int(sapp.Keycode.F9) = .F9,
+	int(sapp.Keycode.F10) = .F10,
+	int(sapp.Keycode.F11) = .F11,
+	int(sapp.Keycode.F12) = .F12,
+	int(sapp.Keycode.F13) = .F13,
+	int(sapp.Keycode.F14) = .F14,
+	int(sapp.Keycode.F15) = .F15,
+	int(sapp.Keycode.F16) = .F16,
+	int(sapp.Keycode.F17) = .F17,
+	int(sapp.Keycode.F18) = .F18,
+	int(sapp.Keycode.F19) = .F19,
+	int(sapp.Keycode.F20) = .F20,
+	int(sapp.Keycode.F21) = .F21,
+	int(sapp.Keycode.F22) = .F22,
+	int(sapp.Keycode.F23) = .F23,
+	int(sapp.Keycode.F24) = .F24,
+	int(sapp.Keycode.F25) = .F25,
+	int(sapp.Keycode.KP_0) = .KP_0,
+	int(sapp.Keycode.KP_1) = .KP_1,
+	int(sapp.Keycode.KP_2) = .KP_2,
+	int(sapp.Keycode.KP_3) = .KP_3,
+	int(sapp.Keycode.KP_4) = .KP_4,
+	int(sapp.Keycode.KP_5) = .KP_5,
+	int(sapp.Keycode.KP_6) = .KP_6,
+	int(sapp.Keycode.KP_7) = .KP_7,
+	int(sapp.Keycode.KP_8) = .KP_8,
+	int(sapp.Keycode.KP_9) = .KP_9,
+	int(sapp.Keycode.KP_DECIMAL) = .KP_Decimal,
+	int(sapp.Keycode.KP_DIVIDE) = .KP_Divide,
+	int(sapp.Keycode.KP_MULTIPLY) = .KP_Multiply,
+	int(sapp.Keycode.KP_SUBTRACT) = .KP_Subtract,
+	int(sapp.Keycode.KP_ADD) = .KP_Add,
+	int(sapp.Keycode.KP_ENTER) = .KP_Enter,
+	int(sapp.Keycode.KP_EQUAL) = .KP_Equal,
+	int(sapp.Keycode.LEFT_SHIFT) = .Left_Shift,
+	int(sapp.Keycode.LEFT_CONTROL) = .Left_Control,
+	int(sapp.Keycode.LEFT_ALT) = .Left_Alt,
+	int(sapp.Keycode.LEFT_SUPER) = .Left_Super,
+	int(sapp.Keycode.RIGHT_SHIFT) = .Right_Shift,
+	int(sapp.Keycode.RIGHT_CONTROL) = .Right_Control,
+	int(sapp.Keycode.RIGHT_ALT) = .Right_Alt,
+	int(sapp.Keycode.RIGHT_SUPER) = .Right_Super,
+	int(sapp.Keycode.MENU) = .Menu,
+}
+
+// sokol_modifiers translates the backend modifier mask (modifier keys
+// only; mouse-button bits are ignored here).
+sokol_modifiers :: proc(mask: u32) -> input.Modifiers {
+	mods: input.Modifiers
+	if mask & sapp.MODIFIER_SHIFT != 0 {
+		mods += {.Shift}
+	}
+	if mask & sapp.MODIFIER_CTRL != 0 {
+		mods += {.Ctrl}
+	}
+	if mask & sapp.MODIFIER_ALT != 0 {
+		mods += {.Alt}
+	}
+	if mask & sapp.MODIFIER_SUPER != 0 {
+		mods += {.Super}
+	}
+	return mods
+}
+
+// sokol_buttons extracts the held-button set from the backend
+// modifier mask (sokol_app reports held mouse buttons there).
+sokol_buttons :: proc(mask: u32) -> input.Mouse_Buttons {
+	buttons: input.Mouse_Buttons
+	if mask & sapp.MODIFIER_LMB != 0 {
+		buttons += {.Left}
+	}
+	if mask & sapp.MODIFIER_RMB != 0 {
+		buttons += {.Right}
+	}
+	if mask & sapp.MODIFIER_MMB != 0 {
+		buttons += {.Middle}
+	}
+	return buttons
+}
+
+// sokol_button_to_input maps a backend mouse button; unrecognized
+// values return ok=false and the event is dropped by the caller (the
+// editor Mouse_Button type has no Invalid member — see core/input).
+sokol_button_to_input :: proc(b: sapp.Mousebutton) -> (input.Mouse_Button, bool) {
+	#partial switch b {
+	case .LEFT:
+		return .Left, true
+	case .MIDDLE:
+		return .Middle, true
+	case .RIGHT:
+		return .Right, true
+	case:
+	}
+	return {}, false
+}
+
+// normalize_sapp_event translates one backend event into an editor
+// input event (M01.04). ok=false means the event has no editor
+// equivalent (non-input events, unrecognized buttons, invalid text).
+// Pointer coordinates are converted from framebuffer pixels to
+// logical units with core/coords, using the validated scale cached by
+// window_metrics — DPI is applied exactly once, at this boundary.
+normalize_sapp_event :: proc(ev: ^sapp.Event) -> (input.Event, bool) {
+	scale := state.scale
+	#partial switch ev.type {
+	case .KEY_DOWN:
+		return input.Key_Down {
+			key = sokol_key_map[int(ev.key_code)],
+			repeat = ev.key_repeat,
+			modifiers = sokol_modifiers(ev.modifiers),
+		}, true
+	case .KEY_UP:
+		return input.Key_Up {
+			key = sokol_key_map[int(ev.key_code)],
+			modifiers = sokol_modifiers(ev.modifiers),
+		}, true
+	case .CHAR:
+		text, terr := input.normalize_text(ev.char_code)
+		if !errs.ok(terr) {
+			log.warnf("input: %v (event dropped)", errs.describe(terr))
+			errs.destroy(&terr)
+			return {}, false
+		}
+		return input.Text{text = text, modifiers = sokol_modifiers(ev.modifiers)}, true
+	case .MOUSE_DOWN, .MOUSE_UP:
+		button, b_ok := sokol_button_to_input(ev.mouse_button)
+		if !b_ok {
+			return {}, false
+		}
+		pos, perr := coords.to_logical_point(
+			coords.Physical_Point{ev.mouse_x, ev.mouse_y},
+			scale,
+		)
+		if !errs.ok(perr) {
+			// state.scale is validated at the boundary; this is a
+			// defensive path only.
+			errs.destroy(&perr)
+			return {}, false
+		}
+		mods := sokol_modifiers(ev.modifiers)
+		if ev.type == .MOUSE_DOWN {
+			return input.Pointer_Down{button = button, pos = pos, modifiers = mods}, true
+		}
+		return input.Pointer_Up{button = button, pos = pos, modifiers = mods}, true
+	case .MOUSE_MOVE:
+		pos, perr := coords.to_logical_point(
+			coords.Physical_Point{ev.mouse_x, ev.mouse_y},
+			scale,
+		)
+		if !errs.ok(perr) {
+			errs.destroy(&perr)
+			return {}, false
+		}
+		return input.Pointer_Move {
+			pos = pos,
+			buttons = sokol_buttons(ev.modifiers),
+			modifiers = sokol_modifiers(ev.modifiers),
+		}, true
+	case .MOUSE_SCROLL:
+		pos, perr := coords.to_logical_point(
+			coords.Physical_Point{ev.mouse_x, ev.mouse_y},
+			scale,
+		)
+		if !errs.ok(perr) {
+			errs.destroy(&perr)
+			return {}, false
+		}
+		return input.Scroll {
+			pos = pos,
+			dx = ev.scroll_x,
+			dy = ev.scroll_y,
+			modifiers = sokol_modifiers(ev.modifiers),
+		}, true
+	}
+	return {}, false
+}
+
+// log_input_event logs a normalized event for diagnostics. Pointer
+// moves are the high-frequency event and are not logged, keeping the
+// log bounded; the headless input smoke greps the remaining lines.
+log_input_event :: proc(e: input.Event) {
+	#partial switch _ in e {
+	case input.Pointer_Move:
+		return
+	case:
+	}
+	log.debugf("input: %s", input.describe(e))
 }
 
 // Test hook used by the headless smoke test; unset in normal use.
@@ -404,6 +696,7 @@ main :: proc() {
 
 	state.autoquit_frames = autoquit_frames_from_env()
 	state.test_panic = env_flag("HAMMER_TEST_PANIC")
+	state.scale = 1.0 // replaced by window_metrics before any input event
 	cfg = generated.resolved
 
 	log.infof("hammer starting (pid=%d, os=%v, arch=%v)", os.get_pid(), ODIN_OS, ODIN_ARCH)

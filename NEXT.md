@@ -3,19 +3,43 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M01.04 — Native input normalization
+## Current task: M01.05 — Worker/result queues with bounded capacity
 
-See SPECS.md §18 M01 for deliverables and acceptance. M01.01–M01.03
-are done (see below); M01.04 builds on the window service and
-`core/coords` (M01.03: mouse events arrive in framebuffer pixels and
-must be converted with `coords.to_logical_point` before any layout or
-hit-testing — never apply DPI twice).
+See SPECS.md §18 M01 for deliverables and acceptance. M01.01–M01.04
+are done (see below); M01.05 builds on the normalized `input.Event`
+union from M01.04 (the queue element type) and prepares the
+asynchronous infrastructure M09 (commands) and M12 (Tree-sitter) will
+use: bounded capacity, cancellation, stale-result validation
+(AGENTS.md §13), no unbounded retry.
 
-The M01.02 traps in `docs/m01-02-config.md` §Traps and the M01.03
-traps in `docs/m01-03-coords.md` §Traps are required reading for new
-code in `src/` (fmt brace escaping, block-scoped defer, relative
-import resolution, `%v` float formatting; Xlib async errors, no
-`odin fmt` in the pinned compiler, no `math.is_finite`).
+The M01.02 traps in `docs/m01-02-config.md` §Traps, the M01.03 traps
+in `docs/m01-03-coords.md` §Traps, and the M01.04 traps in
+`docs/m01-04-input.md` §Traps are required reading for new code in
+`src/` (fmt brace escaping, block-scoped defer, relative import
+resolution, `%v` float formatting; Xlib async errors, no `odin fmt`,
+no `math.is_finite`; `#partial switch` needed for catch-alls, Odin
+procs are not closures).
+
+## M01.04 done (2026-11-12 session)
+
+Native input normalization (`docs/m01-04-input.md`):
+
+- New backend-free `src/core/input`: editor-owned `Key` naming (119
+  members), `Modifiers`/`Mouse_Button(s)` bit sets, the `Event` tagged
+  union (key down/up, text, pointer down/up/move, scroll — logical
+  coordinates), `normalize_text` (UTF-32 validation, never asserts on
+  backend data), `describe` diagnostics with a pinned format.
+- `src/main.odin` adapter: sapp keycode table, modifier/button mask
+  translation, `normalize_sapp_event` (framebuffer→logical via
+  `core/coords`), `state.scale` cache (validated once in
+  `window_metrics`); ESC quit now dispatches through a normalized
+  `Key_Down`. `tests/unit/input` added (6 tests).
+- Validated: 45/45 unit tests leak-free; headless XTEST-fed input
+  smokes at scale 1.0 and 2.0 (keys, modifiers, text, buttons, wheel,
+  motion → logical coords, ESC-quit exit 0); debug/release/run smokes;
+  panic path (132); Windows cross-build + Wine 11 smoke (exit 0). Real
+  desktop, IME/dead keys, and real Windows input remain the recorded
+  follow-ups.
 
 ## M01.03 done (2026-11-12 session)
 

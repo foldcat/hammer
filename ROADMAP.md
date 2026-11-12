@@ -101,6 +101,22 @@ deferred by owner decision; see the M00.09 note and
   release/run, all error paths, Windows cross-build + Wine 11. Traps:
   Odin fmt brace escaping, block-scoped defer, relative import
   resolution (`docs/m01-02-config.md` §Traps).
+- **M01.03 done (2026-11-12 session).** Logical/physical coordinate
+  conversion (`docs/m01-03-coords.md`): backend-free `src/core/coords`
+  (distinct `Physical_*`/`Logical_*` types, validated divide/multiply
+  conversions, points ↔ logical px per SPECS.md §9.6), consumed by
+  `window_metrics` in the app layer. Validated 39/39 unit tests, scale
+  1.0/2.0 smokes, real X11 resize events at both scales (throwaway
+  resizer), Windows cross-build + Wine 11.
+- **M01.04 done (2026-11-12 session).** Native input normalization
+  (`docs/m01-04-input.md`): backend-free `src/core/input` (editor `Key`
+  naming, modifier/button bit sets, the `Event` tagged union in logical
+  coordinates, UTF-32 text validation), sapp adapter in `src/main.odin`
+  (keycode table, mask translation, framebuffer→logical conversion,
+  cached validated `state.scale`); ESC quit dispatches through a
+  normalized `Key_Down`. Validated 45/45 unit tests, XTEST-fed input
+  smokes at scale 1.0/2.0 (keys/modifiers/text/buttons/wheel/motion),
+  Windows cross-build + Wine 11.
 - **M00.01 done.** Repository skeleton, `AGENTS.md` agent workflow, `SPECS.md`,
   `README.md`, `make.odin` build tool, `colorscheme.yaml`, `ols.json`,
   `.gitignore`/`.gitmodules`. Working tree clean at `3200a42`.
@@ -235,12 +251,12 @@ deferred by owner decision; see the M00.09 note and
 
 **Status:** Active
 **Depends on:** M00
-**Next task:** M01.03
+**Next task:** M01.05
 
 - [x] M01.01 Implement lifecycle and error-reporting infrastructure.
 - [x] M01.02 Add generated trusted configuration package.
-- [ ] M01.03 Create logical/physical coordinate conversion.
-- [ ] M01.04 Add native input normalization.
+- [x] M01.03 Create logical/physical coordinate conversion.
+- [x] M01.04 Add native input normalization.
 - [ ] M01.05 Add worker/result queues with bounded capacity.
 - [ ] M01.06 Render basic column/tag/body rectangles.
 
