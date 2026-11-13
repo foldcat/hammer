@@ -3,17 +3,16 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M02.06 — Anchor transformation
+## Current task: M02.07 — Branching in-memory undo
 
-M02.01–M02.05 are done; M02 (SPECS.md §18) is active. M02.06 adds
-anchors: stable positions that transform through transactions
-(SPECS.md §8.3 — a plain integer offset is not enough for delayed
-clipboard results, async pipes, IPC clients, layout restoration, and
-multiple views). An anchor = byte position + affinity (stick to the
-left or right side of edits at its position); transforming = replaying
-the applied transaction log (the M02.05 `Log_Entry.ops` in applied
-order) against the anchor. The headless-core rule (SPECS.md §4.2)
-applies: no Sokol, testable without a window; follow the randomized
+M02.01–M02.06 are done; M02 (SPECS.md §18) is active. M02.07 adds the
+branching undo tree (SPECS.md §8.4): nodes (parent/child ids,
+transaction metadata, timestamps, before/after roots, selection state)
+over the M02.05 log; undo B→A followed by a new edit creates a branch
+instead of destroying the abandoned one; grouping via the M02.05
+`grouping_key`. Build on `Log_Entry` roots (already retained by the
+persistent tree). The headless-core rule (SPECS.md §4.2) applies: no
+Sokol, testable without a window; follow the randomized
 differential-test discipline of SPECS.md §21.
 
 Required reading for new code in `src/`: the traps in
@@ -21,11 +20,39 @@ Required reading for new code in `src/`: the traps in
 `docs/m01-04-input.md` §Traps, `docs/m01-05-queue.md` §Traps,
 `docs/m01-06-render.md` §Traps, `docs/m02-01-chunks.md` §Traps,
 `docs/m02-02-leaves.md` §Traps, `docs/m02-03-tree.md` §Traps,
-`docs/m02-04-coords.md` §Traps, and `docs/m02-05-transactions.md`
-§Traps (bare-name unions with type-name switch cases; error-returning
-allocation, never `make`, for fallible copies; nil roots are legal
-states; reference models must apply the deterministic order; no
-`core:map`).
+`docs/m02-04-coords.md` §Traps, `docs/m02-05-transactions.md` §Traps,
+and `docs/m02-06-anchors.md` §Traps (never copy a Doc/Tree/Store;
+reference models replay the applied order; empty-range replace is a
+pure insert; no local type declarations; no `core:map`).
+
+## M02.06 done (2026-11-13 session)
+
+Anchor transformation (`docs/m02-06-anchors.md`) — the SPECS.md §8.3
+stable-position primitive over the M02.05 log:
+
+- New `anchor.odin` in `src/core/txn`: `Affinity` (Left sticks to the
+  left text — inserts at the anchor push it past; Right sticks to the
+  right text — it stays put), `Anchor` (pos + affinity + captured
+  revision), `anchor_at` (validated capture at the current revision),
+  `anchor_transform` (replays log entries with base ≥ the anchor's
+  revision in the applied order; stamps the current revision;
+  idempotent at the current revision; `.Invalid_Input` for anchors
+  ahead of the document). Delete collapse rules and the replace
+  range-end adjacency rule documented and pinned.
+- `tests/unit/txn/anchor_test.odin` added (5 tests; 11 in the
+  package): affinity/delete/replace hand cases, log replay across
+  revisions, and a 400-step randomized differential (a pool of anchors
+  at random revisions/positions/affinities vs an independent reference
+  transform) that caught two reference-model bugs (unsorted replay
+  order; empty-range replace misrule) and a test bug worth recording
+  (copying a Doc by value — never do that).
+- Validated: 11/11 txn tests leak-free (×10, no flake); full suite
+  via `odin run make.odin -file -- test` (100 tests, all 11
+  test-bearing packages clean); debug/release builds; Xvfb release
+  smoke (exit 0, no PANIC/ERROR); `-no-crt` Windows cross-build of a
+  throwaway consumer + Wine 11 run (both affinities through a
+  multi-op transaction, stale rejection, exit 0). No product consumer
+  yet (M06 selections).
 
 ## M02.05 done (2026-11-13 session)
 

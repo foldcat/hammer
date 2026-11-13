@@ -299,29 +299,35 @@ test_rollback_on_log_failure :: proc(t: ^testing.T) {
 	expect_doc_ok(t, &doc, "after rollback")
 }
 
-// ref_apply applies operations to the reference model in the same
-// deterministic order as doc_apply (independent implementation).
-ref_apply :: proc(ref: ^[dynamic]u8, ops: []txn.Operation) {
-	sorted := make([]txn.Operation, len(ops), context.allocator)
-	defer delete(sorted)
-	copy(sorted, ops)
-	// Descending start position; ranges before inserts at equal starts.
-	for i := 1; i < len(sorted); i += 1 {
-		v := sorted[i]
+// ref_sort orders operations in the deterministic application order
+// (descending start; ranges before inserts at equal starts) — the
+// reference's own implementation of the ordering contract.
+ref_sort :: proc(ops: []txn.Operation) {
+	for i := 1; i < len(ops); i += 1 {
+		v := ops[i]
 		j := i - 1
 		for j >= 0 {
-			a, b := v, sorted[j]
+			a, b := v, ops[j]
 			a_start, b_start := ref_op_start(a), ref_op_start(b)
 			less := a_start > b_start ||
 				(a_start == b_start && ref_op_is_range(a) && !ref_op_is_range(b))
 			if !less {
 				break
 			}
-			sorted[j + 1] = sorted[j]
+			ops[j + 1] = ops[j]
 			j -= 1
 		}
-		sorted[j + 1] = v
+		ops[j + 1] = v
 	}
+}
+
+// ref_apply applies operations to the reference model in the same
+// deterministic order as doc_apply (independent implementation).
+ref_apply :: proc(ref: ^[dynamic]u8, ops: []txn.Operation) {
+	sorted := make([]txn.Operation, len(ops), context.allocator)
+	defer delete(sorted)
+	copy(sorted, ops)
+	ref_sort(sorted)
 	for op in sorted {
 		switch o in op {
 		case txn.Insert:

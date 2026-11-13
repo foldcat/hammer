@@ -308,19 +308,32 @@ real-Windows validation remain the recorded follow-ups).
 
 **Status:** Active
 **Depends on:** M01
-**Next task:** M02.06
+**Next task:** M02.07
 
 - [x] M02.01 Implement immutable backing chunks.
 - [x] M02.02 Implement leaves, metrics, and range iteration.
 - [x] M02.03 Implement balancing and persistent root updates.
 - [x] M02.04 Implement coordinate conversion.
 - [x] M02.05 Implement transactions and revision tracking.
-- [ ] M02.06 Implement anchor transformation.
+- [x] M02.06 Implement anchor transformation.
 - [ ] M02.07 Implement branching in-memory undo.
 - [ ] M02.08 Add randomized differential tests and benchmarks.
 
 ### Notes
 
+- **M02.06 done (2026-11-13 session).** Anchor transformation
+  (`docs/m02-06-anchors.md`): `anchor.odin` in `src/core/txn` —
+  `Affinity` (Left/Right stickiness), `Anchor` (pos + affinity +
+  captured revision), `anchor_at`, `anchor_transform` (replays the
+  M02.05 log in applied order, idempotent, `.Invalid_Input` for
+  future revisions). Delete collapse + replace range-end adjacency
+  rules pinned. 5 new tests (11 in the package) incl. a 400-step
+  randomized differential with a pool of anchors vs an independent
+  reference transform — caught two reference bugs (unsorted replay;
+  empty-range replace) and recorded the never-copy-a-Doc trap.
+  Validated 11/11 leak-free ×10, full suite 100 tests clean,
+  debug/release builds, Xvfb release smoke, `-no-crt` Windows
+  cross-build + Wine 11 consumer (exit 0). No product consumer yet.
 - **M02.05 done (2026-11-13 session).** Transactions and revision
   tracking (`docs/m02-05-transactions.md`): backend-free `src/core/txn`
   — `Doc` (chunk store + tree + transaction-level revision + applied
