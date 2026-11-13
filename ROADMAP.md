@@ -31,7 +31,7 @@ stubs, validation actually run, platform claims recorded honestly.
 | M00 | Specification, feasibility spikes, build baseline  | —              | —           | Done        |
 | M01 | Application shell, platform layer, compiled config | M00            | Alpha A     | **Done**    |
 | M02 | Rope, transactions, anchors, headless core         | M01            | Alpha A     | **Done**    |
-| M03 | File loading, codecs, safe save, external changes  | M02            | Alpha A     | Not started |
+| M03 | File loading, codecs, safe save, external changes  | M02            | Alpha A     | In progress |
 | M04 | Recovery journals, persistent history, shutdown    | M03            | Alpha A     | Not started |
 | M05 | Unicode text renderer, fonts, DPI                  | M02 (+M03/M04) | Alpha A     | Not started |
 | M06 | Editing input, shortcuts, clipboard, indentation   | M04, M05       | Alpha A     | Not started |
@@ -310,7 +310,7 @@ real-Windows validation remain the recorded follow-ups).
 benchmarks close the test matrix; real-desktop/real-Windows validation
 remain the standing M01/D-02 follow-ups).
 **Depends on:** M01
-**Next task:** — (milestone complete; next is M03.02)
+**Next task:** — (milestone complete; next is M03.03)
 
 - [x] M02.01 Implement immutable backing chunks.
 - [x] M02.02 Implement leaves, metrics, and range iteration.
@@ -455,11 +455,13 @@ remain the standing M01/D-02 follow-ups).
 
 ## M03 — File loading, codecs, safe save, and external changes
 
-**Status:** Active (M03.02 is the current task)
+**Status:** Active (M03.03 is the current task)
 **Depends on:** M02
+**Next task:** M03.03 — UTF-8/BOM/newline policy (SPECS.md §7.4);
+see NEXT.md for scope and acceptance.
 
 - [x] M03.01 Implement canonical file identity.
-- [ ] M03.02 Implement background chunked loading.
+- [x] M03.02 Implement background chunked loading.
 - [ ] M03.03 Implement UTF-8/BOM/newline policy.
 - [ ] M03.04 Implement explicit unsupported/invalid encoding behavior.
 - [ ] M03.05 Implement temporary-write/replace save.
@@ -468,6 +470,42 @@ remain the standing M01/D-02 follow-ups).
 
 ### Notes
 
+- **M03.02 done (2026-11-13 session).** Background chunked loading
+  (`docs/m03-02-fileload.md`): the read/capture adapter feeding
+  `src/core/fileid` from real files and loading content chunked into
+  the M02 chunk store on a worker, with the `File_ID`/`File_Stamp`
+  captured at load time (SPECS.md §6.4, §7.5, §11.1 step 2, §4.2–§4.4).
+  New `src/core/fileload`: `Capture` + `capture_file` (handle-based
+  fstat — Unix statx st_dev/st_ino, Windows
+  `GetFileInformationByHandle`; `.None` on the inode-0/file-index-0
+  conventions; the mtime split floors negative times; negative size
+  `.Invalid_Input`), `load_file` (open → capture → chunked reads
+  interned via `chunk.intern` → re-fstat the same handle and require
+  `stamp_equal`, else `.Conflict` with the partial load discarded —
+  all-or-nothing; regular files only; O_NONBLOCK open on Linux so a
+  FIFO cannot block; a `cancel` flag aborts between chunks), and
+  `Loader` (one worker thread, fixed-capacity 4/4 bounded queues, a
+  thread-safe growing arena owning every request copy/result/store,
+  sticky cancel/resume, close-drains, destroy joins+frees without
+  deadlocking against backpressure; results echo the §4.3 request_id
+  + worker tid). 19 new tests (`tests/unit/fileload`) incl. capture
+  vs an independently built `os.stat` stamp, `.None` conventions,
+  mtime-split boundaries, chunked round-trips, repeated-chunk
+  interning, empty files, error paths, upfront cancel, two
+  concurrent-writer property tests (atomic temp+rename flips must
+  yield one complete state; in-place truncate+write must yield a
+  complete state or the legitimate momentary empty snapshot, else
+  `.Conflict`), and loader tests (backgroundness, id echo + FIFO,
+  cancel/resume, close-drains, mid-load cancel on a 64 MiB fixture,
+  destroy discarding, destroy of a never-started loader). Validated
+  19/19 leak-free ×20 (+ single-threaded), full suite 142 tests
+  clean, debug/release builds, Xvfb release smoke, `-no-crt` Windows
+  cross-build + Wine 11 consumer (capture, `.None` conventions,
+  validation error path, chunked load round-trip with stamp match,
+  the worker loader — exit 0). No product consumer yet (M06/M07 wire
+  buffer open; M03.06 reuses `capture_file` for conflict detection).
+  Deferred to the M03.06 slice: canonical path resolution and volume
+  case-sensitivity probing.
 - **M03.01 done (2026-11-13 session).** Canonical file identity
   (`docs/m03-01-fileid.md`): backend-free `src/core/fileid` — `File_ID`
   (kind + hi/lo: Unix st_dev/st_ino, Windows zero-extended volume

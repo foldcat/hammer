@@ -3,17 +3,18 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M03.02 — Background chunked loading
+## Current task: M03.03 — UTF-8/BOM/newline policy
 
-M03.01 is done (canonical file identity — see below). M03.02 is active
-(SPECS.md §18): the read/capture adapter that stats real files into
-`src/core/fileid` values (Unix dev/ino, Windows
-`BY_HANDLE_FILE_INFORMATION`, `.None` on the documented conventions)
-and loads content chunked into the M02 chunk store on a worker, with
-the `File_ID`/`File_Stamp` captured at load time (the §11.1 step 2
-checkpoint). Read `docs/m03-01-fileid.md` first: the model, the `.None`
-canonical-value rule, the best-effort version fallback, and the pinned
-differentials define the contract the adapter must feed.
+M03.02 is done (background chunked loading — see below). M03.03 is
+active (SPECS.md §7.4): the codec metadata and validation layer over
+the M03.02 `Loaded` content — preserve LF/CRLF rather than silently
+normalizing, retain original encoding/BOM policy in file metadata,
+define the unsupported/invalid-encoding behavior (invalid UTF-8 must
+never be silently replaced and then saved destructively; unsupported
+encodings open read-only until conversion is chosen). The M02.02
+chunk-store scalar-counting contract (m02-02-leaves.md trap 5) is
+the line M03.03 must stay consistent with. M03.04 (explicit
+unsupported/invalid-encoding behavior) follows.
 
 Required reading for new code in `src/`: the traps in
 `docs/m01-02-config.md` §Traps, `docs/m01-03-coords.md` §Traps,
@@ -22,13 +23,65 @@ Required reading for new code in `src/`: the traps in
 `docs/m02-02-leaves.md` §Traps, `docs/m02-03-tree.md` §Traps,
 `docs/m02-04-coords.md` §Traps, `docs/m02-05-transactions.md` §Traps,
 `docs/m02-06-anchors.md` §Traps, `docs/m02-07-undo.md` §Traps,
-`docs/m02-08-benchmarks.md` §Traps, and `docs/m03-01-fileid.md`
-§Traps (never copy a Doc/Tree/Store; reference models replay the
-applied order; empty-range replace is a pure insert; no local type
-declarations; no `core:map`; a no-op apply creates no node; `make`
-with a length pre-fills; `delete` on a `[]byte` goes through
-`context.allocator`; `odin test pkg1 pkg2` runs only the first
-package; xorshift64 seeds, no flakes).
+`docs/m02-08-benchmarks.md` §Traps, `docs/m03-01-fileid.md`
+§Traps, and `docs/m03-02-fileload.md` §Traps (never copy a
+Doc/Tree/Store; reference models replay the applied order;
+empty-range replace is a pure insert; no local type declarations; no
+`core:map`; a no-op apply creates no node; `make` with a length
+pre-fills; `delete` on a `[]byte` goes through `context.allocator`;
+`odin test pkg1 pkg2` runs only the first package; xorshift64 seeds,
+no flakes; `.Non_Blocking` breaks Windows `os.read`; `time.Time` is a
+struct — `time.to_unix_nanoseconds`; a `defer` in a scope ending in a
+diverging call is rejected; `os.write_entire_file` truncates before
+writing — use temp+rename for atomic-replace invariants).
+
+## M03.02 done (2026-11-13 session)
+
+Background chunked loading (`docs/m03-02-fileload.md`) — the
+read/capture adapter feeding `src/core/fileid` from real files and
+loading content chunked into the M02 chunk store on a worker, with
+the `File_ID`/`File_Stamp` captured at load time (SPECS.md §6.4,
+§7.5, §11.1 step 2, §4.2–§4.4):
+
+- New `src/core/fileload`: `Capture` (id + stamp, the §11.1 step 2
+  checkpoint) via `capture_file` (handle-based fstat — Unix
+  st_dev/st_ino through statx, Windows volume serial / 64-bit file
+  index through `GetFileInformationByHandle`; `.None` on the
+  m03-01-fileid.md conventions; negative-size `.Invalid_Input`; the
+  mtime split floors negative times); `load_file` (open → capture →
+  read in `chunk_size` chunks → `chunk.intern` → re-fstat and require
+  `stamp_equal`, else `.Conflict` with the partial load discarded —
+  all-or-nothing; regular files only; a `cancel` flag aborts between
+  chunks); and `Loader` (one worker thread, fixed-capacity 4/4
+  bounded queues, a thread-safe growing arena owning every request
+  copy/result/store, sticky `loader_cancel`/`loader_resume`,
+  `loader_close` drains, `loader_destroy` joins and frees without
+  deadlocking against result backpressure). Results echo the §4.3
+  request_id plus the worker thread id; the remaining §4.3 fields
+  attach with the buffer registry.
+- `tests/unit/fileload` added (19 tests): capture vs an independently
+  built `os.stat` stamp, `.None` conventions, mtime-split boundaries,
+  multi-chunk multibyte/CRLF round-trips, repeated-chunk interning,
+  empty files, error paths, upfront cancel, two concurrent-writer
+  property tests (atomic temp+rename flips — success must equal one
+  complete state; in-place truncate+write — success must be a
+  complete state or the legitimate momentary empty state, else
+  `.Conflict`), and loader tests (backgroundness, id echo + FIFO,
+  cancel/resume, close-drains, mid-load cancel on a 64 MiB fixture,
+  destroy discarding unconsumed results, destroy of a never-started
+  loader). The first property draft
+  caught that a truncate-then-write writer momentarily empties the
+  file — a 0-byte success is a *valid* snapshot; the test now pins
+  that explicitly.
+- Validated: 19/19 fileload tests leak-free (×20 flake loop, no
+  flake; also single-threaded); full suite via `odin run make.odin
+  -file -- test` (142 tests, all 14 test-bearing packages clean);
+  debug/release builds; Xvfb release smoke (exit 0, no PANIC/ERROR);
+  `-no-crt` Windows cross-build of a throwaway consumer + Wine 11 run
+  (capture, `.None` conventions, validation error path, chunked load
+  round-trip with stamp match, the worker loader — exit 0). No
+  product consumer yet (M06/M07 wire buffer open; M03.06 reuses
+  `capture_file` for conflict detection).
 
 ## M03.01 done (2026-11-13 session)
 
