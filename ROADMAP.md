@@ -308,19 +308,34 @@ real-Windows validation remain the recorded follow-ups).
 
 **Status:** Active
 **Depends on:** M01
-**Next task:** M02.05
+**Next task:** M02.06
 
 - [x] M02.01 Implement immutable backing chunks.
 - [x] M02.02 Implement leaves, metrics, and range iteration.
 - [x] M02.03 Implement balancing and persistent root updates.
 - [x] M02.04 Implement coordinate conversion.
-- [ ] M02.05 Implement transactions and revision tracking.
+- [x] M02.05 Implement transactions and revision tracking.
 - [ ] M02.06 Implement anchor transformation.
 - [ ] M02.07 Implement branching in-memory undo.
 - [ ] M02.08 Add randomized differential tests and benchmarks.
 
 ### Notes
 
+- **M02.05 done (2026-11-13 session).** Transactions and revision
+  tracking (`docs/m02-05-transactions.md`): backend-free `src/core/txn`
+  — `Doc` (chunk store + tree + transaction-level revision + applied
+  log) with `doc_apply` as the only mutation path. `Transaction`
+  (id/source/base_revision/grouping_key) with Insert/Delete/Replace
+  ops in base-snapshot coordinates, validated and applied in
+  deterministic descending order; stale bases are `.Conflict` with no
+  mutation; failed applies roll back the root (all-or-nothing). The
+  log records every transaction with before/after roots + an owned op
+  copy (M02.06 anchors, M02.07 undo substrate); `doc_check` validates
+  the log chain. 6 new tests incl. a 400-step differential with stale
+  probes and a fixed-arena rollback test. Validated 6/6 leak-free
+  ×10, full suite 95 tests clean, debug/release builds, Xvfb release
+  smoke, `-no-crt` Windows cross-build + Wine 11 consumer (multi-op
+  txn, stale conflict, exit 0). No product consumer yet.
 - **M02.04 done (2026-11-13 session).** Coordinate conversion
   (`docs/m02-04-coords.md`): `coord.odin` in `src/core/rope` —
   distinct `Scalar_Index`/`Line_Index`/`Column_Index` types, a shared
