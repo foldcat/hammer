@@ -3,15 +3,17 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M03.01 — Canonical file identity
+## Current task: M03.02 — Background chunked loading
 
-M02 is done (M02.08 closed the milestone's test matrix — see below).
-M03 (SPECS.md §18) is active: canonical file identity first
-(device/inode or platform file-id plus version-validated identity for
-external-change detection), headless core (SPECS.md §4.2), unit-tested
-per the established differential discipline. This begins the M03 file
-milestone; no file I/O architecture exists yet, so the identity model
-and its validation are the complete slice.
+M03.01 is done (canonical file identity — see below). M03.02 is active
+(SPECS.md §18): the read/capture adapter that stats real files into
+`src/core/fileid` values (Unix dev/ino, Windows
+`BY_HANDLE_FILE_INFORMATION`, `.None` on the documented conventions)
+and loads content chunked into the M02 chunk store on a worker, with
+the `File_ID`/`File_Stamp` captured at load time (the §11.1 step 2
+checkpoint). Read `docs/m03-01-fileid.md` first: the model, the `.None`
+canonical-value rule, the best-effort version fallback, and the pinned
+differentials define the contract the adapter must feed.
 
 Required reading for new code in `src/`: the traps in
 `docs/m01-02-config.md` §Traps, `docs/m01-03-coords.md` §Traps,
@@ -19,13 +21,47 @@ Required reading for new code in `src/`: the traps in
 `docs/m01-06-render.md` §Traps, `docs/m02-01-chunks.md` §Traps,
 `docs/m02-02-leaves.md` §Traps, `docs/m02-03-tree.md` §Traps,
 `docs/m02-04-coords.md` §Traps, `docs/m02-05-transactions.md` §Traps,
-`docs/m02-06-anchors.md` §Traps, `docs/m02-07-undo.md` §Traps, and
-`docs/m02-08-benchmarks.md` §Traps (never copy a Doc/Tree/Store;
-reference models replay the applied order; empty-range replace is a
-pure insert; no local type declarations; no `core:map`; a no-op apply
-creates no node; `make` with a length pre-fills; `delete` on a
-`[]byte` goes through `context.allocator`; `odin test pkg1 pkg2` runs
-only the first package; xorshift64 seeds, no flakes).
+`docs/m02-06-anchors.md` §Traps, `docs/m02-07-undo.md` §Traps,
+`docs/m02-08-benchmarks.md` §Traps, and `docs/m03-01-fileid.md`
+§Traps (never copy a Doc/Tree/Store; reference models replay the
+applied order; empty-range replace is a pure insert; no local type
+declarations; no `core:map`; a no-op apply creates no node; `make`
+with a length pre-fills; `delete` on a `[]byte` goes through
+`context.allocator`; `odin test pkg1 pkg2` runs only the first
+package; xorshift64 seeds, no flakes).
+
+## M03.01 done (2026-11-13 session)
+
+Canonical file identity (`docs/m03-01-fileid.md`) — the SPECS.md §6.4
+identity model and its validation as the M03 foundation:
+
+- New backend-free `src/core/fileid`: `File_ID` (kind + hi/lo:
+  Unix st_dev/st_ino, Windows zero-extended volume serial / 64-bit
+  file index; `.None` is one canonical value — inode 0 and file index
+  0 map to it, hi/lo ignored, never a dedup key), `id_equal` +
+  `id_cmp` (total order, cmp == 0 iff equal), `File_Stamp`
+  (version-validated identity: id + size + mtime, `make_stamp`
+  validates only nsec — size/mtime pass through, negative mtimes
+  valid), `stamp_status` (Unchanged/Changed/Replaced: identity
+  difference → Replaced incl. cross-kind; either id `.None` →
+  size+mtime best effort, never Replaced), `stamp_equal`, and the
+  §6.4 `Case_Sensitivity`/`Symlink_Policy` tracked attributes. No
+  file I/O — the stat/path adapters land with M03.02/M03.06.
+- `tests/unit/fileid` added (8 tests): constructor mapping (incl.
+  zero-dev/zero-serial non-invalidation), equality/order hand cases,
+  stamp validation error paths, the full status decision table, and
+  two seeded differentials (250-id order vs an independent array-key
+  reference with antisymmetry + cmp/equal agreement + transitivity;
+  1200-draw status vs an independently structured reference policy
+  with reflexivity/symmetry/all-class coverage).
+- Validated: 8/8 fileid tests leak-free (×10, no flake; also
+  single-threaded); full suite via `odin run make.odin -file -- test`
+  (123 tests, all 13 test-bearing packages clean); debug/release
+  builds; Xvfb release smoke (exit 0, no PANIC/ERROR); `-no-crt`
+  Windows cross-build of a throwaway consumer + Wine 11 run
+  (constructors, none mapping, validation error path, all three
+  status classes, exit 0). No product consumer yet (M03.02 wires the
+  capture adapter).
 
 ## M02.08 done (2026-11-13 session) — M02 complete
 

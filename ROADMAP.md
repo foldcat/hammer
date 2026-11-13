@@ -310,7 +310,7 @@ real-Windows validation remain the recorded follow-ups).
 benchmarks close the test matrix; real-desktop/real-Windows validation
 remain the standing M01/D-02 follow-ups).
 **Depends on:** M01
-**Next task:** — (milestone complete; next is M03.01)
+**Next task:** — (milestone complete; next is M03.02)
 
 - [x] M02.01 Implement immutable backing chunks.
 - [x] M02.02 Implement leaves, metrics, and range iteration.
@@ -455,16 +455,41 @@ remain the standing M01/D-02 follow-ups).
 
 ## M03 — File loading, codecs, safe save, and external changes
 
-**Status:** Active (M03.01 is the current task)
+**Status:** Active (M03.02 is the current task)
 **Depends on:** M02
 
-- [ ] M03.01 Implement canonical file identity.
+- [x] M03.01 Implement canonical file identity.
 - [ ] M03.02 Implement background chunked loading.
 - [ ] M03.03 Implement UTF-8/BOM/newline policy.
 - [ ] M03.04 Implement explicit unsupported/invalid encoding behavior.
 - [ ] M03.05 Implement temporary-write/replace save.
 - [ ] M03.06 Implement disk-change conflict detection.
 - [ ] M03.07 Add failure-injection tests for save.
+
+### Notes
+
+- **M03.01 done (2026-11-13 session).** Canonical file identity
+  (`docs/m03-01-fileid.md`): backend-free `src/core/fileid` — `File_ID`
+  (kind + hi/lo: Unix st_dev/st_ino, Windows zero-extended volume
+  serial / 64-bit file index; `.None` as one canonical value: inode 0
+  and file index 0 map to it, hi/lo ignored in every comparison, never
+  a dedup key), `id_equal` + total-order `id_cmp` (cmp == 0 iff
+  equal), version-validated `File_Stamp` (id + size + mtime,
+  `make_stamp` validates only nsec — size/mtime pass through
+  unconstrained), `stamp_status` (Unchanged/Changed/Replaced:
+  identity difference → Replaced incl. cross-kind; either id `.None`
+  → size+mtime best effort, never Replaced), `stamp_equal`, and the
+  §6.4 `Case_Sensitivity`/`Symlink_Policy` tracked attributes. No file
+  I/O: the stat/path capture adapters land with M03.02/M03.06. 8 new
+  tests (`tests/unit/fileid`) incl. two seeded differentials (250-id
+  order vs an independent array-key reference with antisymmetry +
+  cmp/equal agreement + transitivity; 1200-draw status vs an
+  independently structured reference policy with reflexivity +
+  symmetry + all-class coverage). Validated 8/8 leak-free ×10
+  (+ single-threaded), full suite 123 tests clean, debug/release
+  builds, Xvfb release smoke, `-no-crt` Windows cross-build + Wine 11
+  consumer (constructors, none mapping, validation error path, all
+  three status classes, exit 0). No product consumer yet (M03.02).
 
 ## M04 — Recovery journals, persistent history foundation, and shutdown guard
 
