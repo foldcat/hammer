@@ -570,6 +570,7 @@ see NEXT.md for scope and acceptance.
 - [ ] M06.06 Implement multiline indent/outdent transaction.
 - [ ] M06.07 Implement IME preedit/commit handling.
 - [ ] M06.08 Add clipboard interoperability tests.
+- [ ] M06.09 Implement parenthesis/bracket/quote autopair policy.
 
 ## M07 — Acme columns, windows, tags, mouse workflow, and lookup
 
