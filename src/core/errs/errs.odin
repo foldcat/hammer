@@ -25,6 +25,7 @@ Kind :: enum {
 	Unsupported, // valid request, feature not available here
 	IO, // file / platform I/O failure
 	Conflict, // revision or external-modification conflict
+	NotFound, // a requested state or history node does not exist (undo at the initial state, ...)
 	Cancelled, // asynchronous work was cancelled
 	Resource_Limit, // a budget (queue, size, count) was exceeded
 	Internal, // invariant violation that is not fatal; log and carry
@@ -107,6 +108,8 @@ kind_name :: proc(kind: Kind) -> string {
 		return "I/O failure"
 	case .Conflict:
 		return "conflict"
+	case .NotFound:
+		return "not found"
 	case .Cancelled:
 		return "cancelled"
 	case .Resource_Limit:

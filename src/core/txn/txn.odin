@@ -1,4 +1,5 @@
-// Package txn: transactions and revision tracking (M02.05).
+// Package txn: transactions, revision tracking, anchors, and the
+// branching in-memory undo tree (M02.05–M02.07).
 //
 // The transaction layer over the persistent rope (SPECS.md §8.1):
 // every edit to a document goes through a transaction — typing, paste,
@@ -12,11 +13,16 @@
 // Contracts:
 //
 // - **Revisions.** `doc.revision` (u64, starts at 0 for the empty
-//   document) bumps exactly once per applied transaction, regardless
-//   of how many operations it contains. It is the buffer revision for
-//   stale-rejection and background-result validation (SPECS.md §4.3).
-//   The tree's own `revision` field counts internal mutations and is
-//   not the buffer revision.
+//   initial state) identifies the current history state. It is the
+//   buffer revision for stale-rejection and background-result
+//   validation (SPECS.md §4.3). Applied transactions draw their
+//   `after` revision from a global counter (`doc.next_revision`), so
+//   revision values are unique across the whole history tree even
+//   though they are not dense: undo back to a state and applying a
+//   new edit produces `base = <old revision>, after = <next global
+//   revision>`, skipping the abandoned branch's values. The tree's
+//   own `revision` field counts internal mutations and is not the
+//   buffer revision.
 // - **Stale rejection.** A transaction whose `base_revision` does not
 //   match the current revision is rejected with `.Conflict` and
 //   changes nothing — the revisioned-result contract (SPECS.md §4.3):
@@ -30,18 +36,24 @@
 //   stays valid while applying. The log stores the operations in this
 //   applied order.
 // - **Atomicity.** Validation failures reject the whole transaction
-//   before any mutation. If an operation fails mid-apply (allocation
-//   failure), the root is restored to its pre-transaction value — the
-//   persistent tree makes rollback a pointer reset; the orphaned nodes
-//   and any interned chunks are retained (content-addressed, safe).
-// - **The log.** Every applied transaction is recorded (id, source,
-//   base/after revision, grouping key, before/after roots, and an
-//   owned deep copy of the operations). Roots stay valid forever
-//   (M02.03 persistence), so M02.06 anchor transformation and M02.07
-//   undo build on the log; retention/pruning is M02.07/M04's concern.
-// - **Ownership.** The log, its operation copies, and error messages
-//   use the caller-provided allocators; `doc_destroy` releases them,
-//   then the tree and the chunk store.
+//   before any mutation. If a step fails mid-apply (allocation
+//   failure), the root is restored to its pre-transaction value and no
+//   counter, log entry, or child link changes — the persistent tree
+//   makes rollback a pointer reset; the orphaned nodes and any
+//   interned chunks are retained (content-addressed, safe).
+// - **The log is the undo tree** (SPECS.md §8.4). Every applied
+//   transaction is recorded as a node: parent/child ids, transaction
+//   metadata, timestamp, before/after roots, before/after selection
+//   state, and an owned deep copy of the operations, in apply order
+//   (`doc.log[i].id == i + 1`). Roots stay valid forever (M02.03
+//   persistence), so `undo`/`redo` (see undo.odin) jump between
+//   states by reassigning the root pointer, and anchor transformation
+//   replays the current path. Undo followed by a new edit appends a
+//   *sibling* node instead of destroying the abandoned branch. The log
+//   is never pruned in M02 (retention/pruning is M04/M14's concern).
+// - **Ownership.** The log (with its operation copies and child-id
+//   arrays) and error messages use the caller-provided allocators;
+//   `doc_destroy` releases them, then the tree and the chunk store.
 //
 // Backend-free: imports only `core:` packages plus `core/chunk`,
 // `core/rope`, and `core/errs` — no Sokol collection (SPECS.md
@@ -49,6 +61,7 @@
 package txn
 
 import "core:mem"
+import "core:time"
 
 import chunk "../chunk"
 import errs "../errs"
@@ -101,26 +114,39 @@ Operation :: union {
 // Transaction is a batch of non-overlapping edits computed against the
 // document state at `base_revision`. `ops` is borrowed for the apply
 // call (the log stores its own copy); `id` is assigned by `doc_apply`
-// (0 before).
+// (0 before). `after_selection` is the selection state the edit leaves
+// (recorded on the undo node; M06 owns selection semantics — the txn
+// layer only validates bounds and records it).
 Transaction :: struct {
-	id:            Transaction_ID,
-	source:        Source,
-	base_revision: u64,
-	grouping_key:  u64,
-	ops:           []Operation,
+	id:              Transaction_ID,
+	source:          Source,
+	base_revision:   u64,
+	grouping_key:    u64,
+	ops:             []Operation,
+	after_selection: Selection,
 }
 
-// Log_Entry is one recorded transaction: the applied (sorted)
-// operations plus the before/after roots for undo and snapshot reads.
+// Log_Entry is one recorded transaction and one node of the undo tree
+// (SPECS.md §8.4): the applied (sorted) operations, the before/after
+// roots for undo and snapshot reads, the parent/child links, the
+// timestamp, and the selection state before and after the edit.
+// Entries live in apply order (`doc.log[i].id == i + 1`); `parent`
+// and the `children` ids are Transaction_IDs, 0 meaning the initial
+// state (which has no entry).
 Log_Entry :: struct {
-	id:           Transaction_ID,
-	source:       Source,
-	base:         u64,
-	after:        u64,
-	grouping_key: u64,
-	before_root:  ^rope.Node,
-	after_root:   ^rope.Node,
-	ops:          []Operation, // owned deep copy, applied order
+	id:               Transaction_ID,
+	source:           Source,
+	base:             u64,
+	after:            u64,
+	grouping_key:     u64,
+	parent:           Transaction_ID,
+	children:         [dynamic]Transaction_ID, // apply order; last = most recent
+	timestamp:        time.Time,
+	before_root:      ^rope.Node,
+	after_root:       ^rope.Node,
+	before_selection: Selection,
+	after_selection:  Selection,
+	ops:              []Operation, // owned deep copy, applied order
 }
 
 // Options configures a Doc at init.
@@ -133,15 +159,19 @@ Options :: struct {
 	target_leaf_bytes: int,
 }
 
-// Doc is a document: text (chunk store + persistent tree), a
-// transaction-level revision, and the applied-transaction log. Treat
-// it as a fixed-location value — pass by pointer.
+// Doc is a document: text (chunk store + persistent tree), the current
+// undo-tree position, a transaction-level revision, and the applied
+// log (the undo tree's node array). Treat it as a fixed-location value
+// — pass by pointer, never copy it (duplicating the dynamic-array
+// headers and the tree pool corrupts state).
 Doc :: struct {
-	store:    chunk.Store,
-	tree:     rope.Tree,
-	revision: u64,
-	next_id:  u64,
-	log:      [dynamic]Log_Entry,
+	store:        chunk.Store,
+	tree:         rope.Tree,
+	revision:     u64, // the current node's `after` (0 = initial state)
+	current:      Transaction_ID, // current undo-tree node; 0 = initial state
+	next_id:      u64, // next Transaction_ID to assign
+	next_revision: u64, // global revision counter (see the package doc)
+	log:          [dynamic]Log_Entry, // every applied transaction, apply order
 }
 
 // doc_init prepares an empty document. The allocator backs the log and
@@ -166,16 +196,19 @@ doc_init :: proc(
 		return ierr
 	}
 	doc.revision = 0
+	doc.current = 0
 	doc.next_id = 1
+	doc.next_revision = 1
 	doc.log = make([dynamic]Log_Entry, allocator)
 	return {}
 }
 
 // doc_destroy releases the document: the log (with its operation
-// copies), the tree, and the chunk store.
+// copies and child-id arrays), the tree, and the chunk store.
 doc_destroy :: proc(doc: ^Doc) {
 	for &entry in doc.log {
 		ops_destroy(entry.ops)
+		delete(entry.children)
 	}
 	delete(doc.log)
 	rope.tree_destroy(&doc.tree)
@@ -194,7 +227,7 @@ doc_log_len :: proc(doc: ^Doc) -> int {
 }
 
 // doc_apply validates `txn` against the current revision and applies
-// its operations.
+// its operations, appending one undo-tree node to the log.
 //
 // - `txn.base_revision` must equal the current revision, or the
 //   transaction is rejected with `.Conflict` and nothing changes.
@@ -202,12 +235,18 @@ doc_log_len :: proc(doc: ^Doc) -> int {
 //   overlapping ranges, no duplicate insert positions; `.Invalid_Input`
 //   violations reject the whole transaction) and applied in
 //   deterministic descending order.
+// - `txn.after_selection` must lie within [0, byte_count] of the
+//   post-edit document (`.Invalid_Input` otherwise).
 // - A transaction with no operations (or only empty inserts) is a
 //   no-op: no revision bump, no log entry.
-// - On success `txn.id` is assigned, the revision bumps by one, and
-//   the log records the transaction.
-// - On a mid-apply allocation failure the pre-transaction root is
-//   restored (`.Resource_Limit`).
+// - On success `txn.id` is assigned, the new node's `after` revision
+//   comes from the global counter, the node is linked under the
+//   current node (or the initial state), and the current state moves
+//   to the new node. Applying after an undo creates a sibling node;
+//   the abandoned branch is retained (SPECS.md §8.4).
+// - On a mid-apply failure (allocation or selection validation) the
+//   pre-transaction root is restored and no counter, log entry, or
+//   child link changes (`.Resource_Limit` / `.Invalid_Input`).
 doc_apply :: proc(
 	doc: ^Doc,
 	txn: ^Transaction,
@@ -262,7 +301,12 @@ doc_apply :: proc(
 		return {}
 	}
 
+	parent := doc.current
 	before_root := doc.tree.root
+	before_selection := Selection{}
+	if parent != 0 {
+		before_selection = doc.log[parent - 1].after_selection
+	}
 
 	// Apply in order; restore the root on any failure.
 	for op in sorted {
@@ -299,25 +343,35 @@ doc_apply :: proc(
 		}
 	}
 
-	doc.revision += 1
+	// The selection must describe the post-edit document.
+	total := rope.tree_byte_count(&doc.tree)
+	if !selection_in_bounds(txn.after_selection, total) {
+		doc.tree.root = before_root
+		return errs.newf(
+			.Invalid_Input,
+			"txn: after_selection [%v, %v] outside [0, %v]",
+			txn.after_selection.anchor,
+			txn.after_selection.active,
+			total,
+			allocator = allocator,
+		)
+	}
+
+	// Peek the id and revision; the counters bump only on full success.
+	after := doc.next_revision
 	txn.id = Transaction_ID(doc.next_id)
-	doc.next_id += 1
 
 	copied, cerr := ops_copy(sorted[:], allocator)
 	if !errs.ok(cerr) {
 		// The edit is applied but the log copy failed: roll the
 		// document back so the apply stays all-or-nothing.
 		doc.tree.root = before_root
-		doc.revision -= 1
-		doc.next_id -= 1
 		txn.id = 0
 		return cerr
 	}
 	if aerr := reserve(&doc.log, len(doc.log) + 1); aerr != .None {
 		ops_destroy(copied)
 		doc.tree.root = before_root
-		doc.revision -= 1
-		doc.next_id -= 1
 		txn.id = 0
 		return errs.newf(
 			.Resource_Limit,
@@ -326,26 +380,53 @@ doc_apply :: proc(
 			allocator = allocator,
 		)
 	}
+	if parent != 0 {
+		if aerr := reserve(&doc.log[parent - 1].children, len(doc.log[parent - 1].children) + 1); aerr != .None {
+			ops_destroy(copied)
+			doc.tree.root = before_root
+			txn.id = 0
+			return errs.newf(
+				.Resource_Limit,
+				"txn: growing the child list of node %v failed: %v",
+				parent,
+				aerr,
+				allocator = allocator,
+			)
+		}
+	}
+
 	append(&doc.log, Log_Entry {
 		id = txn.id,
 		source = txn.source,
 		base = txn.base_revision,
-		after = doc.revision,
+		after = after,
 		grouping_key = txn.grouping_key,
+		parent = parent,
+		timestamp = time.now(),
 		before_root = before_root,
 		after_root = doc.tree.root,
+		before_selection = before_selection,
+		after_selection = txn.after_selection,
 		ops = copied,
 	})
+	if parent != 0 {
+		append(&doc.log[parent - 1].children, txn.id)
+	}
+	doc.current = txn.id
+	doc.revision = after
+	doc.next_id += 1
+	doc.next_revision += 1
 	return {}
 }
 
-// doc_check validates the document: tree invariants plus the log
-// chain (unique ids, base/after revisions chaining from 0).
+// doc_check validates the document: tree invariants plus the undo-tree
+// structure (dense ids in apply order, strictly increasing global
+// revisions, parent/child symmetry, base revisions and before-roots
+// matching the parent, the current state matching the tree root).
 doc_check :: proc(doc: ^Doc, allocator := context.allocator) -> errs.Error {
 	if cerr := rope.tree_check(&doc.tree, allocator); !errs.ok(cerr) {
 		return cerr
 	}
-	base := u64(0)
 	for entry, i in doc.log {
 		if entry.id != Transaction_ID(i + 1) {
 			return errs.newf(
@@ -356,41 +437,200 @@ doc_check :: proc(doc: ^Doc, allocator := context.allocator) -> errs.Error {
 				allocator = allocator,
 			)
 		}
-		if entry.base != base {
+		if entry.after <= entry.base {
 			return errs.newf(
 				.Internal,
-				"txn: log entry %v has base %v, expected %v",
-				i,
-				entry.base,
-				base,
-				allocator = allocator,
-			)
-		}
-		if entry.after != entry.base + 1 {
-			return errs.newf(
-				.Internal,
-				"txn: log entry %v jumps %v -> %v",
+				"txn: log entry %v does not advance %v -> %v",
 				i,
 				entry.base,
 				entry.after,
 				allocator = allocator,
 			)
 		}
+		if i > 0 && entry.after <= doc.log[i - 1].after {
+			return errs.newf(
+				.Internal,
+				"txn: log entry %v revision %v is not strictly increasing",
+				i,
+				entry.after,
+				allocator = allocator,
+			)
+		}
+		if entry.parent == 0 {
+			if entry.base != 0 {
+				return errs.newf(
+					.Internal,
+					"txn: root child %v has base %v, expected 0",
+					entry.id,
+					entry.base,
+					allocator = allocator,
+				)
+			}
+		} else {
+			if entry.parent >= entry.id {
+				return errs.newf(
+					.Internal,
+					"txn: log entry %v has parent %v, which does not precede it",
+					entry.id,
+					entry.parent,
+					allocator = allocator,
+				)
+			}
+			p := doc.log[entry.parent - 1]
+			if entry.base != p.after {
+				return errs.newf(
+					.Internal,
+					"txn: log entry %v has base %v, expected the parent's revision %v",
+					entry.id,
+					entry.base,
+					p.after,
+					allocator = allocator,
+				)
+			}
+			if entry.before_root != p.after_root {
+				return errs.newf(
+					.Internal,
+					"txn: log entry %v before_root does not match parent %v's after_root",
+					entry.id,
+					entry.parent,
+					allocator = allocator,
+				)
+			}
+			if entry.before_selection != p.after_selection {
+				return errs.newf(
+					.Internal,
+					"txn: log entry %v before_selection does not match parent %v's after_selection",
+					entry.id,
+					entry.parent,
+					allocator = allocator,
+				)
+			}
+			if !children_contains(doc, entry.parent, entry.id) {
+				return errs.newf(
+					.Internal,
+					"txn: parent %v's child list does not contain %v",
+					entry.parent,
+					entry.id,
+					allocator = allocator,
+				)
+			}
+		}
 		// Nil roots are legitimate: the document may be empty before
 		// the first transaction or after a delete-everything one (the
 		// snapshot-roots test verifies root contents separately).
-		base = entry.after
+		for child, j in entry.children {
+			if child <= entry.id || child > Transaction_ID(len(doc.log)) {
+				return errs.newf(
+					.Internal,
+					"txn: node %v child list entry %v has invalid id %v",
+					entry.id,
+					j,
+					child,
+					allocator = allocator,
+				)
+			}
+			if j > 0 && entry.children[j - 1] >= child {
+				return errs.newf(
+					.Internal,
+					"txn: node %v child list is not strictly increasing",
+					entry.id,
+					allocator = allocator,
+				)
+			}
+			if doc.log[child - 1].parent != entry.id {
+				return errs.newf(
+					.Internal,
+					"txn: node %v lists child %v, which points at parent %v",
+					entry.id,
+					child,
+					doc.log[child - 1].parent,
+					allocator = allocator,
+				)
+			}
+		}
 	}
-	if base != doc.revision {
+
+	// The current state: the doc revision and tree root must match the
+	// current node (the initial state is the empty document).
+	if doc.current == 0 {
+		if doc.revision != 0 {
+			return errs.newf(
+				.Internal,
+				"txn: at the initial state but the revision is %v",
+				doc.revision,
+				allocator = allocator,
+			)
+		}
+		if doc.tree.root != nil {
+			return errs.newf(
+				.Internal,
+				"txn: at the initial state but the tree root is not nil",
+				allocator = allocator,
+			)
+		}
+	} else {
+		if doc.current > Transaction_ID(len(doc.log)) {
+			return errs.newf(
+				.Internal,
+				"txn: current node %v does not exist",
+				doc.current,
+				allocator = allocator,
+			)
+		}
+		cur := doc.log[doc.current - 1]
+		if doc.revision != cur.after {
+			return errs.newf(
+				.Internal,
+				"txn: revision %v does not match current node %v's revision %v",
+				doc.revision,
+				doc.current,
+				cur.after,
+				allocator = allocator,
+			)
+		}
+		if doc.tree.root != cur.after_root {
+			return errs.newf(
+				.Internal,
+				"txn: tree root does not match current node %v's after_root",
+				doc.current,
+				allocator = allocator,
+			)
+		}
+	}
+	last_after := u64(0)
+	if len(doc.log) > 0 {
+		last_after = doc.log[len(doc.log) - 1].after
+	}
+	if doc.next_revision != last_after + 1 {
 		return errs.newf(
 			.Internal,
-			"txn: log ends at %v but the document is at %v",
-			base,
-			doc.revision,
+			"txn: next_revision is %v, expected %v",
+			doc.next_revision,
+			last_after + 1,
+			allocator = allocator,
+		)
+	}
+	if doc.next_id != u64(len(doc.log)) + 1 {
+		return errs.newf(
+			.Internal,
+			"txn: next_id is %v, expected %v",
+			doc.next_id,
+			u64(len(doc.log)) + 1,
 			allocator = allocator,
 		)
 	}
 	return {}
+}
+
+// children_contains reports whether `parent`'s child list contains
+// `child`.
+children_contains :: proc(doc: ^Doc, parent, child: Transaction_ID) -> bool {
+	for id in doc.log[parent - 1].children {
+		if id == child {
+			return true
+		}
+	}
+	return false
 }
 
 // validate_ops checks every operation against the base snapshot and

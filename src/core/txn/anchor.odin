@@ -1,12 +1,11 @@
-// Anchor transformation (M02.06), in package txn.
+// Anchor transformation (M02.06, revised M02.07), in package txn.
 //
 // Anchors are stable positions that survive edits (SPECS.md §8.3): a
 // plain integer offset is not enough for delayed clipboard results,
 // asynchronous pipes, IPC clients, layout restoration, or multiple
 // views. An anchor records its byte position, an affinity, and the
 // document revision it was captured at; `anchor_transform` replays
-// the applied transaction log (the M02.05 log, in applied order) to
-// bring it to the current revision.
+// the applied transactions to bring it to the current revision.
 //
 // Affinity semantics (an insertion exactly at the anchor's position):
 //
@@ -23,10 +22,17 @@
 // at the range end stays adjacent to the text that followed the range
 // (it lands after the replacement, regardless of affinity).
 //
-// The transform depends only on operation positions and inserted
-// lengths — the log's operation copies carry both. An anchor captured
-// at any past revision is replayable: the log is never pruned in
-// M02.06 (retention is M02.07/M04's concern).
+// Replay (M02.07): the history is a branching tree, so a revision no
+// longer identifies a unique path. `anchor_transform` replays the
+// current path — the entries below the node whose `after` equals the
+// anchor's revision, in apply order — and stamps the anchor with the
+// current revision. An anchor whose revision lies on an abandoned
+// branch is `.Conflict` (stale; never silently transformed); one ahead
+// of the document is `.Invalid_Input`; one at the current revision is
+// a no-op (idempotent). Revision 0 (the initial state) is always on
+// the path. The transform depends only on operation positions and
+// inserted lengths — the log's operation copies carry both, and the
+// log is never pruned in M02 (retention is M04/M14's concern).
 package txn
 
 import errs "../errs"
@@ -68,13 +74,16 @@ anchor_at :: proc(
 	return Anchor{pos = pos, affinity = affinity, revision = doc.revision}, {}
 }
 
-// anchor_transform replays the applied transactions from the anchor's
-// captured revision up to the document's current revision, updating
-// the anchor in place.
+// anchor_transform replays the current path of the history tree from
+// the anchor's captured revision up to the document's current
+// revision, updating the anchor in place.
 //
 // - An anchor revision ahead of the document is `.Invalid_Input`
 //   (the anchor came from a document state that does not exist here);
 //   an anchor at the current revision is a no-op.
+// - An anchor revision behind the document but not on the current
+//   path (an abandoned branch) is `.Conflict` — transforming it
+//   through unrelated edits would silently fabricate a position.
 // - `anchor.revision` is set to the current revision on success.
 anchor_transform :: proc(doc: ^Doc, anchor: ^Anchor, allocator := context.allocator) -> errs.Error {
 	if anchor.revision > doc.revision {
@@ -89,11 +98,43 @@ anchor_transform :: proc(doc: ^Doc, anchor: ^Anchor, allocator := context.alloca
 	if anchor.revision == doc.revision {
 		return {}
 	}
-	for &entry in doc.log {
-		if entry.base < anchor.revision {
-			continue
+
+	// Walk the current path upward, collecting the nodes below the
+	// anchor's node (or the whole path for an initial-state anchor).
+	// If the anchor's revision is never found, it belongs to an
+	// abandoned branch.
+	path := make([dynamic]Transaction_ID, allocator)
+	defer delete(path)
+	found := anchor.revision == 0
+	for n := doc.current; n != 0; {
+		entry := &doc.log[n - 1]
+		if entry.after == anchor.revision {
+			found = true
+			break
 		}
-		for op in entry.ops {
+		if aerr := reserve(&path, len(path) + 1); aerr != .None {
+			return errs.newf(
+				.Resource_Limit,
+				"txn: reserving the anchor path failed: %v",
+				aerr,
+				allocator = allocator,
+			)
+		}
+		append(&path, n)
+		n = entry.parent
+	}
+	if !found {
+		return errs.newf(
+			.Conflict,
+			"txn: anchor revision %v is not on the current path (abandoned branch)",
+			anchor.revision,
+			allocator = allocator,
+		)
+	}
+	// `path` holds the nodes below the anchor's node, nearest first:
+	// replay in reverse (apply order).
+	for i := len(path) - 1; i >= 0; i -= 1 {
+		for op in doc.log[path[i] - 1].ops {
 			anchor_apply_op(anchor, op)
 		}
 	}

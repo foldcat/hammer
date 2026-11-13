@@ -308,7 +308,7 @@ real-Windows validation remain the recorded follow-ups).
 
 **Status:** Active
 **Depends on:** M01
-**Next task:** M02.07
+**Next task:** M02.08
 
 - [x] M02.01 Implement immutable backing chunks.
 - [x] M02.02 Implement leaves, metrics, and range iteration.
@@ -316,11 +316,33 @@ real-Windows validation remain the recorded follow-ups).
 - [x] M02.04 Implement coordinate conversion.
 - [x] M02.05 Implement transactions and revision tracking.
 - [x] M02.06 Implement anchor transformation.
-- [ ] M02.07 Implement branching in-memory undo.
+- [x] M02.07 Implement branching in-memory undo.
 - [ ] M02.08 Add randomized differential tests and benchmarks.
 
 ### Notes
 
+- **M02.07 done (2026-11-13 session).** Branching in-memory undo
+  (`docs/m02-07-undo.md`): the M02.05 log became the SPECS.md §8.4
+  undo tree — `Log_Entry` nodes gain parent/child ids, a `core:time`
+  timestamp, and before/after `Selection` state; `Doc` gains
+  `current` and a global `next_revision` counter (branching breaks
+  `after = base + 1`; revisions stay unique, §4.3 stale rejection
+  untouched). `doc_apply` links nodes all-or-nothing; `doc_check`
+  validates the tree structure (parent/child symmetry, base/before
+  vs parent, current state vs tree root, counters). New `undo.odin`:
+  `Selection`, `doc_undo`/`doc_redo` (pointer-only jumps),
+  `doc_undoable`/`doc_redoable`, `.NotFound` for the boundaries, and
+  `grouping_key` runs as one undo unit in both directions; redo
+  follows the most recent child. `anchor_transform` replays the
+  current path; abandoned-branch anchors are `.Conflict`. 7 new
+  tests (18 in the package) incl. a 600-step apply/undo/redo
+  differential with random groups/selections and an anchor pool vs
+  an independent reference tree (caught two test-side bugs: a
+  zero-padded reference clone, an all-colliding empty-op no-op gap).
+  Validated 18/18 leak-free ×10 (+ single-threaded), full suite 108
+  tests clean, debug/release builds, Xvfb release smoke, `-no-crt`
+  Windows cross-build + Wine 11 consumer (branching, grouping,
+  anchors, exit 0). No product consumer yet.
 - **M02.06 done (2026-11-13 session).** Anchor transformation
   (`docs/m02-06-anchors.md`): `anchor.odin` in `src/core/txn` —
   `Affinity` (Left/Right stickiness), `Anchor` (pos + affinity +
