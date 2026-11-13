@@ -308,12 +308,12 @@ real-Windows validation remain the recorded follow-ups).
 
 **Status:** Active
 **Depends on:** M01
-**Next task:** M02.04
+**Next task:** M02.05
 
 - [x] M02.01 Implement immutable backing chunks.
 - [x] M02.02 Implement leaves, metrics, and range iteration.
 - [x] M02.03 Implement balancing and persistent root updates.
-- [ ] M02.04 Implement coordinate conversion.
+- [x] M02.04 Implement coordinate conversion.
 - [ ] M02.05 Implement transactions and revision tracking.
 - [ ] M02.06 Implement anchor transformation.
 - [ ] M02.07 Implement branching in-memory undo.
@@ -321,6 +321,23 @@ real-Windows validation remain the recorded follow-ups).
 
 ### Notes
 
+- **M02.04 done (2026-11-13 session).** Coordinate conversion
+  (`docs/m02-04-coords.md`): `coord.odin` in `src/core/rope` —
+  distinct `Scalar_Index`/`Line_Index`/`Column_Index` types, a shared
+  `Coord_Cursor` forward-walk state (scalar decode + pending tail +
+  provisional-CR break carry) derived from folded metrics, O(depth)
+  descents (byte/scalar first-own/break resolved rules) with at most
+  one piece decoded per conversion. Byte↔scalar, byte→line,
+  line start/end, line/column↔byte/scalar, all bounds-validated;
+  grapheme positions deferred to M05.02. 5 new coord tests (24 in the
+  package) incl. a 400-step differential comparing every conversion
+  at every position against an independent linear-scan model — it
+  caught a real tree bug (document offsets mixed with chunk offsets →
+  non-monotonic scalar_to_byte) and two reference-model bugs.
+  Validated 24/24 leak-free ×10, full suite 89 tests clean,
+  debug/release builds, Xvfb release smoke, `-no-crt` Windows
+  cross-build + Wine 11 consumer (round-trips, exit 0). No product
+  consumer yet (M02.05).
 - **M02.03 done (2026-11-12 session).** Balancing and persistent root
   updates (`docs/m02-03-tree.md`): `tree.odin` in `src/core/rope` — a
   persistent copy-on-write B-tree (`Node` kind-tagged leaf/internal,

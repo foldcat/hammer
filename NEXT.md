@@ -3,30 +3,61 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M02.04 — Coordinate conversion
+## Current task: M02.05 — Transactions and revision tracking
 
-M02.01 (chunks), M02.02 (leaves/metrics/range iteration), and M02.03
-(balancing/persistent roots) are done; M02 (SPECS.md §18) is active.
-M02.04 adds coordinate conversion over the tree (SPECS.md §7.3):
-byte offsets ↔ Unicode scalar offsets ↔ line/column positions, using
-the M02.02 metrics (`lf_count`, `lone_cr_count`, boundary state) for
-line indexing — every conversion goes through the text module, and the
-distinct coordinate systems must not be interchanged (AGENTS.md §14.3).
-The headless-core rule (SPECS.md §4.2) applies: no Sokol, testable
-without a window; follow the randomized differential-test discipline of
-SPECS.md §21 (the M02.01–M02.03 xorshift + reference-model +
-independent-oracle pattern, single-threaded when debugging).
+M02.01–M02.04 are done; M02 (SPECS.md §18) is active. M02.05 adds the
+transaction layer over the persistent tree (SPECS.md §8): every edit
+goes through a transaction (id, source, base revision, operations,
+before-selection), revisions track buffer generations, and stale
+operations are rejected — the AGENTS.md §14.1 "all buffer edits go
+through transactions" invariant starts here. Build on `tree_insert`/
+`tree_delete` and the coordinate layer. The headless-core rule
+(SPECS.md §4.2) applies: no Sokol, testable without a window; follow
+the randomized differential-test discipline of SPECS.md §21 (the
+M02.01–M02.04 xorshift + reference-model + independent-oracle pattern,
+single-threaded when debugging).
 
 Required reading for new code in `src/`: the traps in
 `docs/m01-02-config.md` §Traps, `docs/m01-03-coords.md` §Traps,
 `docs/m01-04-input.md` §Traps, `docs/m01-05-queue.md` §Traps,
 `docs/m01-06-render.md` §Traps, `docs/m02-01-chunks.md` §Traps,
-`docs/m02-02-leaves.md` §Traps, and `docs/m02-03-tree.md` §Traps
-(slice node arrays `[:count]`; merge siblings left-first; combine's
-leading-run carry; tree_check cannot see ordering — content
-differentials are the ordering oracle; mirror reference models exactly;
-`-define:ODIN_TEST_THREADS=1` to separate races from logic bugs;
-`inject_at_elems`/`remove_range` are builtins; no `core:map`).
+`docs/m02-02-leaves.md` §Traps, `docs/m02-03-tree.md` §Traps, and
+`docs/m02-04-coords.md` §Traps (document vs chunk offsets; the
+differential catches oracle bugs too; `for a, b in` not `:= range`;
+bind slice literals before ranging; `end` is a keyword; declaration
+shadowing is a hard error; no `core:map`).
+
+## M02.04 done (2026-11-13 session)
+
+Coordinate conversion (`docs/m02-04-coords.md`) — the SPECS.md §7.3
+byte/scalar/line/column layer over the persistent tree:
+
+- New `coord.odin` in `src/core/rope`: distinct `Scalar_Index`/
+  `Line_Index`/`Column_Index` types; a shared `Coord_Cursor`
+  forward-walk state (scalar decode with pending tail + break counter
+  with provisional-CR carry) derived from folded metrics so subtree
+  skips and piece decodes agree exactly with `metrics_of`/`combine`;
+  O(depth) descents by byte offset, scalar index (first-own rule), and
+  break index (resolved-break rule); at most one piece decoded per
+  conversion — no flattening. `tree_byte_to_scalar`/
+  `tree_scalar_to_byte`/`tree_byte_to_line`/`tree_line_start(_end)`/
+  `tree_byte_to_line_col`/`tree_line_col_to_byte` (+ scalar variants),
+  `tree_scalar_count`/`tree_line_count`, all bounds-validated. Grapheme
+  positions explicitly deferred to M05.02 (segmentation context).
+- `tests/unit/rope/coord_test.odin` added (5 tests; 24 in the
+  package): hand-computed cases, empty-tree edges, bounds errors,
+  round-trip properties, and a 400-step randomized differential
+  comparing every conversion at every position against an independent
+  linear-scan model. The differential caught a real tree bug
+  (document offsets mixed with chunk offsets → non-monotonic
+  scalar_to_byte) and two reference-model bugs (CR-resolution order,
+  stale line_count).
+- Validated: 24/24 rope tests leak-free (×10, no flake); full suite
+  via `odin run make.odin -file -- test` (89 tests, all packages
+  clean); debug/release builds; Xvfb release smoke (exit 0, no
+  PANIC/ERROR); `-no-crt` Windows cross-build of a throwaway consumer
+  + Wine 11 run (coordinate round-trips, known positions exact, exit
+  0). No product consumer yet (M02.05 wires the buffer registry).
 
 ## M02.03 done (2026-11-12 session)
 
