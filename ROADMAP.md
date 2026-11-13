@@ -30,7 +30,7 @@ stubs, validation actually run, platform claims recorded honestly.
 | --- | -------------------------------------------------- | -------------- | ----------- | ----------- |
 | M00 | Specification, feasibility spikes, build baseline  | —              | —           | Done        |
 | M01 | Application shell, platform layer, compiled config | M00            | Alpha A     | **Done**    |
-| M02 | Rope, transactions, anchors, headless core         | M01            | Alpha A     | **Active**  |
+| M02 | Rope, transactions, anchors, headless core         | M01            | Alpha A     | **Done**    |
 | M03 | File loading, codecs, safe save, external changes  | M02            | Alpha A     | Not started |
 | M04 | Recovery journals, persistent history, shutdown    | M03            | Alpha A     | Not started |
 | M05 | Unicode text renderer, fonts, DPI                  | M02 (+M03/M04) | Alpha A     | Not started |
@@ -306,9 +306,11 @@ real-Windows validation remain the recorded follow-ups).
 
 ## M02 — Rope, transactions, anchors, and headless core
 
-**Status:** Active
+**Status:** Done (all eight tasks validated headless; the M02.08
+benchmarks close the test matrix; real-desktop/real-Windows validation
+remain the standing M01/D-02 follow-ups).
 **Depends on:** M01
-**Next task:** M02.08
+**Next task:** — (milestone complete; next is M03.01)
 
 - [x] M02.01 Implement immutable backing chunks.
 - [x] M02.02 Implement leaves, metrics, and range iteration.
@@ -317,10 +319,25 @@ real-Windows validation remain the recorded follow-ups).
 - [x] M02.05 Implement transactions and revision tracking.
 - [x] M02.06 Implement anchor transformation.
 - [x] M02.07 Implement branching in-memory undo.
-- [ ] M02.08 Add randomized differential tests and benchmarks.
+- [x] M02.08 Add randomized differential tests and benchmarks.
 
 ### Notes
 
+- **M02.08 done (2026-11-13 session) — M02 complete.** Randomized
+  differentials and bounded benchmarks (`docs/m02-08-benchmarks.md`):
+  deterministic no-whole-buffer-copy guards (counting allocator,
+  node-count/chunk-store/height deltas on 2 MiB buffers — a small
+  edit allocates ≤ 256 KiB, creates < 64 nodes, interns only the
+  inserted bytes), the §7.7 huge-single-line case (4 MiB, one line),
+  wall-clock insert/read/apply scaling (16 KiB vs 4 MiB ratios
+  1.08/1.45/1.52 — logarithmic), a 600-step whole-stack randomized
+  differential (content + tree structure + an independent metric
+  oracle + a linear-scan coordinate model through multi-op
+  transactions, undo/redo branching, and `doc_check`), and a new
+  `make.odin bench` target. Validated 28/28 rope + 21/21 txn tests
+  leak-free ×11 (no flake), 115-test full suite clean, debug/release
+  builds, Xvfb release smoke, Windows cross-build + Wine 11 smoke
+  (exit 0). No product code changed.
 - **M02.07 done (2026-11-13 session).** Branching in-memory undo
   (`docs/m02-07-undo.md`): the M02.05 log became the SPECS.md §8.4
   undo tree — `Log_Entry` nodes gain parent/child ids, a `core:time`
@@ -438,7 +455,7 @@ real-Windows validation remain the recorded follow-ups).
 
 ## M03 — File loading, codecs, safe save, and external changes
 
-**Status:** Not started
+**Status:** Active (M03.01 is the current task)
 **Depends on:** M02
 
 - [ ] M03.01 Implement canonical file identity.

@@ -12,6 +12,7 @@
 //     odin run make.odin -file -- windows          # M00.03 Windows cross-build
 //     odin run make.odin -file -- windows --release
 //     odin run make.odin -file -- test             # core unit tests
+//     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
 // The `windows` target cross-builds hammer.exe for windows_amd64 from
 // Linux (mingw-w64 + lld-link + the pinned Sokol C sources, GL backend);
@@ -249,6 +250,29 @@ main :: proc() {
 		for pkg in CORE_TEST_PACKAGES {
 			fmt.printf("[Test] %s\n", pkg)
 			run_odin([]string{"odin", "test", pkg, "-vet", HAMMER_COLLECTION})
+		}
+		return
+	}
+
+	// M02.08 benchmark run: the rope/txn bounded-benchmark tests with
+	// the wall-clock measurements enabled and a single test thread for
+	// stable timings (the deterministic structural guards also run in
+	// the ordinary `test` target).
+	if len(args) > 1 && args[1] == "bench" {
+		bench_packages := []string{"tests/unit/rope", "tests/unit/txn"}
+		for pkg in bench_packages {
+			fmt.printf("[Bench] %s\n", pkg)
+			run_odin(
+				[]string {
+					"odin",
+					"test",
+					pkg,
+					"-vet",
+					HAMMER_COLLECTION,
+					"-define:ODIN_TEST_BENCHMARKS=true",
+					"-define:ODIN_TEST_THREADS=1",
+				},
+			)
 		}
 		return
 	}

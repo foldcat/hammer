@@ -3,15 +3,15 @@
 Work through the active milestone one task per session, in order. Write
 your documentation in `/docs`.
 
-## Current task: M02.08 — Randomized differential tests and benchmarks
+## Current task: M03.01 — Canonical file identity
 
-M02.01–M02.07 are done; M02 (SPECS.md §18) is active. M02.08 closes
-the milestone's test matrix: randomized differential coverage for the
-whole rope/txn stack (SPECS.md §7.7 property matrix, the M02.02–M02.07
-differential discipline — independent reference models, xorshift64
-seeds, no flakes) plus bounded benchmarks (no whole-buffer copies for
-small edits; no flattening — SPECS.md §7.6). The headless-core rule
-(SPECS.md §4.2) applies.
+M02 is done (M02.08 closed the milestone's test matrix — see below).
+M03 (SPECS.md §18) is active: canonical file identity first
+(device/inode or platform file-id plus version-validated identity for
+external-change detection), headless core (SPECS.md §4.2), unit-tested
+per the established differential discipline. This begins the M03 file
+milestone; no file I/O architecture exists yet, so the identity model
+and its validation are the complete slice.
 
 Required reading for new code in `src/`: the traps in
 `docs/m01-02-config.md` §Traps, `docs/m01-03-coords.md` §Traps,
@@ -19,11 +19,50 @@ Required reading for new code in `src/`: the traps in
 `docs/m01-06-render.md` §Traps, `docs/m02-01-chunks.md` §Traps,
 `docs/m02-02-leaves.md` §Traps, `docs/m02-03-tree.md` §Traps,
 `docs/m02-04-coords.md` §Traps, `docs/m02-05-transactions.md` §Traps,
-`docs/m02-06-anchors.md` §Traps, and `docs/m02-07-undo.md` §Traps
-(never copy a Doc/Tree/Store; reference models replay the applied
-order; empty-range replace is a pure insert; no local type
-declarations; no `core:map`; a no-op apply creates no node; `make`
-with a length pre-fills).
+`docs/m02-06-anchors.md` §Traps, `docs/m02-07-undo.md` §Traps, and
+`docs/m02-08-benchmarks.md` §Traps (never copy a Doc/Tree/Store;
+reference models replay the applied order; empty-range replace is a
+pure insert; no local type declarations; no `core:map`; a no-op apply
+creates no node; `make` with a length pre-fills; `delete` on a
+`[]byte` goes through `context.allocator`; `odin test pkg1 pkg2` runs
+only the first package; xorshift64 seeds, no flakes).
+
+## M02.08 done (2026-11-13 session) — M02 complete
+
+Randomized differentials and bounded benchmarks
+(`docs/m02-08-benchmarks.md`) — the SPECS.md §7.7 property matrix and
+the §7.6 complexity targets as executable checks, closing M02:
+
+- `tests/unit/rope/bench_test.odin` (4 tests): a deterministic
+  no-whole-buffer-copy guard (a 32-byte insert / 48-byte delete on a
+  2 MiB tree must allocate ≤ 256 KiB through a counting allocator,
+  create < 64 tree nodes, intern only the inserted bytes, and keep
+  height < 64 — three independent deltas, so no path hides a
+  flattening regression); the §7.7 huge-single-line case (4 MiB,
+  one line, sampled coordinate round-trips); and wall-clock insert
+  scaling (16 KiB vs 4 MiB: 5.5 vs 5.9 µs/op, ratio 1.08) and range
+  reads (100 vs 145 ns/op, ratio 1.45) — logarithmic, not
+  buffer-proportional.
+- `tests/unit/txn/bench_test.odin` (2 tests): the same deterministic
+  guard at the `doc_apply` level on a 2 MiB document, plus
+  transaction-apply scaling (32 KiB vs 4 MiB: 8.3 vs 12.5 µs/op,
+  ratio 1.52).
+- `tests/unit/txn/stack_test.odin` (1 test): the whole-stack 600-step
+  randomized differential — one xorshift64 stream drives multi-op
+  transactions (groups + selections), undo/redo with branching, and
+  four independent references: content, tree structure, a re-derived
+  metric oracle, and a linear-scan coordinate model, plus `doc_check`
+  every 10 steps.
+- `make.odin` gained a `bench` target (single test thread,
+  `-define:ODIN_TEST_BENCHMARKS=true` prints the measured times; the
+  timing guards always run with generous 50x ratios + a 100 µs
+  absolute escape, so the ordinary `test` target stays flake-free).
+- Validated: 28/28 rope + 21/21 txn tests leak-free (×11, no flake;
+  also single-threaded); full suite via `odin run make.odin -file --
+  test` (115 tests, all 12 test-bearing packages clean); debug/release
+  builds; Xvfb release smoke (exit 0, no PANIC/ERROR); Windows
+  cross-build + Wine 11 smoke re-run for the make.odin edit (exit 0).
+  No product code changed.
 
 ## M02.07 done (2026-11-13 session)
 
