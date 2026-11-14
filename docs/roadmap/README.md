@@ -33,8 +33,8 @@ stubs, validation actually run, platform claims recorded honestly.
 | [M00](m00.md) | Specification, feasibility spikes, build baseline  | —              | —           | Done        |
 | [M01](m01.md) | Application shell, platform layer, compiled config | M00            | Alpha A     | **Done**    |
 | [M02](m02.md) | Rope, transactions, anchors, headless core         | M01            | Alpha A     | **Done**    |
-| [M03](m03.md) | File loading, codecs, safe save, external changes  | M02            | Alpha A     | In progress |
-| [M04](m04.md) | Recovery journals, persistent history, shutdown    | M03            | Alpha A     | Not started |
+| [M03](m03.md) | File loading, codecs, safe save, external changes  | M02            | Alpha A     | **Done**    |
+| [M04](m04.md) | Recovery journals, persistent history, shutdown    | M03            | Alpha A     | In progress |
 | [M05](m05.md) | Unicode text renderer, fonts, DPI                  | M02 (+M03/M04) | Alpha A     | Not started |
 | [M06](m06.md) | Editing input, shortcuts, clipboard, indentation   | M04, M05       | Alpha A     | Not started |
 | [M07](m07.md) | Acme columns, windows, tags, mouse, lookup         | M06            | Alpha B     | Not started |

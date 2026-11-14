@@ -4,12 +4,12 @@ Historical session entries are archived under
 [`docs/archive/`](docs/archive/), one file per completed task, grouped by
 milestone. This file is an index into that archive.
 
-## Current task: M03.07 — Failure-injection tests for save
+## Current task: M04.01 — Versioned checksummed journal
 
-M03.06 is done (disk-change conflict detection). M03.07 is active: inject
-write, flush, close, replace, and checkpoint failures; prove the original file
-and editable buffer remain safe, temporary files are cleaned up, and dirty
-state is never cleared before successful publication.
+M03 is done (file loading, codecs, safe save, external changes, and save fault
+injection). M04.01 is active: define bounded versioned journal records with
+length, sequence, and checksum validation; replay only a verified prefix and
+reject or contain torn/corrupt records without losing earlier valid entries.
 
 ## M00 — Specification, feasibility spikes, and build baseline
 
@@ -46,6 +46,7 @@ state is never cleared before successful publication.
 - M03.04 Implement explicit unsupported/invalid encoding behavior — [`m03/m03-04-encoding-behavior.md`](docs/archive/m03/m03-04-encoding-behavior.md)
 - M03.05 Implement temporary-write/replace save — [`m03/m03-05-filesave.md`](docs/archive/m03/m03-05-filesave.md)
 - M03.06 Implement disk-change conflict detection — [`m03/m03-06-filestate.md`](docs/archive/m03/m03-06-filestate.md)
+- M03.07 Add failure-injection tests for save — [`m03/m03-07-save-faults.md`](docs/archive/m03/m03-07-save-faults.md)
 
 ## Misc
 

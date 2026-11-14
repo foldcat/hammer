@@ -43,6 +43,8 @@ Options :: struct {
 	allow_hard_link_break:    bool,
 	allow_unverified_identity: bool,
 	flush:                    Flush_Policy,
+	// Optional synchronous OS/fault-injection hooks; borrowed for this call.
+	operations:               ^Operation_Hooks,
 }
 
 // Snapshot borrows a tree and one immutable root. The tree/store must stay
@@ -111,7 +113,7 @@ save_tree :: proc(
 		return result, errs.newf(.Conflict, "filesave: %s no longer exists", path, allocator = allocator)
 	}
 	if target.exists {
-		cap, cap_err := fileload.capture_file(target.path, allocator)
+		cap, cap_err := operation_capture(options.operations, target.path, allocator)
 		if !errs.ok(cap_err) {
 			return result, cap_err
 		}
@@ -147,7 +149,7 @@ save_tree :: proc(
 	}
 	pattern := fmt.aprintf(".%s.tmp-*", os.base(target.path), allocator = allocator)
 	defer delete(pattern, allocator)
-	temp, temp_err := os.create_temp_file(dir, pattern)
+	temp, temp_err := operation_create_temp(options.operations, dir, pattern)
 	if temp_err != nil {
 		return result, errs.newf(.IO, "filesave: cannot create a temporary file beside %s: %v", target.path, temp_err, allocator = allocator)
 	}
@@ -156,14 +158,14 @@ save_tree :: proc(
 	closed := false
 	published := false
 	defer if !published {
-		os.remove(temp_path)
+		operation_remove(options.operations, temp_path)
 	}
 	defer if !closed {
-		os.close(temp)
+		operation_close(options.operations, temp)
 	}
 
 	if metadata.bom == .UTF8 {
-		if write_err := write_all(temp, transmute([]byte)string("\xef\xbb\xbf")); write_err != nil {
+		if write_err := write_all(temp, options.operations, transmute([]byte)string("\xef\xbb\xbf")); write_err != nil {
 			return result, errs.newf(.IO, "filesave: cannot write UTF-8 BOM to %s: %v", temp_path, write_err, allocator = allocator)
 		}
 	}
@@ -177,21 +179,21 @@ save_tree :: proc(
 		if !more {
 			break
 		}
-		if write_err := write_all(temp, span); write_err != nil {
+		if write_err := write_all(temp, options.operations, span); write_err != nil {
 			return result, errs.newf(.IO, "filesave: cannot write snapshot to %s: %v", temp_path, write_err, allocator = allocator)
 		}
 	}
 	if options.flush == .Sync {
-		if sync_err := os.sync(temp); sync_err != nil {
+		if sync_err := operation_sync(options.operations, temp); sync_err != nil {
 			return result, errs.newf(.IO, "filesave: cannot sync %s: %v", temp_path, sync_err, allocator = allocator)
 		}
 	}
 	if target.exists {
-		if mode_err := os.fchmod(temp, target.info.mode); mode_err != nil {
+		if mode_err := operation_chmod(options.operations, temp, target.info.mode); mode_err != nil {
 			return result, errs.newf(.IO, "filesave: cannot preserve permissions on %s: %v", temp_path, mode_err, allocator = allocator)
 		}
 	}
-	if close_err := os.close(temp); close_err != nil {
+	if close_err := operation_close(options.operations, temp); close_err != nil {
 		closed = true
 		return result, errs.newf(.IO, "filesave: cannot close %s: %v", temp_path, close_err, allocator = allocator)
 	}
@@ -203,23 +205,23 @@ save_tree :: proc(
 		}
 	}
 	if options.disk_check == .Must_Not_Exist {
-		if link_err := os.link(temp_path, target.path); link_err != nil {
+		if link_err := operation_link(options.operations, temp_path, target.path); link_err != nil {
 			return result, errs.newf(.IO, "filesave: cannot publish new file %s without clobbering: %v", target.path, link_err, allocator = allocator)
 		}
 		published = true
 		result.replaced = true
-		if remove_err := os.remove(temp_path); remove_err != nil {
+		if remove_err := operation_remove(options.operations, temp_path); remove_err != nil {
 			return result, errs.newf(.IO, "filesave: %s was published but temporary link cleanup failed: %v", target.path, remove_err, allocator = allocator)
 		}
 	} else {
-		if rename_err := os.rename(temp_path, target.path); rename_err != nil {
+		if rename_err := operation_rename(options.operations, temp_path, target.path); rename_err != nil {
 			return result, errs.newf(.IO, "filesave: cannot replace %s: %v", target.path, rename_err, allocator = allocator)
 		}
 		published = true
 		result.replaced = true
 	}
 
-	cap, capture_err := fileload.capture_file(target.path, allocator)
+	cap, capture_err := operation_capture(options.operations, target.path, allocator)
 	if !errs.ok(capture_err) {
 		return result, capture_err
 	}
@@ -227,10 +229,10 @@ save_tree :: proc(
 	return result, {}
 }
 
-write_all :: proc(file: ^os.File, data: []byte) -> os.Error {
+write_all :: proc(file: ^os.File, hooks: ^Operation_Hooks, data: []byte) -> os.Error {
 	remaining := data
 	for len(remaining) > 0 {
-		n, err := os.write(file, remaining)
+		n, err := operation_write(hooks, file, remaining)
 		if err != nil {
 			return err
 		}
@@ -254,7 +256,7 @@ recheck_disk :: proc(path: string, options: Options, allocator := context.alloca
 		os.file_info_delete(info, allocator)
 		return errs.newf(.Conflict, "filesave: %s appeared before publication", path, allocator = allocator)
 	}
-	cap, err := fileload.capture_file(path, allocator)
+	cap, err := operation_capture(options.operations, path, allocator)
 	if !errs.ok(err) {
 		if err.kind == .NotFound {
 			errs.destroy(&err)
