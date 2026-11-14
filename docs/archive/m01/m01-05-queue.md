@@ -1,6 +1,6 @@
 ## M01.05 done (2026-11-12 session)
 
-Worker/result queues with bounded capacity (`docs/m01-05-queue.md`):
+Worker/result queues with bounded capacity (`docs/notes/m01-05-queue.md`):
 
 - New backend-free `src/core/queue`: `Queue(T)` ring buffer over
   caller-owned storage (capacity fixed at init, zero allocation

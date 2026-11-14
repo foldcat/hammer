@@ -15,7 +15,7 @@
 # Why nested x11-backend and not weston's headless backend for test 2:
 # the headless backend creates no input devices, so it advertises no
 # wl_seat global, and the pinned GLFW 3.4 crashes dereferencing the
-# missing seat (see docs/m00-06-wayland.md). The x11 backend provides a
+# missing seat (see docs/notes/m00-06-wayland.md). The x11 backend provides a
 # full compositor (seat, GL renderer) while the whole setup still runs
 # displayless under Xvfb.
 #

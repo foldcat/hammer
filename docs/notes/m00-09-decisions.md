@@ -2,12 +2,12 @@
 
 **Status:** done (2026-11-12 session). This is the consolidated record of
 every architecture decision taken during M00 and the honest per-platform
-status of everything spiked. Each spike doc (`docs/m00-03` … `m00-08`)
+status of everything spiked. Each spike doc (`docs/notes/m00-03` … `docs/notes/m00-08`)
 remains the authoritative source for how a claim was validated; this file
 is the index, the decision log, and the follow-up ledger.
 
 Sources: SPECS.md §1.2 (platform promise) and §18 (M00 acceptance),
-`docs/m00-03-window.md` … `docs/m00-08-fuse.md`, `make.odin`,
+`docs/notes/m00-03-window.md` … `docs/notes/m00-08-fuse.md`, `make.odin`,
 `.gitmodules`, and spot verifications run this session (versions below).
 
 ---
@@ -136,10 +136,10 @@ Deferred (all blocked by no toolchain on this machine):
 
 - M00.04–M00.08 Windows halves: Win32 clipboard, Windows DPI/IME, ConPTY,
   WinFsp. (M00.03's Windows half was unblocked 2026-11-12 and is done —
-  see `docs/m00-03-window.md` §Windows.)
+  see `docs/notes/m00-03-window.md` §Windows.)
 - M00 deliverables "Linux and Windows CI" (Windows part).
 - Nothing about Windows behavior is claimed anywhere in the spike docs
-  beyond what `docs/m00-03-window.md` records as Wine-validated.
+  beyond what `docs/notes/m00-03-window.md` records as Wine-validated.
 
 Explicit blocking statement (per SPECS.md §18 M00 acceptance, "a clear
 platform limitation either resolves or explicitly blocks the affected

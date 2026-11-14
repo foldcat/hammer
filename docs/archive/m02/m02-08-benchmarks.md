@@ -1,7 +1,7 @@
 ## M02.08 done (2026-11-13 session) — M02 complete
 
 Randomized differentials and bounded benchmarks
-(`docs/m02-08-benchmarks.md`) — the SPECS.md §7.7 property matrix and
+(`docs/notes/m02-08-benchmarks.md`) — the SPECS.md §7.7 property matrix and
 the §7.6 complexity targets as executable checks, closing M02:
 
 - `tests/unit/rope/bench_test.odin` (4 tests): a deterministic

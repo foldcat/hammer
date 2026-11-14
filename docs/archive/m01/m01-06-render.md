@@ -1,6 +1,6 @@
 ## M01 done (2026-11-12 session, M01.06)
 
-Render basic column/tag/body rectangles (`docs/m01-06-render.md`) —
+Render basic column/tag/body rectangles (`docs/notes/m01-06-render.md`) —
 this closes M01:
 
 - New backend-free `src/core/layout`: `Rect`/`Window` (frame/tag/body)

@@ -76,7 +76,7 @@ xft_dpi_value :: proc(res: string) -> (f64, bool) {
 
 // screen_dpi computes the classic mm-based screen DPI (what a GLFW-style
 // implementation would use). sapp's X11 backend deliberately does not use
-// this; see docs/m00-05-dpi-ime.md.
+// this; see docs/notes/m00-05-dpi-ime.md.
 screen_dpi :: proc(display: ^xlib.Display, screen: i32) -> (f64, bool) {
 	mm := xlib.DisplayWidthMM(display, screen)
 	if mm <= 0 {

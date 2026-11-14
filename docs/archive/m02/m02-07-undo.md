@@ -1,6 +1,6 @@
 ## M02.07 done (2026-11-13 session)
 
-Branching in-memory undo (`docs/m02-07-undo.md`) — the SPECS.md §8.4
+Branching in-memory undo (`docs/notes/m02-07-undo.md`) — the SPECS.md §8.4
 undo tree over the M02.05 log:
 
 - The log **is** the tree: `Log_Entry` gained parent/child ids,

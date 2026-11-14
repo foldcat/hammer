@@ -1,6 +1,6 @@
 ## M02.02 done (2026-11-12 session)
 
-Leaves, metrics, and range iteration (`docs/m02-02-leaves.md`) — the
+Leaves, metrics, and range iteration (`docs/notes/m02-02-leaves.md`) — the
 SPECS.md §7.1 Piece/Leaf/local-metrics layer on top of M02.01:
 
 - New backend-free `src/core/rope`: `Piece` (store_id + byte_start +

@@ -1,6 +1,6 @@
 ## M02.05 done (2026-11-13 session)
 
-Transactions and revision tracking (`docs/m02-05-transactions.md`) —
+Transactions and revision tracking (`docs/notes/m02-05-transactions.md`) —
 the SPECS.md §8.1 transaction layer over the persistent rope:
 
 - New backend-free `src/core/txn`: `Doc` (chunk store + tree +

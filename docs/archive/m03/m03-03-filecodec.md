@@ -1,6 +1,6 @@
 ## M03.03 done (2026-11-14 session)
 
-UTF-8/BOM/newline policy (`docs/m03-03-filecodec.md`) — a backend-free,
+UTF-8/BOM/newline policy (`docs/notes/m03-03-filecodec.md`) — a backend-free,
 allocation-free `src/core/filecodec` over M03.02 `Loaded` chunks:
 
 - `Decoded` retains byte-exact `raw` and BOM-excluding `content` borrowed
@@ -26,15 +26,15 @@ allocation-free `src/core/filecodec` over M03.02 `Loaded` chunks:
   M03.05.
 
 Required reading for new code in `src/`: the traps in
-`docs/m01-02-config.md` §Traps, `docs/m01-03-coords.md` §Traps,
-`docs/m01-04-input.md` §Traps, `docs/m01-05-queue.md` §Traps,
-`docs/m01-06-render.md` §Traps, `docs/m02-01-chunks.md` §Traps,
-`docs/m02-02-leaves.md` §Traps, `docs/m02-03-tree.md` §Traps,
-`docs/m02-04-coords.md` §Traps, `docs/m02-05-transactions.md` §Traps,
-`docs/m02-06-anchors.md` §Traps, `docs/m02-07-undo.md` §Traps,
-`docs/m02-08-benchmarks.md` §Traps, `docs/m03-01-fileid.md`
-§Traps, `docs/m03-02-fileload.md` §Traps, and
-`docs/m03-03-filecodec.md` §Traps (never copy a
+`docs/notes/m01-02-config.md` §Traps, `docs/notes/m01-03-coords.md` §Traps,
+`docs/notes/m01-04-input.md` §Traps, `docs/notes/m01-05-queue.md` §Traps,
+`docs/notes/m01-06-render.md` §Traps, `docs/notes/m02-01-chunks.md` §Traps,
+`docs/notes/m02-02-leaves.md` §Traps, `docs/notes/m02-03-tree.md` §Traps,
+`docs/notes/m02-04-coords.md` §Traps, `docs/notes/m02-05-transactions.md` §Traps,
+`docs/notes/m02-06-anchors.md` §Traps, `docs/notes/m02-07-undo.md` §Traps,
+`docs/notes/m02-08-benchmarks.md` §Traps, `docs/notes/m03-01-fileid.md`
+§Traps, `docs/notes/m03-02-fileload.md` §Traps, and
+`docs/notes/m03-03-filecodec.md` §Traps (never copy a
 Doc/Tree/Store; reference models replay the applied order;
 empty-range replace is a pure insert; no local type declarations; no
 `core:map`; a no-op apply creates no node; `make` with a length

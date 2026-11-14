@@ -1,6 +1,6 @@
 ## Allocator migration done (2026-11-12 session)
 
-Owner-directed refactor (`docs/m01-alloc-arenas.md`): the panic
+Owner-directed refactor (`docs/notes/m01-alloc-arenas.md`): the panic
 allocator previously installed as `context.allocator` was replaced with
 explicit arenas per AGENTS.md §10.5:
 

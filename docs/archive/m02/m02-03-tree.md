@@ -1,6 +1,6 @@
 ## M02.03 done (2026-11-12 session)
 
-Balancing and persistent root updates (`docs/m02-03-tree.md`) — the
+Balancing and persistent root updates (`docs/notes/m02-03-tree.md`) — the
 SPECS.md §7.1 Internal node / RopeRoot layer:
 
 - New `tree.odin` in `src/core/rope`: a persistent copy-on-write

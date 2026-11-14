@@ -1,7 +1,7 @@
 ## M00.08 done (2026-11-12 session)
 
 `spike/fuse/` (`fuse-spike` target in `make.odin`) plus
-`docs/m00-08-fuse.md` — minimal FUSE deployment proof on Linux, raw
+`docs/notes/m00-08-fuse.md` — minimal FUSE deployment proof on Linux, raw
 `core:sys/linux` syscalls, no libfuse, no new dependencies:
 
 - Unprivileged path verified end to end: direct mount(2) fails EPERM

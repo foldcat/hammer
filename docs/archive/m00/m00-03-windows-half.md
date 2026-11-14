@@ -12,8 +12,8 @@ Wine 11 + mingw-w64 32/64) and the M00.03 Windows half executed:
   clear, clean shutdown, exit 0 — debug and release.
 - Traps + follow-ups (last-`/defaultlib`-only lld quirk, explicit
   Win32/UCRT lib inputs, D3D11 variant, real-Windows validation) are
-  recorded in `docs/m00-03-window.md` §Windows and
-  `docs/m00-09-decisions.md` §4/§5.
+  recorded in `docs/notes/m00-03-window.md` §Windows and
+  `docs/notes/m00-09-decisions.md` §4/§5.
 
 M01.01 remains the active task; the remaining Windows spike halves
 (M00.04/05/07/08) stay deferred per D-02.

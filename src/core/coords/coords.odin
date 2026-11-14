@@ -2,7 +2,7 @@
 //
 // The window backend reports everything in framebuffer (physical)
 // pixels: `sapp.width()/height()` are pre-scaled and mouse events
-// arrive in framebuffer pixels (docs/m00-05-dpi-ime.md). The editor
+// arrive in framebuffer pixels (docs/notes/m00-05-dpi-ime.md). The editor
 // lays out in logical, DPI-independent units (SPECS.md §9.6), so
 // physical values must be divided by the current `dpi_scale` — and
 // logical values multiplied by it — exactly once. Never apply DPI

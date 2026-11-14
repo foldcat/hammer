@@ -16,7 +16,7 @@
 //
 // The `windows` target cross-builds hammer.exe for windows_amd64 from
 // Linux (mingw-w64 + lld-link + the pinned Sokol C sources, GL backend);
-// the binary is validated under Wine. See docs/m00-03-window.md.
+// the binary is validated under Wine. See docs/notes/m00-03-window.md.
 //
 // On Linux this tool also self-configures the Sokol dependency: it
 // downloads the pinned Sokol C sources (verified by sha256), checks the
@@ -106,7 +106,7 @@ CORE_TEST_PACKAGES := []string {
 // Windows cross-build (M00.03 Windows half): the mingw-w64 import
 // libraries, mirrored into a task-owned "Windows SDK root" as .lib-named
 // symlinks, serve as the -windows-sdk-root for cross-linking. All of this
-// is generated under build/ (gitignored); see docs/m00-03-window.md.
+// is generated under build/ (gitignored); see docs/notes/m00-03-window.md.
 WINDOWS_BINARY_PATH :: OUT_DIR + "/hammer.exe"
 WINDOWS_SDK_DIR :: OUT_DIR + "/windows-sdk"
 WINDOWS_LLD_SHIM :: OUT_DIR + "/lld-link-shim"
@@ -700,7 +700,7 @@ sokol_lib_path :: proc(name, pkg, variant: string) -> string {
 // Win32 + CRT libraries the Sokol GL static libraries resolve against at
 // final link. They are passed as plain linker inputs rather than
 // /defaultlib flags: the lld-link used here honors only the last
-// /defaultlib argument (verified; see docs/m00-03-window.md §Windows).
+// /defaultlib argument (verified; see docs/notes/m00-03-window.md §Windows).
 WINDOWS_SYSTEM_LIBS := []string {
 	"user32.lib",
 	"kernel32.lib",
@@ -856,7 +856,7 @@ setup_windows_sdk :: proc(sysroot, libgcc_path: string) -> bool {
 // files the sokol-odin bindings expect for the GL variant
 // (third_party/sokol/sokol/<pkg>/sokol_<pkg>_windows_x64_gl_<variant>.lib,
 // gitignored by the submodule). GL backend only for now; the D3D11 variant
-// is a recorded follow-up (docs/m00-03-window.md).
+// is a recorded follow-up (docs/notes/m00-03-window.md).
 build_sokol_libs_windows :: proc() -> bool {
 	missing_any := false
 	for lib in SOKOL_LIBS {

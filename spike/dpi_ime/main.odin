@@ -30,7 +30,7 @@
 //       Feeds fake key/mouse events (XTEST) to another window; used to
 //       drive the sapp probe app from the demo harness.
 //
-// Findings are recorded in docs/m00-05-dpi-ime.md. This is spike code,
+// Findings are recorded in docs/notes/m00-05-dpi-ime.md. This is spike code,
 // not the product implementation.
 package main
 

@@ -101,7 +101,7 @@ ioctl_checked :: proc(fd: linux.Fd, request: u32, arg: uintptr) -> (result: i64,
 
 // pty_open allocates a pseudo-terminal pair. Master: /dev/ptmx (O_NOCTTY
 // so it never becomes our controlling terminal). Slave: /dev/pts/<n>
-// from TIOCGPTN. Two findings baked in here (see docs/m00-07-pty.md):
+// from TIOCGPTN. Two findings baked in here (see docs/notes/m00-07-pty.md):
 //   - TIOCSPTLCK(0) — unlockpt — is REQUIRED before the slave can be
 //     opened; a locked slave fails with EIO. Verified: without it,
 //     open("/dev/pts/N") returns EIO while python's openpty (which calls

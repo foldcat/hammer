@@ -1,6 +1,6 @@
 ## M01.02 done (2026-11-12 session)
 
-Generated trusted configuration package (`docs/m01-02-config.md`):
+Generated trusted configuration package (`docs/notes/m01-02-config.md`):
 
 - `src/core/config` (backend-free): schema (SPECS.md §14.2 fonts/theme
   structs, exported fields, bounds), oxocarbon defaults from
@@ -20,5 +20,5 @@ Generated trusted configuration package (`docs/m01-02-config.md`):
 - Tests moved to `tests/unit/config` (13); 30/30 unit tests leak-free.
   Validated: debug/release/run builds, full custom-config pipeline,
   every error path, Windows cross-build + Wine 11 smoke (config under
-  `-no-crt`). Traps recorded in `docs/m01-02-config.md` §Traps.
+  `-no-crt`). Traps recorded in `docs/notes/m01-02-config.md` §Traps.
 

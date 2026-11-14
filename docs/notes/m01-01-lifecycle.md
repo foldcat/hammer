@@ -155,7 +155,7 @@ HAMMER_TEST_PANIC=1 (AeDebug auto-exit configured in the sandbox prefix):
 
 - M01.03 consumes `dpi_scale` + `framebuffer_size` for logical/physical
   coordinate conversion (rule: divide by `dpi_scale`, per
-  `docs/m00-09-decisions.md` §5).
+  `docs/notes/m00-09-decisions.md` §5).
 - M01.05 workers install the logger per thread (`logging.install`).
 - M04.06 inserts the dirty-buffer review at the `.QUIT_REQUESTED`
   handler (`cancel_quit` is the Cancel path).

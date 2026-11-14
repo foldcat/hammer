@@ -1,6 +1,6 @@
 ## M01.03 done (2026-11-12 session)
 
-Logical/physical coordinate conversion (`docs/m01-03-coords.md`):
+Logical/physical coordinate conversion (`docs/notes/m01-03-coords.md`):
 
 - New backend-free `src/core/coords`: distinct `Physical_*`/`Logical_*`
   size/point structs, validated conversions both directions (divide /

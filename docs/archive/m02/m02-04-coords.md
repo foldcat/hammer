@@ -1,6 +1,6 @@
 ## M02.04 done (2026-11-13 session)
 
-Coordinate conversion (`docs/m02-04-coords.md`) — the SPECS.md §7.3
+Coordinate conversion (`docs/notes/m02-04-coords.md`) — the SPECS.md §7.3
 byte/scalar/line/column layer over the persistent tree:
 
 - New `coord.odin` in `src/core/rope`: distinct `Scalar_Index`/

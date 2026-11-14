@@ -1,6 +1,6 @@
 ## M03.02 done (2026-11-13 session)
 
-Background chunked loading (`docs/m03-02-fileload.md`) — the
+Background chunked loading (`docs/notes/m03-02-fileload.md`) — the
 read/capture adapter feeding `src/core/fileid` from real files and
 loading content chunked into the M02 chunk store on a worker, with
 the `File_ID`/`File_Stamp` captured at load time (SPECS.md §6.4,

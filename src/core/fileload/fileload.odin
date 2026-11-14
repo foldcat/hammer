@@ -20,7 +20,7 @@
 //     runs the same load on one background worker thread with bounded
 //     queues (SPECS.md §4.4).
 //
-// Identity policy (docs/m03-01-fileid.md, pinned by its
+// Identity policy (docs/notes/m03-01-fileid.md, pinned by its
 // differentials):
 //
 //   - `.None` is one canonical value: inode 0 (Unix) / file index 0

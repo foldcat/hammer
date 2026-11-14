@@ -1,6 +1,6 @@
 ## M02.01 done (2026-11-12 session)
 
-Immutable backing chunks (`docs/m02-01-chunks.md`) — the SPECS.md §7.1
+Immutable backing chunks (`docs/notes/m02-01-chunks.md`) — the SPECS.md §7.1
 ByteStore layer, the foundation the rest of M02 builds on:
 
 - New backend-free `src/core/chunk`: `Store` owning immutable,

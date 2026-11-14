@@ -3,4 +3,4 @@ This directory holds the generated, staged configuration package
 trusted user config (or the built-in defaults when no config exists).
 The file is gitignored generated output — never edit it by hand; edit
 the config source instead. See `src/core/config` and
-`docs/m01-02-config.md`.
+`docs/notes/m01-02-config.md`.

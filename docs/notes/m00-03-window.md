@@ -21,7 +21,7 @@ decision only reorders the work.
 **Revised 2026-11-12 (same day, later session):** the owner installed
 Wine 11 and the mingw-w64 cross toolchain (64- and 32-bit), satisfying
 the toolchain half of the D-02 unblock conditions
-(`docs/m00-09-decisions.md` §4). The M00.03 Windows half was therefore
+(`docs/notes/m00-09-decisions.md` §4). The M00.03 Windows half was therefore
 unblocked and executed: the window now cross-builds from Linux and runs
 under Wine. See the Windows section below. The Windows halves of
 M00.04/M00.05/M00.07/M00.08 and the Windows CI runner remain deferred.
@@ -233,4 +233,4 @@ performed); `windows_386` (the pinned sokol-odin bindings only name
   (`M00.09`).
 - Windows: build and validate the sokol **D3D11** variant (the product
   default on Windows) under Wine; validate on a real Windows machine/CI
-  runner when available (see `docs/m00-09-decisions.md` §4).
+  runner when available (see `docs/notes/m00-09-decisions.md` §4).

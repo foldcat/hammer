@@ -1,6 +1,6 @@
 ## M02.06 done (2026-11-13 session)
 
-Anchor transformation (`docs/m02-06-anchors.md`) — the SPECS.md §8.3
+Anchor transformation (`docs/notes/m02-06-anchors.md`) — the SPECS.md §8.3
 stable-position primitive over the M02.05 log:
 
 - New `anchor.odin` in `src/core/txn`: `Affinity` (Left sticks to the

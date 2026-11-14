@@ -1,6 +1,6 @@
 // Tests for the M03.02 read/capture adapter (`hammer:core/fileload`):
 // stat capture into `core/fileid` values (the §11.1 step 2
-// checkpoint), the `.None` conventions from docs/m03-01-fileid.md,
+// checkpoint), the `.None` conventions from docs/notes/m03-01-fileid.md,
 // and the chunked load with its all-or-nothing and no-torn-content
 // guarantees. Real files live in the task-owned sandbox; the oracle
 // stamps are built independently from `os.stat` (a different syscall

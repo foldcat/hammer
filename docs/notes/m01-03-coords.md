@@ -7,7 +7,7 @@ dual-monitor mixed-DPI validation remains the recorded follow-up.
 This task delivers the logical/physical coordinate conversion
 (SPECS.md §18 M01.03, SPECS.md §9.6 "DPI model"): a backend-free
 `core/coords` package implementing the rule recorded in
-`docs/m00-09-decisions.md` §5 — sapp reports pre-scaled framebuffer
+`docs/notes/m00-09-decisions.md` §5 — sapp reports pre-scaled framebuffer
 pixels, the editor lays out in logical units and divides by
 `dpi_scale`, never applying DPI twice.
 
@@ -28,7 +28,7 @@ pixels, the editor lays out in logical units and divides by
 - The backend reports everything in framebuffer pixels: the physical
   window is pre-scaled at creation, `sapp.width()/height()` are the
   framebuffer size, and mouse events arrive in framebuffer pixels
-  (docs/m00-05-dpi-ime.md). The editor therefore divides by
+  (docs/notes/m00-05-dpi-ime.md). The editor therefore divides by
   `dpi_scale` for logical layout and multiplies back only when a
   physical pixel count is genuinely needed — DPI is applied exactly
   once.

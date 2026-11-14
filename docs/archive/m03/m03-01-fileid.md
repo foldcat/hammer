@@ -1,6 +1,6 @@
 ## M03.01 done (2026-11-13 session)
 
-Canonical file identity (`docs/m03-01-fileid.md`) — the SPECS.md §6.4
+Canonical file identity (`docs/notes/m03-01-fileid.md`) — the SPECS.md §6.4
 identity model and its validation as the M03 foundation:
 
 - New backend-free `src/core/fileid`: `File_ID` (kind + hi/lo:

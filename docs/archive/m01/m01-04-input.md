@@ -1,6 +1,6 @@
 ## M01.04 done (2026-11-12 session)
 
-Native input normalization (`docs/m01-04-input.md`):
+Native input normalization (`docs/notes/m01-04-input.md`):
 
 - New backend-free `src/core/input`: editor-owned `Key` naming (119
   members), `Modifiers`/`Mouse_Button(s)` bit sets, the `Event` tagged

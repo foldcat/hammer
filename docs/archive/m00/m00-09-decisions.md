@@ -1,6 +1,6 @@
 ## M00.09 done (2026-11-12 session)
 
-`docs/m00-09-decisions.md` — the consolidated architecture decision log
+`docs/notes/m00-09-decisions.md` — the consolidated architecture decision log
 and compatibility inventory for M00:
 
 - Decision log: D-01 X11 product backend (sokol/X11); D-02 Windows

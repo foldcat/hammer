@@ -9,7 +9,7 @@
 // The shader is a single embedded GLSL 410 colored-quad shader (the
 // GL backend only today). Shader-tooling formalization (sokol-shdc,
 // Metal/D3D11 variants) is the recorded M05.01 follow-up
-// (docs/m00-09-decisions.md); the pinned sokol_gfx revision accepts
+// (docs/notes/m00-09-decisions.md); the pinned sokol_gfx revision accepts
 // GLSL source directly on GL backends.
 package main
 

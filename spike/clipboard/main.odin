@@ -9,7 +9,7 @@
 // This is throwaway spike code, not the M06.04 product implementation.
 // The editor will build a clipboard service on these findings (delayed
 // paste, ownership monitoring, cancellation, etc.). Findings are recorded
-// in docs/m00-04-clipboard.md.
+// in docs/notes/m00-04-clipboard.md.
 //
 // Two modes, run as separate processes sharing one X display:
 //

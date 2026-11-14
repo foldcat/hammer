@@ -84,7 +84,7 @@ not replace it.
 
 *(Superseded 2026-11-12: the product now has an explicit frame arena;
 this section is a historical record of M01.02 — see
-`docs/m01-alloc-arenas.md` for the current allocation layout.)*
+`docs/notes/m01-alloc-arenas.md` for the current allocation layout.)*
 
 No code in this task touches the scratch arena. The product has no
 frame arena yet, so a `free_all` boundary does not exist anywhere — a

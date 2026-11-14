@@ -1,6 +1,6 @@
 ## M01.01 done (2026-11-12 session)
 
-Lifecycle and error-reporting infrastructure (`docs/m01-01-lifecycle.md`):
+Lifecycle and error-reporting infrastructure (`docs/notes/m01-01-lifecycle.md`):
 
 - `src/core/errs` (owned-message structured errors),
   `src/core/logging` (console + bounded file sink, mutex-serialized
@@ -11,7 +11,7 @@ Lifecycle and error-reporting infrastructure (`docs/m01-01-lifecycle.md`):
 - Tests moved out of `src/` into `tests/unit/` (`hammer` collection):
   pinned Odin compiles `_test.odin` files into normal builds, which
   broke the `-no-crt` Windows cross-build (`core:testing` →
-  `core:c/libc`). Trap recorded in `docs/m00-09-decisions.md` §5.
+  `core:c/libc`). Trap recorded in `docs/notes/m00-09-decisions.md` §5.
 - Validated headless: 17/17 unit tests (leak-checked); Linux
   debug/release Xvfb smokes (exit 0, clean tracking-allocator exit);
   Linux panic path (exit 132, `[PANIC ]` line in the log); console-only
