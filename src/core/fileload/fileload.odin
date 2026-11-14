@@ -31,8 +31,9 @@
 //     occur on real devices/volumes); only the inode/index zero
 //     convention is encoded.
 //   - Symlinks are followed (the identity is the target's):
-//     `Symlink_Policy.Follow` is this layer's behavior;
-//     `.Preserve_Link` semantics are M03.05's decision.
+//     `Symlink_Policy.Follow` is this layer's behavior; filesave resolves
+//     the final target under `.Follow` and refuses symlink paths under
+//     `.Preserve_Link` rather than replacing the link itself.
 //
 // Load-time consistency: `load_file` captures the stamp before
 // reading and re-stats the same handle after the last chunk. If id,

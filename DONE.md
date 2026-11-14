@@ -4,12 +4,12 @@ Historical session entries are archived under
 [`docs/archive/`](docs/archive/), one file per completed task, grouped by
 milestone. This file is an index into that archive.
 
-## Current task: M03.05 — Temporary-write/replace save
+## Current task: M03.07 — Failure-injection tests for save
 
-M03.04 is done (explicit unsupported/invalid encoding behavior). M03.05 is
-active: save from a stable snapshot through temporary-write/replace, preserve
-encoding/BOM/newline policy, and leave the editable buffer dirty on every
-failure. Escaped display text must never be saved as source content.
+M03.06 is done (disk-change conflict detection). M03.07 is active: inject
+write, flush, close, replace, and checkpoint failures; prove the original file
+and editable buffer remain safe, temporary files are cleaned up, and dirty
+state is never cleared before successful publication.
 
 ## M00 — Specification, feasibility spikes, and build baseline
 
@@ -44,6 +44,8 @@ failure. Escaped display text must never be saved as source content.
 - M03.02 Implement background chunked loading — [`m03/m03-02-fileload.md`](docs/archive/m03/m03-02-fileload.md)
 - M03.03 Implement UTF-8/BOM/newline policy — [`m03/m03-03-filecodec.md`](docs/archive/m03/m03-03-filecodec.md)
 - M03.04 Implement explicit unsupported/invalid encoding behavior — [`m03/m03-04-encoding-behavior.md`](docs/archive/m03/m03-04-encoding-behavior.md)
+- M03.05 Implement temporary-write/replace save — [`m03/m03-05-filesave.md`](docs/archive/m03/m03-05-filesave.md)
+- M03.06 Implement disk-change conflict detection — [`m03/m03-06-filestate.md`](docs/archive/m03/m03-06-filestate.md)
 
 ## Misc
 

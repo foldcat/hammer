@@ -101,6 +101,8 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/fileid",
 	"tests/unit/fileload",
 	"tests/unit/filecodec",
+	"tests/unit/filesave",
+	"tests/unit/filestate",
 }
 
 // Windows cross-build (M00.03 Windows half): the mingw-w64 import

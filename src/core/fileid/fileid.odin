@@ -213,6 +213,13 @@ stamp_status :: proc(expected, observed: File_Stamp) -> Stamp_Status {
 	return .Changed
 }
 
+// stamp_identity_verified reports whether both checkpoints carry usable
+// platform identities. A false result means a same-size/same-mtime replacement
+// cannot be distinguished by this model, even when stamp_equal returns true.
+stamp_identity_verified :: proc(expected, observed: File_Stamp) -> bool {
+	return expected.id.kind != .None && observed.id.kind != .None
+}
+
 // stamp_equal reports whether two stamps agree on every field — the
 // checkpoint comparison for "the disk still carries exactly the stamp
 // I recorded" (§11.1 step 8). Two `.None` ids compare equal under
@@ -242,8 +249,8 @@ Case_Sensitivity :: enum {
 //
 //   - `.Follow`: the buffer's identity is the link *target's* identity
 //     (stat, not lstat), so `./foo.c` and a symlink to it dedup; the
-//     display path may still be the link. Save semantics through a
-//     symlink are decided in M03.05 and are not implied here.
+//     display path may still be the link. filesave resolves and replaces the
+//     final target under this policy, leaving the link itself in place.
 //   - `.Preserve_Link`: the identity is the link itself (lstat); the
 //     link path is the canonical path, and a second path naming the
 //     target is a different buffer.
