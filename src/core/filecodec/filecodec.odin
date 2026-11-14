@@ -1,13 +1,15 @@
-// Package filecodec implements the file encoding, BOM, and newline policy
-// (M03.03, SPECS.md §7.4) over M03.02's chunked raw loads.
+// Package filecodec implements file encoding, BOM, newline, display, and
+// deliberate-conversion policy (M03.03/M03.04, SPECS.md §7.4) over chunked raw
+// loads.
 //
-// UTF-8 is the only encoding decoded in this slice. A UTF-8 BOM is file
-// metadata, not text: `Decoded.content` excludes it while `Decoded.raw`
-// retains every original byte. UTF-16/UTF-32 BOMs are recognized and retained
-// but open read-only as `.Unsupported_Encoding`; there is no heuristic
-// encoding detection for BOM-less input. Invalid UTF-8 is also read-only and
-// its bytes are never replaced. M03.04 owns escaped rendering, offset maps,
-// and deliberate conversion.
+// UTF-8 is the only initially editable encoding. A UTF-8 BOM is file metadata,
+// not text: `Decoded.content` excludes it while `Decoded.raw` retains every
+// original byte. UTF-16/UTF-32 BOMs are recognized and retained but open
+// read-only as `.Unsupported_Encoding`; there is no heuristic encoding
+// detection for BOM-less input. Invalid UTF-8 is also read-only and its bytes
+// are never implicitly replaced. Owned display projections escape invalid or
+// unsupported bytes and carry raw/display offset maps. Explicit conversion
+// produces separate UTF-8 storage and refuses lossy changes without opt-in.
 //
 // Newline bytes are preserved exactly. The scanner counts lone LF, CRLF, and
 // lone CR sequences across arbitrary chunk boundaries; mixed files stay mixed.

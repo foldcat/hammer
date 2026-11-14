@@ -4,13 +4,12 @@ Historical session entries are archived under
 [`docs/archive/`](docs/archive/), one file per completed task, grouped by
 milestone. This file is an index into that archive.
 
-## Current task: M03.04 — Explicit unsupported/invalid encoding behavior
+## Current task: M03.05 — Temporary-write/replace save
 
-M03.03 is done (UTF-8/BOM/newline policy). M03.04 is active (SPECS.md
-§7.4): clear escaped/replacement rendering for invalid bytes, explicit
-raw/display offset mapping, safe parser degradation, and deliberate
-conversion. Invalid bytes must remain lossless and unsupported encodings
-must stay read-only until the user explicitly chooses conversion.
+M03.04 is done (explicit unsupported/invalid encoding behavior). M03.05 is
+active: save from a stable snapshot through temporary-write/replace, preserve
+encoding/BOM/newline policy, and leave the editable buffer dirty on every
+failure. Escaped display text must never be saved as source content.
 
 ## M00 — Specification, feasibility spikes, and build baseline
 
@@ -44,6 +43,7 @@ must stay read-only until the user explicitly chooses conversion.
 - M03.01 Implement canonical file identity — [`m03/m03-01-fileid.md`](docs/archive/m03/m03-01-fileid.md)
 - M03.02 Implement background chunked loading — [`m03/m03-02-fileload.md`](docs/archive/m03/m03-02-fileload.md)
 - M03.03 Implement UTF-8/BOM/newline policy — [`m03/m03-03-filecodec.md`](docs/archive/m03/m03-03-filecodec.md)
+- M03.04 Implement explicit unsupported/invalid encoding behavior — [`m03/m03-04-encoding-behavior.md`](docs/archive/m03/m03-04-encoding-behavior.md)
 
 ## Misc
 
