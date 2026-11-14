@@ -1,6 +1,6 @@
-// Package journal implements the versioned, checksummed recovery journal
-// primitive (M04.01, SPECS.md §11.3–§11.4). Transaction payloads are opaque
-// bytes here; transaction serialization and buffer replay are separate layers.
+// Package journal implements versioned recovery journals, checkpoints, and
+// generation rotation (M04.01–M04.02, SPECS.md §11.3–§11.5). Transaction
+// payloads are opaque; serialization and buffer application are separate.
 package journal
 
 import "base:runtime"
@@ -9,7 +9,7 @@ import "core:crypto/sha2"
 import filecodec "../filecodec"
 import fileid "../fileid"
 
-FORMAT_VERSION :: u32(1)
+FORMAT_VERSION :: u32(2)
 RECORD_VERSION :: u32(1)
 BASE_HASH_SIZE :: sha2.DIGEST_SIZE_256
 
@@ -36,6 +36,7 @@ Header :: struct {
 	encoding:            filecodec.Metadata,
 	session_id:          u64,
 	process_instance_id: u64,
+	generation:          u64,
 	created_unix_ns:     i64,
 }
 

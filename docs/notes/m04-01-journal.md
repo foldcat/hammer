@@ -7,7 +7,8 @@ remain opaque; transaction serialization/application is M04.05.
 ## Format and identity
 
 All integers are fixed-width little-endian fields; no native struct memory is
-serialized. Format and record versions are independently pinned at 1.
+serialized. M04.01 pinned format and record versions at 1; M04.02 advances the
+journal format to 2 to add generation identity.
 
 ```text
 File:   fixed header (160 bytes) + path bytes + CRC32

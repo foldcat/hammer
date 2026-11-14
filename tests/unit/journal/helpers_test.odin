@@ -26,6 +26,10 @@ journal_path :: proc(dir: string) -> string {
 	return fmt.tprintf("%s/recovery.journal", dir)
 }
 
+generation_path :: proc(dir, kind: string, generation: u64) -> string {
+	return fmt.tprintf("%s/%s-%06d.bin", dir, kind, generation)
+}
+
 expect_ok :: proc(t: ^testing.T, err: errs.Error) -> bool {
 	if errs.ok(err) {
 		return true

@@ -6,12 +6,14 @@ import "core:os"
 import errs "../errs"
 
 // Operation_Hooks is an optional synchronous OS/fault-injection boundary.
-// Nil fields use the real operation. Hooks must preserve the real write/sync
-// contracts and are never retained beyond the Writer lifetime.
+// Nil fields use the real operation. Hooks must preserve the real operation's
+// ownership and handle-cleanup contracts and are borrowed for the Writer life.
 Operation_Hooks :: struct {
-	data:  rawptr,
-	write: proc(data: rawptr, file: ^os.File, bytes: []byte) -> (int, os.Error),
-	sync:  proc(data: rawptr, file: ^os.File) -> os.Error,
+	data:   rawptr,
+	write:  proc(data: rawptr, file: ^os.File, bytes: []byte) -> (int, os.Error),
+	sync:   proc(data: rawptr, file: ^os.File) -> os.Error,
+	close:  proc(data: rawptr, file: ^os.File) -> os.Error,
+	remove: proc(data: rawptr, path: string) -> os.Error,
 }
 
 // Writer owns one exclusively created journal file. It is not thread-safe.
@@ -19,6 +21,7 @@ Operation_Hooks :: struct {
 // valid prefix rather than appending behind a potentially partial record.
 Writer :: struct {
 	file:          ^os.File,
+	generation:    u64,
 	next_sequence: u64,
 	bytes_written: i64,
 	record_count:  int,
@@ -41,6 +44,20 @@ operation_sync :: proc(hooks: ^Operation_Hooks, file: ^os.File) -> os.Error {
 		return hooks.sync(hooks.data, file)
 	}
 	return os.sync(file)
+}
+
+operation_close :: proc(hooks: ^Operation_Hooks, file: ^os.File) -> os.Error {
+	if hooks != nil && hooks.close != nil {
+		return hooks.close(hooks.data, file)
+	}
+	return os.close(file)
+}
+
+operation_remove :: proc(hooks: ^Operation_Hooks, path: string) -> os.Error {
+	if hooks != nil && hooks.remove != nil {
+		return hooks.remove(hooks.data, path)
+	}
+	return os.remove(path)
 }
 
 write_all :: proc(file: ^os.File, hooks: ^Operation_Hooks, data: []byte) -> os.Error {
@@ -108,9 +125,10 @@ create :: proc(
 		return {}, errs.newf(.IO, "journal: cannot create %s: %v", path, open_err, allocator = allocator)
 	}
 	writer.file = file
+	writer.generation = header.generation
 	defer if !errs.ok(err) {
-		os.close(file)
-		os.remove(path)
+		operation_close(options.operations, file)
+		operation_remove(options.operations, path)
 		writer = Writer{}
 	}
 
@@ -225,8 +243,9 @@ writer_close :: proc(writer: ^Writer) -> errs.Error {
 	}
 	file := writer.file
 	allocator := writer.allocator
+	operations := writer.operations
 	writer^ = Writer{}
-	if err := os.close(file); err != nil {
+	if err := operation_close(operations, file); err != nil {
 		return errs.newf(.IO, "journal: cannot close: %v", err, allocator = allocator)
 	}
 	return {}

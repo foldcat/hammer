@@ -7,8 +7,8 @@ import filecodec "../filecodec"
 import fileid "../fileid"
 
 // All persistent fields are fixed-width little-endian values. No Odin struct
-// memory is serialized. Format version 1 uses SHA-256 for base content and
-// CRC32 for file headers and records.
+// memory is serialized. Journal format 2 adds generation identity and uses
+// SHA-256 for base content and CRC32 for file headers and records.
 FILE_MAGIC :: [8]u8{'H', 'M', 'R', 'J', '\r', '\n', 0x1a, '\n'}
 HEADER_FIXED_SIZE :: 160
 HEADER_TRAILER_SIZE :: 4
@@ -64,9 +64,9 @@ encode_header_fixed :: proc(data: []byte, header: Header, path_length: u32) {
 	put_u64(data, 48, header.stamp.size)
 	put_i64(data, 56, header.stamp.mtime_sec)
 	put_u32(data, 64, header.stamp.mtime_nsec)
-	put_u32(data, 68, 0)
+	put_u32(data, 68, u32(header.generation))
 	put_u32(data, 72, path_length)
-	put_u32(data, 76, 0)
+	put_u32(data, 76, u32(header.generation >> 32))
 	copy(data[80:112], base_hash[:])
 	put_u64(data, 112, header.session_id)
 	put_u64(data, 120, header.process_instance_id)
@@ -89,9 +89,6 @@ decode_header_fixed :: proc(data: []byte) -> (header: Header, path_length: u32, 
 	path_length = get_u32(data, 72)
 	header_bytes := u64(get_u32(data, 8))
 	if header_bytes != u64(HEADER_FIXED_SIZE + HEADER_TRAILER_SIZE) + u64(path_length) {
-		return {}, 0, false
-	}
-	if get_u32(data, 68) != 0 || get_u32(data, 76) != 0 {
 		return {}, 0, false
 	}
 	id_kind := get_u32(data, 16)
@@ -130,6 +127,7 @@ decode_header_fixed :: proc(data: []byte) -> (header: Header, path_length: u32, 
 	}
 	header.session_id = get_u64(data, 112)
 	header.process_instance_id = get_u64(data, 120)
+	header.generation = u64(get_u32(data, 68)) | (u64(get_u32(data, 76)) << 32)
 	header.created_unix_ns = get_i64(data, 128)
 	return header, path_length, true
 }

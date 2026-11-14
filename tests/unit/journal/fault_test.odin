@@ -6,10 +6,13 @@ import "core:testing"
 import journal "hammer:core/journal"
 
 Fault_State :: struct {
-	calls:       int,
-	fail_call:   int,
-	max_write:   int,
-	fail_sync:   bool,
+	calls:          int,
+	fail_call:      int,
+	max_write:      int,
+	close_calls:    int,
+	fail_close_call: int,
+	fail_sync:      bool,
+	fail_remove:    bool,
 }
 
 fault_error :: proc() -> os.Error {
@@ -35,6 +38,24 @@ fault_sync :: proc(data: rawptr, file: ^os.File) -> os.Error {
 		return fault_error()
 	}
 	return os.sync(file)
+}
+
+fault_close :: proc(data: rawptr, file: ^os.File) -> os.Error {
+	state := (^Fault_State)(data)
+	state.close_calls += 1
+	close_err := os.close(file)
+	if state.close_calls == state.fail_close_call {
+		return fault_error()
+	}
+	return close_err
+}
+
+fault_remove :: proc(data: rawptr, path: string) -> os.Error {
+	state := (^Fault_State)(data)
+	if state.fail_remove {
+		return fault_error()
+	}
+	return os.remove(path)
 }
 
 @(test)
@@ -95,6 +116,21 @@ test_failed_create_removes_only_its_new_file :: proc(t: ^testing.T) {
 	state := Fault_State{fail_call = 1}
 	hooks := journal.Operation_Hooks{data = &state, write = fault_write}
 	_, err := journal.create(path, test_header("create-fault"), {operations = &hooks}, context.allocator)
+	expect_kind(t, err, .IO)
+	testing.expect(t, !os.exists(path))
+}
+
+@(test)
+test_checkpoint_sync_failure_removes_unpublished_file :: proc(t: ^testing.T) {
+	dir := sandbox(t)
+	if dir == "" {return}
+	defer sandbox_destroy(dir)
+	path := generation_path(dir, "checkpoint", 1)
+	state := Fault_State{fail_sync = true}
+	hooks := journal.Operation_Hooks{data = &state, sync = fault_sync, close = fault_close}
+	header := test_header("checkpoint-sync")
+	header.generation = 1
+	err := journal.write_checkpoint(path, header, transmute([]byte)string("snapshot"), {operations = &hooks}, context.allocator)
 	expect_kind(t, err, .IO)
 	testing.expect(t, !os.exists(path))
 }
