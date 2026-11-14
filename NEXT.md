@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M04.01 — Versioned checksummed journal
+## Current task: M04.02 — Periodic checkpointing and rotation
