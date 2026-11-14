@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M04.03 — Crash recovery discovery
+## Current task: M04.04 — Stale-session/lock detection
