@@ -12,6 +12,7 @@
 //     odin run make.odin -file -- windows          # M00.03 Windows cross-build
 //     odin run make.odin -file -- windows --release
 //     odin run make.odin -file -- test             # core unit tests
+//     odin run make.odin -file -- text-test        # M05.01 native text dependencies
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
@@ -89,6 +90,12 @@ HAMMER_COLLECTION :: "-collection:hammer=" + SRC_DIR
 RECOVERY_TEST_DIR :: #directory + "/tests/integration/recovery"
 RECOVERY_TEST_BINARY :: OUT_DIR + "/recovery_kill_test"
 RECOVERY_TEST_HARNESS :: RECOVERY_TEST_DIR + "/kill_harness.py"
+
+TEXT_TEST_DIR :: #directory + "/tests/integration/textdeps"
+FREETYPE_PKG_VERSION :: "26.7.20" // FreeType 2.15.0 libtool/pkg-config version
+HARFBUZZ_VERSION :: "12.3.2"
+ICU_VERSION :: "78.3"
+SHADERC_VERSION :: "shaderc-2026.3"
 
 CORE_TEST_PACKAGES := []string {
 	"tests/unit/errs",
@@ -268,6 +275,21 @@ main :: proc() {
 			run_odin([]string{"python3", RECOVERY_TEST_HARNESS, "--binary", RECOVERY_TEST_BINARY}, true)
 		} else {
 			fmt.eprintln("[Test] recovery-test currently requires a POSIX SIGKILL controller")
+			os.exit(1)
+		}
+		return
+	}
+
+	// M05.01 native text bindings: verify exact dependency and shader-tool
+	// versions before linking and calling the real Linux libraries.
+	if len(args) > 1 && args[1] == "text-test" {
+		when ODIN_OS == .Linux {
+			if !text_deps_present() {
+				os.exit(1)
+			}
+			run_odin([]string{"odin", "test", TEXT_TEST_DIR, "-vet", HAMMER_COLLECTION})
+		} else {
+			fmt.eprintln("[Test] text-test currently requires Linux")
 			os.exit(1)
 		}
 		return
@@ -522,6 +544,39 @@ run_odin :: proc(cmd_args: []string, inherit_stdio := false) {
 		fmt.eprintf("[Build] Command exited with code %d\n", state.exit_code)
 		os.exit(int(state.exit_code))
 	}
+}
+
+// --- Native text dependency checks (M05.01, Linux only) -----------------
+
+text_deps_present :: proc() -> bool {
+	pins := []struct {
+		pkg:     string,
+		version: string,
+		exact:   string,
+	} {
+		{"freetype2", FREETYPE_PKG_VERSION, "--exact-version=" + FREETYPE_PKG_VERSION},
+		{"harfbuzz", HARFBUZZ_VERSION, "--exact-version=" + HARFBUZZ_VERSION},
+		{"icu-uc", ICU_VERSION, "--exact-version=" + ICU_VERSION},
+	}
+	for pin in pins {
+		if !run_tool([]string{"pkg-config", pin.exact, pin.pkg}, true) {
+			fmt.eprintf("[Test] required %s %s (pkg-config exact-version check failed)\n", pin.pkg, pin.version)
+			return false
+		}
+	}
+	version, ok := tool_output([]string{"glslc", "--version"})
+	if !ok || !strings.has_prefix(version, SHADERC_VERSION + "\n") {
+		fmt.eprintf("[Test] required %s (glslc --version mismatch)\n", SHADERC_VERSION)
+		return false
+	}
+	fmt.printf(
+		"[Test] pins: FreeType 2.15.0 (%s), HarfBuzz %s, ICU %s, %s\n",
+		FREETYPE_PKG_VERSION,
+		HARFBUZZ_VERSION,
+		ICU_VERSION,
+		SHADERC_VERSION,
+	)
+	return true
 }
 
 // --- Sokol setup (Linux only) -----------------------------------------

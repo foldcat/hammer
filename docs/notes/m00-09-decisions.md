@@ -69,8 +69,8 @@ Pinned (recorded in-repo, verified this session):
 | Sokol bindings | sokol-odin submodule `ae94aa54d4ecbd7503e299694fa8dc328607d255`                        | `.gitmodules`; `git submodule status`            |
 | Sokol C        | floooh/sokol `93aa187b5d387cc24b7290b3ca3f13f61e139e7c`, sha256 `3e5a1b36…785c9`, zlib | `make.odin`; `third_party/sokol-c/SOURCE_COMMIT` |
 
-System (present on this machine, recorded versions; the repo has no
-runtime pin for them yet — see follow-ups):
+System components present on this machine. M05.01 text dependencies have
+exact build/runtime checks; the other versions are recorded below:
 
 | Component       | Version (this machine)                             | Used by                                                                            |
 | --------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -79,14 +79,16 @@ runtime pin for them yet — see follow-ups):
 | libX11          | 1.8.14                                             | clipboard/DPI/IME spikes; has the `XGetWindowProperty` NULL-out-param bug (M00.04) |
 | GLFW            | system libglfw3 3.4.0                              | Wayland spike only — not a product dependency                                      |
 | Weston          | 14 (reference compositor, `headless xwayland` USE) | Wayland spike harness                                                              |
-| shaderc/glslc   | shaderc-2026.3                                     | not yet pinned (M05.01)                                                            |
+| shaderc/glslc   | shaderc-2026.3 (exact `glslc --version` check)     | pinned M05.01; renderer tooling integration remains later work                    |
+| FreeType        | 2.15.0 (pkg-config 26.7.20)                        | pinned/bound M05.01; FTL                                                          |
+| HarfBuzz        | 12.3.2                                             | pinned/bound M05.01; Old MIT                                                      |
+| ICU4C           | 78.3, Unicode 17.0; unversioned C symbols          | pinned/bound M05.01; Unicode-3.0                                                  |
 | kernel / FUSE   | 6.18.50; FUSE protocol 7.45 offered                | FUSE spike                                                                         |
 | fusermount3     | libfuse 3.18.3, setuid root                        | FUSE deployment helper                                                             |
 | Mesa            | 26.1.8 (llvmpipe software GL used headless)        | all GL validation                                                                  |
 
-Not yet pinned anywhere (explicit gap; owners below): shader tooling
-(`glslc`), font/shaping libraries (FreeType/HarfBuzz) → M05.01;
-Tree-sitter → M12.01; WinFsp → M19.05/M20.07. Sokol C sources are fetched
+M05.01 pinned shader tooling, FreeType/HarfBuzz, and ICU. Remaining explicit
+dependency gaps: Tree-sitter → M12.01; WinFsp → M19.05/M20.07. Sokol C sources are fetched
 at build time by `make.odin` (sha256-verified) rather than vendored;
 `third_party/sokol-c/` is gitignored and carries a `SOURCE_COMMIT`
 marker.
@@ -195,9 +197,10 @@ Each item is recorded in its spike doc; this is the ledger.
     `trap()`), which hangs headless crash tests; the sandbox WINEPREFIX
     has AeDebug set to auto-exit so crash runs terminate. Real-Windows
     exit-code behavior unvalidated (m01-01 Finding 4).
-- **M05.01**
-  - Pin shader tooling (`glslc`, shaderc-2026.3 present) and FreeType/
-    HarfBuzz with licenses (m00-02 gap, m00-03).
+- **M05.01 done**
+  - Shader tooling, FreeType/HarfBuzz, and ICU are pinned with licenses in
+    `docs/notes/m05-01-text-dependencies.md`; portable shader generation and
+    product font integration remain later renderer tasks.
 - **M06.04 (clipboard)**
   - libX11 1.8.14 dereferences `XGetWindowProperty` out-params
     unconditionally — never pass NULL (m00-04 Finding 2).

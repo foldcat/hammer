@@ -38,7 +38,14 @@ libraries):
 odin run make.odin -file                    # debug build
 odin run make.odin -file -- --release       # optimized build
 odin run make.odin -file -- test            # core unit tests (headless)
+odin run make.odin -file -- text-test       # pinned native text bindings (Linux)
 ```
+
+M05.01 adds narrow Linux bindings for FreeType 2.15.0, HarfBuzz 12.3.2,
+and ICU4C 78.3 (Unicode 17.0, with unversioned C symbols). The text test
+requires those exact `pkg-config` versions plus shaderc/glslc 2026.3. These
+libraries are not yet used for product font rendering; M05.02 begins that
+integration.
 
 ### Configuration
 
