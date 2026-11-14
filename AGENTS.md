@@ -65,6 +65,10 @@ commit/push unless asked. Do not stash user changes automatically. Do
 not discard user modifications. Recursive deletion requires a resolved
 path, confirmed containment, and a narrow allowlist.
 
+**Allocators.** `context.allocator` is replaced with a panic allocator.
+Use arena allocators or other custom allocators such as pools. Ensure that
+`free_all` MUST be called at some point.
+
 **Ownership.** Every allocation has an owner and a matching destructor.
 Containers do not deep-copy. Slices are views. Do not free string
 literals, borrowed subslices, or scratch-backed results after reset. Do
