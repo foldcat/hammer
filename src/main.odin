@@ -231,8 +231,8 @@ event :: proc "c" (ev: ^sapp.Event) {
 			request_quit(.User_Request, "esc")
 		}
 	case .QUIT_REQUESTED:
-		// Window close button / OS close. M04.06 inserts the
-		// dirty-buffer review before this unconditional quit.
+		// This demo has no editable document buffers. Their product integration
+		// must route this event through lifecycle.Close_Guard before quitting.
 		request_quit(.User_Request, "window-close")
 	case .RESIZED:
 		// Resize must survive any scale value the backend reports

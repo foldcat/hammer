@@ -1,10 +1,9 @@
 // Package lifecycle: the application lifecycle state machine.
 //
-// This is the skeleton the SPECS.md §11.6 shutdown state machine builds
-// on. M01.01 implements the transitions and the fatal-error plumbing;
-// the dirty-buffer and running-job review stages (M04.06/M04.07/M09.08)
-// plug in as decision points inside the Quitting phase without changing
-// this shape.
+// M01.01 implements the transitions and fatal-error plumbing. Close_Guard in
+// close.odin (M04.06–M04.07) supplies dirty-buffer and save-failure decisions
+// inside Quitting; running-job review (M09.08) plugs in without changing this
+// shape.
 //
 // Transitions are programmer invariants: calling a transition from the
 // wrong phase is a bug and asserts. `request_quit` is deliberately
