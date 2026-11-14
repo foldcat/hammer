@@ -2,7 +2,9 @@
 // sandbox, error assertions, and the result-waiting loop.
 package fileload_test
 
+import "core:fmt"
 import "core:os"
+import "core:sync"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -12,19 +14,52 @@ import errs "hammer:core/errs"
 import fileload "hammer:core/fileload"
 
 // SANDBOX is the task-owned test sandbox (AGENTS.md §19: tests route
-// state into a unique sandbox, never real user files). /tmp/opencode
-// is the approved external scratch area; every test uses a distinct
-// file name inside it so parallel test threads cannot collide.
-SANDBOX :: "/tmp/opencode/fileload-tests"
+// state into a unique sandbox, never real user files). It is created
+// under the system temp dir on first use — never a hardcoded
+// /tmp/opencode path — so the tests run anywhere /tmp (or $TMPDIR) is
+// writable, with or without an opencode-provided scratch area. Every
+// test uses a distinct file name inside it so parallel test threads
+// cannot collide.
+SANDBOX: string
+
+// sandbox_once ensures the shared sandbox path is computed exactly once
+// across the parallel test threads.
+@(private="file")
+sandbox_once: sync.Once
+
+// sandbox_buf backs SANDBOX so the path needs no allocator: a test's
+// context.allocator does not outlive that test, so a globally shared
+// path cannot be allocated from it.
+@(private="file")
+sandbox_buf: [512]u8
 
 // sandbox_init creates the sandbox directory once.
 sandbox_init :: proc(t: ^testing.T) {
-	if os.exists(SANDBOX) {
-		return
+	sync.once_do(&sandbox_once, proc() {
+		dir, err := os.make_directory_temp("", "hammer-fileload-*", context.temp_allocator)
+		if err != nil {
+			return
+		}
+		n := copy(sandbox_buf[:], dir)
+		if n < len(dir) {
+			// The path did not fit in the fixed buffer; leave SANDBOX
+			// empty so sandbox_init reports the failure instead of
+			// running against a truncated, non-existent directory.
+			return
+		}
+		SANDBOX = string(sandbox_buf[:n])
+	})
+	if SANDBOX == "" {
+		testing.expect(t, false, "cannot create the fileload test sandbox")
 	}
-	if err := os.make_directory_all(SANDBOX); err != nil {
-		testing.expectf(t, false, "cannot create the sandbox %s: %v", SANDBOX, err)
-	}
+}
+
+// sandbox_path joins a test-owned file name onto the shared sandbox.
+// The result is scratch-allocated (context.temp_allocator), matching the
+// existing convention: callers use it within the test scope, then remove
+// the file with os.remove_all before the scratch arena is reset.
+sandbox_path :: proc(name: string) -> string {
+	return fmt.tprintf("%s/%s", SANDBOX, name)
 }
 
 // expect_ok asserts that `e` is the no-error sentinel (for

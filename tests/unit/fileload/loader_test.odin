@@ -16,7 +16,7 @@ import fileload "hammer:core/fileload"
 // returns its path; the caller removes it.
 write_fixture :: proc(t: ^testing.T, name: string, tag: u8, n: int) -> string {
 	sandbox_init(t)
-	path := fmt.tprintf("%s/%s", SANDBOX, name)
+	path := sandbox_path(name)
 	content := make([]u8, n, context.allocator)
 	defer delete(content)
 	for i in 0 ..< n {
@@ -213,7 +213,7 @@ test_loader_close_drains :: proc(t: ^testing.T) {
 @(test)
 test_loader_error_result :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	missing := SANDBOX + "/loader-missing.txt"
+	missing := sandbox_path("loader-missing.txt")
 	os.remove_all(missing)
 
 	l: fileload.Loader
@@ -232,7 +232,7 @@ test_loader_error_result :: proc(t: ^testing.T) {
 @(test)
 test_loader_cancel_midload :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	path := SANDBOX + "/loader-slow.txt"
+	path := sandbox_path("loader-slow.txt")
 	// 64 MiB with a 1 KiB chunk size: thousands of read+intern steps,
 	// comfortably longer than the 2 ms cancel delay, so the flag is
 	// observed mid-load (a picked-up-after-cancel request would also

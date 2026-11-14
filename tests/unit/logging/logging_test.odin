@@ -38,12 +38,15 @@ thread_worker :: proc(t: ^thread.Thread) {
 
 // sandbox_dir creates a unique, task-owned directory under the system
 // temp dir (per AGENTS.md §19, test state never touches user state
-// directories). The caller owns the returned directory.
+// directories). It is created with a random suffix under the real temp
+// dir — never a hardcoded /tmp/opencode path — so it works without an
+// opencode-provided scratch area. The caller owns the returned
+// directory and must remove it.
 sandbox_dir :: proc(t: ^testing.T, name: string) -> string {
-	temp, _ := os.temp_directory(context.temp_allocator)
-	dir := fmt.tprintf("%s/opencode/%s-%d", temp, name, os.get_pid())
-	if err := os.make_directory_all(dir); err != nil {
-		testing.expectf(t, false, "cannot create sandbox dir %s: %v", dir, err)
+	pattern := fmt.tprintf("%s-*", name)
+	dir, err := os.make_directory_temp("", pattern, context.temp_allocator)
+	if err != nil {
+		testing.expectf(t, false, "cannot create sandbox dir for %s: %v", name, err)
 		return ""
 	}
 	return dir

@@ -44,7 +44,7 @@ stamp_from_stat :: proc(fi: os.File_Info) -> fileid.File_Stamp {
 @(test)
 test_capture_matches_fresh_stat :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	path := SANDBOX + "/capture-basic.txt"
+	path := sandbox_path("capture-basic.txt")
 	content := "hello, hammer\nünïcode ✓ αβγ\n"
 	expect_ok(t, os.write_entire_file(path, transmute([]byte)content))
 	defer os.remove_all(path)
@@ -67,7 +67,7 @@ test_capture_matches_fresh_stat :: proc(t: ^testing.T) {
 @(test)
 test_capture_error_paths :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	missing := SANDBOX + "/capture-missing.txt"
+	missing := sandbox_path("capture-missing.txt")
 	os.remove_all(missing)
 
 	_, err := fileload.capture_file(missing, context.allocator)
@@ -78,7 +78,7 @@ test_capture_error_paths :: proc(t: ^testing.T) {
 		// Directories open on Linux, so the regular-file policy is
 		// what rejects them (on Windows os.open fails first — the
 		// Wine consumer exercises that branch).
-		dir := SANDBOX + "/capture-dir"
+		dir := sandbox_path("capture-dir")
 		os.make_directory_all(dir)
 		defer os.remove_all(dir)
 		_, err2 := fileload.capture_file(dir, context.allocator)
@@ -133,7 +133,7 @@ test_capture_mtime_split :: proc(t: ^testing.T) {
 @(test)
 test_load_chunked_roundtrip :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	path := SANDBOX + "/load-multi.txt"
+	path := sandbox_path("load-multi.txt")
 
 	// Patterned content spanning many chunks: multibyte scalars,
 	// CRLF pairs, and enough bytes to force chunk boundary splits.
@@ -177,7 +177,7 @@ test_load_chunked_roundtrip :: proc(t: ^testing.T) {
 @(test)
 test_load_empty_file :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	path := SANDBOX + "/load-empty.txt"
+	path := sandbox_path("load-empty.txt")
 	expect_ok(t, os.write_entire_file(path, []u8{}))
 	defer os.remove_all(path)
 
@@ -193,7 +193,7 @@ test_load_empty_file :: proc(t: ^testing.T) {
 @(test)
 test_load_interns_repeated_chunks :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	path := SANDBOX + "/load-dedup.txt"
+	path := sandbox_path("load-dedup.txt")
 
 	// Eight identical 64-byte chunks: regular-file reads fill the
 	// buffer, so each read interns the same 64 bytes — one stored
@@ -227,7 +227,7 @@ test_load_error_paths :: proc(t: ^testing.T) {
 	sandbox_init(t)
 
 	// Missing file: .NotFound, nothing to destroy.
-	missing := SANDBOX + "/load-missing.txt"
+	missing := sandbox_path("load-missing.txt")
 	os.remove_all(missing)
 	loaded: fileload.Loaded
 	err := fileload.load_file(&loaded, missing, {}, context.allocator)
@@ -238,7 +238,7 @@ test_load_error_paths :: proc(t: ^testing.T) {
 
 	when ODIN_OS == .Linux {
 		// A directory opens but is not a regular file: .Unsupported.
-		dir := SANDBOX + "/load-dir"
+		dir := sandbox_path("load-dir")
 		os.make_directory_all(dir)
 		defer os.remove_all(dir)
 		loaded2: fileload.Loaded
@@ -251,7 +251,7 @@ test_load_error_paths :: proc(t: ^testing.T) {
 @(test)
 test_load_cancelled_before_start :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	path := SANDBOX + "/load-cancel.txt"
+	path := sandbox_path("load-cancel.txt")
 	expect_ok(t, os.write_entire_file(path, []u8{'h', 'i'}))
 	defer os.remove_all(path)
 
@@ -325,7 +325,7 @@ modifier_inplace_proc :: proc(t: ^thread.Thread) {
 @(test)
 test_load_never_torn_by_concurrent_write :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	path := SANDBOX + "/load-race.txt"
+	path := sandbox_path("load-race.txt")
 	os.remove_all(fmt.tprintf("%s.tmp", path))
 
 	content_a := make([]u8, 256 * 1024, context.allocator)
@@ -390,7 +390,7 @@ test_load_never_torn_by_concurrent_write :: proc(t: ^testing.T) {
 @(test)
 test_load_conflict_or_consistent_under_inplace_write :: proc(t: ^testing.T) {
 	sandbox_init(t)
-	path := SANDBOX + "/load-race-inplace.txt"
+	path := sandbox_path("load-race-inplace.txt")
 
 	content_a := make([]u8, 128 * 1024, context.allocator)
 	defer delete(content_a)
