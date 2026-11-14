@@ -3160,7 +3160,7 @@ Every agent session:
 
 1. Read `AGENTS.md`.
 2. Read `NEXT.md`.
-3. Read the active milestone in `ROADMAP.md`.
+3. Read the active milestone in `docs/roadmap/`.
 4. Inspect existing code and tests.
 5. Confirm prerequisites.
 6. Write a short implementation plan.
@@ -3249,7 +3249,7 @@ Do not turn the project into a conventional IDE.
 ## Before changing code
 
 1. Read NEXT.md.
-2. Read the active ROADMAP.md milestone.
+2. Read the active milestone in `docs/roadmap/`.
 3. Read relevant architecture and ADR documents.
 4. Inspect existing implementation and tests.
 5. Confirm prerequisites are complete.
@@ -3317,7 +3317,7 @@ Never claim tests passed unless they were run.
 
 Update:
 
-- ROADMAP.md
+- docs/roadmap/ (active milestone file)
 - NEXT.md
 - Relevant docs/ADRs
 - Session summary
