@@ -12,6 +12,7 @@
 //     odin run make.odin -file -- windows          # M00.03 Windows cross-build
 //     odin run make.odin -file -- windows --release
 //     odin run make.odin -file -- test             # core unit tests
+//     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
 // The `windows` target cross-builds hammer.exe for windows_amd64 from
@@ -84,6 +85,10 @@ SOKOL_COLLECTION :: "-collection:sokol=" + SOKOL_PKG_DIR
 // they are never compiled into product builds; the `hammer` collection
 // maps them back onto the source packages under test.
 HAMMER_COLLECTION :: "-collection:hammer=" + SRC_DIR
+
+RECOVERY_TEST_DIR :: #directory + "/tests/integration/recovery"
+RECOVERY_TEST_BINARY :: OUT_DIR + "/recovery_kill_test"
+RECOVERY_TEST_HARNESS :: RECOVERY_TEST_DIR + "/kill_harness.py"
 
 CORE_TEST_PACKAGES := []string {
 	"tests/unit/errs",
@@ -245,6 +250,26 @@ main :: proc() {
 	if len(args) > 1 && args[1] == "windows" {
 		stage_config(args[2:])
 		windows_main(args[2:])
+		return
+	}
+
+	// M04.08 process-kill recovery integration. The Python controller owns
+	// exact-point acknowledgments, SIGKILL, timeouts, and sandbox cleanup.
+	if len(args) > 1 && args[1] == "recovery-test" {
+		when ODIN_OS == .Linux {
+			run_odin([]string {
+				"odin",
+				"build",
+				RECOVERY_TEST_DIR,
+				"-vet",
+				HAMMER_COLLECTION,
+				"-out:" + RECOVERY_TEST_BINARY,
+			})
+			run_odin([]string{"python3", RECOVERY_TEST_HARNESS, "--binary", RECOVERY_TEST_BINARY}, true)
+		} else {
+			fmt.eprintln("[Test] recovery-test currently requires a POSIX SIGKILL controller")
+			os.exit(1)
+		}
 		return
 	}
 

@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M04.08 — Add kill-at-random-point recovery tests
+## Current task: M05.01 — Bind and pin font/shaping/Unicode libraries
