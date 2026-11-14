@@ -1,5 +1,5 @@
-// Package txn: transactions, revision tracking, anchors, and the
-// branching in-memory undo tree (M02.05–M02.07).
+// Package txn: transactions, revision tracking, anchors, the branching undo
+// tree, and persistent undo archives (M02.05–M02.07, M04.05).
 //
 // The transaction layer over the persistent rope (SPECS.md §8.1):
 // every edit to a document goes through a transaction — typing, paste,
@@ -12,8 +12,8 @@
 //
 // Contracts:
 //
-// - **Revisions.** `doc.revision` (u64, starts at 0 for the empty
-//   initial state) identifies the current history state. It is the
+// - **Revisions.** `doc.revision` (u64, starts at 0 for the retained base
+//   snapshot, empty or nonempty) identifies the current history state. It is the
 //   buffer revision for stale-rejection and background-result
 //   validation (SPECS.md §4.3). Applied transactions draw their
 //   `after` revision from a global counter (`doc.next_revision`), so
@@ -167,6 +167,7 @@ Options :: struct {
 Doc :: struct {
 	store:        chunk.Store,
 	tree:         rope.Tree,
+	initial_root: ^rope.Node, // retained base-content snapshot for revision 0
 	revision:     u64, // the current node's `after` (0 = initial state)
 	current:      Transaction_ID, // current undo-tree node; 0 = initial state
 	next_id:      u64, // next Transaction_ID to assign
@@ -200,6 +201,28 @@ doc_init :: proc(
 	doc.next_id = 1
 	doc.next_revision = 1
 	doc.log = make([dynamic]Log_Entry, allocator)
+	return {}
+}
+
+// doc_init_from_bytes prepares a document whose revision-0 state contains
+// base_content. The content is copied into the document's chunk store; the
+// caller's slice is borrowed only for this call. No history node is created.
+doc_init_from_bytes :: proc(
+	doc: ^Doc,
+	base_content: []byte,
+	options: Options,
+	allocator := context.allocator,
+) -> errs.Error {
+	if err := doc_init(doc, options, allocator); !errs.ok(err) {
+		return err
+	}
+	if len(base_content) > 0 {
+		if err := rope.tree_insert(&doc.tree, 0, base_content, allocator); !errs.ok(err) {
+			doc_destroy(doc)
+			return err
+		}
+	}
+	doc.initial_root = doc.tree.root
 	return {}
 }
 
@@ -466,6 +489,14 @@ doc_check :: proc(doc: ^Doc, allocator := context.allocator) -> errs.Error {
 					allocator = allocator,
 				)
 			}
+			if entry.before_root != doc.initial_root || entry.before_selection != (Selection{}) {
+				return errs.newf(
+					.Internal,
+					"txn: root child %v does not match the initial snapshot",
+					entry.id,
+					allocator = allocator,
+				)
+			}
 		} else {
 			if entry.parent >= entry.id {
 				return errs.newf(
@@ -551,7 +582,7 @@ doc_check :: proc(doc: ^Doc, allocator := context.allocator) -> errs.Error {
 	}
 
 	// The current state: the doc revision and tree root must match the
-	// current node (the initial state is the empty document).
+	// current node or the retained revision-0 base snapshot.
 	if doc.current == 0 {
 		if doc.revision != 0 {
 			return errs.newf(
@@ -561,10 +592,10 @@ doc_check :: proc(doc: ^Doc, allocator := context.allocator) -> errs.Error {
 				allocator = allocator,
 			)
 		}
-		if doc.tree.root != nil {
+		if doc.tree.root != doc.initial_root {
 			return errs.newf(
 				.Internal,
-				"txn: at the initial state but the tree root is not nil",
+				"txn: at the initial state but the tree root is not the base snapshot",
 				allocator = allocator,
 			)
 		}
@@ -869,16 +900,16 @@ ops_destroy_partial :: proc(ops: []Operation, allocator := context.allocator) {
 	}
 }
 
-// ops_destroy frees an owned operation copy.
-ops_destroy :: proc(ops: []Operation) {
+// ops_destroy frees an owned operation copy with its creating allocator.
+ops_destroy :: proc(ops: []Operation, allocator := context.allocator) {
 	for op in ops {
 		switch o in op {
 		case Insert:
-			delete(o.data)
+			delete(o.data, allocator)
 		case Delete:
 		case Replace:
-			delete(o.data)
+			delete(o.data, allocator)
 		}
 	}
-	delete(ops)
+	delete(ops, allocator)
 }

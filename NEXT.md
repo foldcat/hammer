@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M04.05 — Persist undo transactions and branches
+## Current task: M04.06 — Implement dirty-buffer close/quit decisions
