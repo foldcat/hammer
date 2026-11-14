@@ -1,6 +1,6 @@
-// Package journal implements versioned recovery journals, checkpoints,
-// generation rotation, and discovery (M04.01–M04.03, SPECS.md §11.3–§11.5).
-// Transaction payloads are opaque; serialization/buffer application are separate.
+// Package journal implements recovery journals, checkpoints, discovery, and
+// OS-backed session locks (M04.01–M04.04, SPECS.md §11.3–§11.5). Transaction
+// payloads are opaque; serialization/buffer application are separate.
 package journal
 
 import "base:runtime"
