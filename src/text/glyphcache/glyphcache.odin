@@ -129,6 +129,22 @@ clear :: proc(cache: ^Cache) {
 	cache.tick = 0
 }
 
+reset :: proc(cache: ^Cache) {
+	for &page in cache.pages {
+		for &pixel in page.pixels {
+			pixel = 0
+		}
+		runtime.clear(&page.keys)
+		page.cursor_x = 1
+		page.cursor_y = 1
+		page.row_height = 0
+		page.last_used = 0
+		page.dirty = page.pixels != nil
+	}
+	runtime.clear(&cache.entries)
+	cache.tick = 0
+}
+
 get :: proc(cache: ^Cache, key: Key, rasterize: Rasterize_Proc, user: rawptr) -> (Entry, errs.Error) {
 	if err := validate_key(key, cache.allocator); !errs.ok(err) {
 		return {}, err

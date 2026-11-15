@@ -105,6 +105,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/platform",
 	"tests/unit/config",
 	"tests/unit/coords",
+	"tests/unit/dpi",
 	"tests/unit/input",
 	"tests/unit/queue",
 	"tests/unit/layout",
@@ -691,9 +692,8 @@ system_deps_present :: proc() -> bool {
 		append(&missing, "ar (binutils)")
 	}
 
-	// The Sokol libraries link against X11, Xi, Xcursor and GL at final
-	// link time; the dev symlinks must be present.
-	libs := []string{"libX11.so", "libXi.so", "libXcursor.so", "libGL.so"}
+	// Sokol links X11, Xi, Xcursor and GL; DPI monitor tracking links Xrandr.
+	libs := []string{"libX11.so", "libXi.so", "libXcursor.so", "libGL.so", "libXrandr.so"}
 	cache := ""
 	desc := os.Process_Desc{command = []string{"ldconfig", "-p"}}
 	// temp-allocated output; borrowed for the duration of this proc only.
@@ -715,10 +715,10 @@ system_deps_present :: proc() -> bool {
 		fmt.eprintf("[Setup]   - %s\n", item)
 	}
 	fmt.eprintln(
-		"[Setup] Gentoo: emerge -av x11-libs/libX11 x11-libs/libXi x11-libs/libXcursor media-libs/mesa sys-devel/binutils",
+		"[Setup] Gentoo: emerge -av x11-libs/libX11 x11-libs/libXi x11-libs/libXcursor x11-libs/libXrandr media-libs/mesa sys-devel/binutils",
 	)
 	fmt.eprintln(
-		"[Setup] Debian/Ubuntu: apt install libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev build-essential",
+		"[Setup] Debian/Ubuntu: apt install libx11-dev libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev build-essential",
 	)
 	return false
 }

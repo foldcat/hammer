@@ -1,4 +1,4 @@
-// Rendering (M01.06): the basic column/tag/body rectangles.
+// Rendering (M01.06, M05.06): the basic column/tag/body rectangles.
 //
 // This is the application-layer renderer (package main): it draws the
 // logical window geometry from `core/layout` with sokol_gfx,
@@ -101,7 +101,7 @@ render_frame :: proc() {
 	if phys.width <= 0 || phys.height <= 0 {
 		return
 	}
-	logical_size, err := coords.to_logical_size(phys, state.scale)
+	logical_size, err := coords.to_logical_size(phys, state.dpi.scale)
 	if !errs.ok(err) {
 		errs.destroy(&err)
 		logical_size = coords.Logical_Size{phys.width, phys.height}
@@ -141,10 +141,10 @@ render_frame :: proc() {
 // logical rectangle `r` mapped to clip coordinates. Logical y=0 is
 // the top edge; GL clip y=+1 is the top.
 quad_vertices :: proc(verts: []Vertex, r: layout.Rect, color: [4]f32, fb: coords.Physical_Size) {
-	x0 := 2 * r.x * state.scale / fb.width - 1
-	x1 := 2 * (r.x + r.width) * state.scale / fb.width - 1
-	y0 := 1 - 2 * r.y * state.scale / fb.height
-	y1 := 1 - 2 * (r.y + r.height) * state.scale / fb.height
+	x0 := 2 * r.x * state.dpi.scale / fb.width - 1
+	x1 := 2 * (r.x + r.width) * state.dpi.scale / fb.width - 1
+	y0 := 1 - 2 * r.y * state.dpi.scale / fb.height
+	y1 := 1 - 2 * (r.y + r.height) * state.dpi.scale / fb.height
 	bl := Vertex{{x0, y1}, color}
 	br := Vertex{{x1, y1}, color}
 	tr := Vertex{{x1, y0}, color}
@@ -193,7 +193,7 @@ when ODIN_OS == .Linux {
 		// larger configured font (21pt -> tag height 32) paints tag
 		// color there — proving font-size settings visibly change
 		// the layout after rebuild.
-		below_tag := probe_pixel(coords.Logical_Point{fb.width / (2 * state.scale), 30}, fb)
+		below_tag := probe_pixel(coords.Logical_Point{fb.width / (2 * state.dpi.scale), 30}, fb)
 		log.infof(
 			"render-probe: tag=#%02X%02X%02X body=#%02X%02X%02X corner=#%02X%02X%02X below-tag=#%02X%02X%02X",
 			tag[0],
@@ -216,8 +216,8 @@ when ODIN_OS == .Linux {
 	// the top).
 	probe_pixel :: proc(p: coords.Logical_Point, fb: coords.Physical_Size) -> [3]u8 {
 		px: [4]u8
-		xi := i32(int(p.x * state.scale))
-		yi := i32(int(fb.height) - 1 - int(p.y * state.scale))
+		xi := i32(int(p.x * state.dpi.scale))
+		yi := i32(int(fb.height) - 1 - int(p.y * state.dpi.scale))
 		if xi < 0 || yi < 0 || xi >= i32(int(fb.width)) || yi >= i32(int(fb.height)) {
 			return {0, 0, 0}
 		}

@@ -9,6 +9,7 @@
 //   HAMMER_AUTOQUIT_FRAMES=<n>  request quit after n frames (headless smoke test)
 //   HAMMER_TEST_PANIC=1         panic during frame 2 (panic-reporting smoke test)
 //   HAMMER_RENDER_PROBE=1       log rendered pixel colors at frame 5 (render validation)
+//   HAMMER_TEST_DPI_SCALES=...  comma-separated per-frame scales (at most 8)
 //   HAMMER_LOG=<path>           log file path; empty string disables file logging
 package main
 
@@ -19,6 +20,7 @@ import "core:mem"
 import mem_virtual "core:mem/virtual"
 import "core:os"
 import "core:strconv"
+import "core:strings"
 
 import sapp "sokol:app"
 import sg "sokol:gfx"
@@ -33,8 +35,11 @@ import "platform"
 import generated "config/generated"
 import coords "core/coords"
 import config "core/config"
+import "core/dpi"
 import input "core/input"
 import fonts "text/fonts"
+
+MAX_TEST_DPI_SCALES :: 8
 
 State :: struct {
 	pass_action:     sg.Pass_Action,
@@ -44,12 +49,11 @@ State :: struct {
 	// probe_frame is the frame at which the render probe fires
 	// (HAMMER_RENDER_PROBE); 0 = disabled.
 	probe_frame:     i64,
-	// scale is the editor-owned, always-valid physical/logical ratio
-	// (M01.04). window_metrics validates the backend value and falls
-	// back to 1.0; input normalization and rendering trust this
-	// cached value, so the external input is validated once, at the
-	// boundary.
-	scale:           f32,
+	// dpi is the editor-owned, always-valid scale and font-size state.
+	// Input normalization and rendering trust this validated cache.
+	dpi:             dpi.State,
+	test_dpi_scales: [MAX_TEST_DPI_SCALES]f32,
+	test_dpi_count:  int,
 }
 
 state: State
@@ -192,6 +196,7 @@ frame :: proc "c" () {
 	defer mem_virtual.arena_free_all(&temp)
 
 	state.frame_count += 1
+	sync_dpi_changes()
 
 	if app.phase == .Initializing {
 		lifecycle.app_enter_running(&app)
@@ -214,6 +219,10 @@ frame :: proc "c" () {
 	render_frame()
 	sg.end_pass()
 	sg.commit()
+}
+
+sync_dpi_changes :: proc() {
+	window_metrics("window dpi changed", log.Level.Info, false)
 }
 
 event :: proc "c" (ev: ^sapp.Event) {
@@ -343,48 +352,74 @@ sokol_framebuffer_size :: proc(user: rawptr) -> (width, height: i32) {
 }
 
 sokol_dpi_scale :: proc(user: rawptr) -> f32 {
-	return sapp.dpi_scale()
+	if state.test_dpi_count > 0 {
+		index := min(int(state.frame_count), state.test_dpi_count - 1)
+		return state.test_dpi_scales[index]
+	}
+	return platform_dpi_scale()
 }
 
-// window_metrics fetches the physical window metrics from the backend
-// and converts them to logical layout units with core/coords (M01.03).
-// An invalid scale (zero, negative, non-finite, absurd) is reported
-// and falls back to 1.0 — logical equals physical — so a broken DPI
-// value degrades instead of crashing (M01 acceptance).
+// window_metrics fetches physical metrics and refreshes the validated DPI
+// state. Invalid updates retain the last valid scale (initially 1.0).
 window_metrics :: proc(
 	what: string,
 	level := log.Level.Info,
+	log_always := true,
 ) -> (
 	physical: coords.Physical_Size,
 	logical: coords.Logical_Size,
 	scale: f32,
 ) {
+	previous_scale := state.dpi.scale
+	previous_glyph_size := state.dpi.glyph_pixel_size
 	width, height := services.window.framebuffer_size(services.user)
 	scale = services.window.dpi_scale(services.user)
 	physical = coords.Physical_Size{f32(width), f32(height)}
 	converted, err := coords.to_logical_size(physical, scale)
 	if !errs.ok(err) {
-		log.logf(log.Level.Error, "window: %v (falling back to scale 1.0)", errs.describe(err))
+		if log_always {
+			log.logf(log.Level.Error, "window: %v (retaining the last valid scale)", errs.describe(err))
+		}
 		errs.destroy(&err)
-		logical = coords.Logical_Size{physical.width, physical.height}
-		scale = 1.0
+		scale = previous_scale
+		logical = coords.Logical_Size{physical.width / scale, physical.height / scale}
 	} else {
 		logical = converted
 	}
-	// The cached, always-valid scale that input normalization uses
-	// (M01.04); refreshed here and only here.
-	state.scale = scale
-	log.logf(
-		level,
-		"%s: %vx%v px, %vx%v logical, dpi_scale=%.2f, backend=%v",
-		what,
-		width,
-		height,
-		logical.width,
-		logical.height,
-		scale,
-		sg.query_backend(),
-	)
+	_, dpi_err := dpi.update(&state.dpi, cfg.Font_Size_Points, scale)
+	if !errs.ok(dpi_err) {
+		if log_always {
+			log.errorf("dpi: %v (retaining the last valid state)", errs.describe(dpi_err))
+		}
+		errs.destroy(&dpi_err)
+		scale = previous_scale
+		logical = coords.Logical_Size{physical.width / scale, physical.height / scale}
+	}
+	if scale != previous_scale {
+		log.infof(
+			"dpi: scale %.4f -> %.4f, font %.4f physical px, generation=%d",
+			previous_scale,
+			scale,
+			state.dpi.physical_pixel_size,
+			state.dpi.generation,
+		)
+		if state.dpi.glyph_pixel_size != previous_glyph_size {
+			invalidate_glyph_cache(scale)
+		}
+	}
+	if log_always || scale != previous_scale {
+		log.logf(
+			level,
+			"%s: %vx%v px, %vx%v logical, dpi_scale=%.4f, backend=%v",
+			what,
+			width,
+			height,
+			logical.width,
+			logical.height,
+			scale,
+			sg.query_backend(),
+		)
+	}
 	return
 }
 
@@ -576,7 +611,7 @@ sokol_button_to_input :: proc(b: sapp.Mousebutton) -> (input.Mouse_Button, bool)
 // logical units with core/coords, using the validated scale cached by
 // window_metrics — DPI is applied exactly once, at this boundary.
 normalize_sapp_event :: proc(ev: ^sapp.Event) -> (input.Event, bool) {
-	scale := state.scale
+	scale := state.dpi.scale
 	#partial switch ev.type {
 	case .KEY_DOWN:
 		return input.Key_Down {
@@ -607,7 +642,7 @@ normalize_sapp_event :: proc(ev: ^sapp.Event) -> (input.Event, bool) {
 			scale,
 		)
 		if !errs.ok(perr) {
-			// state.scale is validated at the boundary; this is a
+			// state.dpi.scale is validated at the boundary; this is a
 			// defensive path only.
 			errs.destroy(&perr)
 			return {}, false
@@ -675,6 +710,34 @@ autoquit_frames_from_env :: proc() -> i64 {
 	return min(frames, 100_000)
 }
 
+test_dpi_scales_from_env :: proc() -> int {
+	value, found := os.lookup_env("HAMMER_TEST_DPI_SCALES", context.temp_allocator)
+	if !found || value == "" {
+		return 0
+	}
+	if len(value) > 128 {
+		log.warn("dpi test sequence is too long; ignoring it")
+		return 0
+	}
+	parts := strings.split(value, ",", context.temp_allocator)
+	if len(parts) == 0 || len(parts) > MAX_TEST_DPI_SCALES {
+		log.warnf("dpi test sequence accepts 1..%d values; ignoring it", MAX_TEST_DPI_SCALES)
+		return 0
+	}
+	for part, index in parts {
+		scale, ok := strconv.parse_f32(strings.trim_space(part))
+		_, err := coords.points_to_physical_px(12, scale)
+		valid := errs.ok(err)
+		errs.destroy(&err)
+		if !ok || !valid {
+			log.warnf("dpi test sequence contains invalid scale %q; ignoring it", part)
+			return 0
+		}
+		state.test_dpi_scales[index] = scale
+	}
+	return len(parts)
+}
+
 // probe_frame_from_env reads HAMMER_RENDER_PROBE: the frame at which
 // the render probe fires. A bare non-empty value means frame 5; a
 // number selects the frame (useful to probe after a resize).
@@ -727,7 +790,8 @@ main :: proc() {
 	state.autoquit_frames = autoquit_frames_from_env()
 	state.test_panic = env_flag("HAMMER_TEST_PANIC")
 	state.probe_frame = probe_frame_from_env()
-	state.scale = 1.0 // replaced by window_metrics before any input event
+	state.test_dpi_count = test_dpi_scales_from_env()
+	state.dpi.scale = 1.0 // replaced by window_metrics before any input event
 	cfg = generated.resolved
 
 	log.infof("hammer starting (pid=%d, os=%v, arch=%v)", os.get_pid(), ODIN_OS, ODIN_ARCH)

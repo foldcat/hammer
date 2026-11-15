@@ -189,3 +189,32 @@ test_empty_glyphs_clear_and_destroy :: proc(t: ^testing.T) {
 	cachepkg.destroy(&cache)
 	cachepkg.destroy(&cache)
 }
+
+@(test)
+test_reset_reuses_pages_and_forces_upload :: proc(t: ^testing.T) {
+	cache: cachepkg.Cache
+	new_cache(t, &cache, {page_width = 8, page_height = 8, max_pages = 1, max_entries = 2})
+	defer cachepkg.destroy(&cache)
+	fake := Fake{width = 2, height = 2, pitch = 2}
+	_, err := cachepkg.get(&cache, test_key(1), fake_rasterize, &fake)
+	expect_cache_ok(t, {}, err)
+	page := &cache.pages[0]
+	pixels := raw_data(page.pixels)
+	keys := raw_data(page.keys)
+	capacity := cap(page.keys)
+	cachepkg.mark_page_clean(&cache, 0)
+
+	cachepkg.reset(&cache)
+	testing.expect(t, cachepkg.entry_count(&cache) == 0)
+	testing.expect(t, len(cache.pages) == 1 && len(page.keys) == 0)
+	testing.expect(t, raw_data(page.pixels) == pixels)
+	testing.expect(t, raw_data(page.keys) == keys && cap(page.keys) == capacity)
+	testing.expect(t, page.dirty && page.cursor_x == 1 && page.cursor_y == 1)
+	testing.expect(t, page.pixels[1 * 8 + 1] == 0)
+
+	entry, get_err := cachepkg.get(&cache, test_key(2), fake_rasterize, &fake)
+	expect_cache_ok(t, entry, get_err)
+	testing.expect(t, fake.calls == 2)
+	testing.expect(t, cachepkg.entry_count(&cache) == 1)
+	testing.expect(t, entry.rect == cachepkg.Rect{x = 1, y = 1, width = 2, height = 2})
+}
