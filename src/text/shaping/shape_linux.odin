@@ -211,13 +211,13 @@ shape_visual_run :: proc(
 	}
 	if direction == .RTL {
 		for index := len(segments) - 1; index >= 0; index -= 1 {
-			if err := shape_segment(result, text, segments[index], direction, fonts, options, allocator); !errs.ok(err) {
+			if err := shape_segment(result, text, segments[index], direction, graphemes, fonts, options, allocator); !errs.ok(err) {
 				return err
 			}
 		}
 	} else {
 		for segment in segments {
-			if err := shape_segment(result, text, segment, direction, fonts, options, allocator); !errs.ok(err) {
+			if err := shape_segment(result, text, segment, direction, graphemes, fonts, options, allocator); !errs.ok(err) {
 				return err
 			}
 		}
@@ -246,7 +246,7 @@ choose_font :: proc(result: ^Text, codepoints: []Codepoint, cluster: Byte_Range,
 	return 0
 }
 
-shape_segment :: proc(result: ^Text, text: string, segment: Segment, direction: Direction, fonts: []Font, options: Options, allocator := context.allocator) -> errs.Error {
+shape_segment :: proc(result: ^Text, text: string, segment: Segment, direction: Direction, graphemes: []Byte_Range, fonts: []Font, options: Options, allocator := context.allocator) -> errs.Error {
 	font := fonts[segment.font_index]
 	face := ft.Face(font.native)
 	if ft_result := ft.FT_Set_Pixel_Sizes(face, 0, options.pixel_size); ft_result != 0 {
@@ -328,9 +328,77 @@ shape_segment :: proc(result: ^Text, text: string, segment: Segment, direction: 
 		pen_x += position.x_advance
 	}
 	run.advance = pen_x - result.total_advance
+	if err := build_clusters(&run, segment, direction, graphemes, allocator); !errs.ok(err) {
+		delete(run.glyphs)
+		delete(run.clusters)
+		return err
+	}
 	result.total_advance = pen_x
 	append(&result.runs, run)
 	return errs.Error{}
+}
+
+build_clusters :: proc(run: ^Run, segment: Segment, direction: Direction, graphemes: []Byte_Range, allocator := context.allocator) -> errs.Error {
+	first := 0
+	for first < len(graphemes) && graphemes[first].end <= segment.range.start {
+		first += 1
+	}
+	last := first
+	for last < len(graphemes) && graphemes[last].start < segment.range.end {
+		last += 1
+	}
+	if first == last {
+		return errs.new(.Internal, "shaping found no graphemes for a nonempty run", allocator = allocator)
+	}
+	run.clusters = make([dynamic]Cluster, 0, last - first, allocator)
+
+	step := 1
+	grapheme_index := first
+	if direction == .RTL {
+		step = -1
+		grapheme_index = last - 1
+	}
+	glyph_index := 0
+	for glyph_index < len(run.glyphs) {
+		glyph_cluster := run.glyphs[glyph_index].cluster
+		group_x := run.glyphs[glyph_index].x - run.glyphs[glyph_index].x_offset
+		group_advance := i32(0)
+		for glyph_index < len(run.glyphs) && run.glyphs[glyph_index].cluster == glyph_cluster {
+			group_advance += run.glyphs[glyph_index].x_advance
+			glyph_index += 1
+		}
+		if grapheme_index < first || grapheme_index >= last || graphemes[grapheme_index].start != glyph_cluster {
+			return errs.new(.Internal, "HarfBuzz cluster does not match its grapheme", allocator = allocator)
+		}
+
+		group_grapheme := grapheme_index
+		grapheme_count := 0
+		for {
+			grapheme_count += 1
+			grapheme_index += step
+			if grapheme_index < first || grapheme_index >= last {
+				break
+			}
+			if glyph_index < len(run.glyphs) && graphemes[grapheme_index].start == run.glyphs[glyph_index].cluster {
+				break
+			}
+		}
+		for local_index in 0 ..< grapheme_count {
+			grapheme := graphemes[group_grapheme + local_index * step]
+			x := group_x + i32(i64(group_advance) * i64(local_index) / i64(grapheme_count))
+			next_x := group_x + i32(i64(group_advance) * i64(local_index + 1) / i64(grapheme_count))
+			append(&run.clusters, Cluster{
+				source_start = grapheme.start,
+				source_end = grapheme.end,
+				x = x,
+				advance = next_x - x,
+			})
+		}
+	}
+	if grapheme_index >= first && grapheme_index < last {
+		return errs.new(.Internal, "HarfBuzz omitted a grapheme cluster", allocator = allocator)
+	}
+	return {}
 }
 
 diagnose_zero_glyph :: proc(result: ^Text, font_id: u64, cluster: int) {

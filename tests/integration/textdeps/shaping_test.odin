@@ -176,6 +176,219 @@ test_shape_invalid_input_and_empty :: proc(t: ^testing.T) {
 	shaping.destroy(&newline)
 }
 
+@(test)
+test_hit_test_combining_and_emoji_graphemes :: proc(t: ^testing.T) {
+	fixtures := fixture_fonts_open(t)
+	defer fixture_fonts_destroy(&fixtures)
+	fonts := [1]shaping.Font{{font_id = 1, native = rawptr(fixtures.mono)}}
+	result := shape_fixture(t, "A\u0301👩\u200d💻B", fonts[:])
+	defer shaping.destroy(&result)
+	if !testing.expect(t, len(result.runs) == 1) {
+		return
+	}
+	run := result.runs[0]
+	if !testing.expect(t, len(run.clusters) == 3) {
+		return
+	}
+	starts := [3]int{0, 3, 14}
+	ends := [3]int{3, 14, 15}
+	fractions := [2]f32{0.25, 0.75}
+	for cluster, index in run.clusters {
+		testing.expect(t, cluster.source_start == starts[index] && cluster.source_end == ends[index])
+		for fraction in fractions {
+			x := (f32(cluster.x) + f32(cluster.advance) * fraction) / 64
+			hit, ok := shaping.hit_test(result, x)
+			expected := cluster.source_start
+			if fraction > 0.5 {
+				expected = cluster.source_end
+			}
+			testing.expect(t, ok && hit.offset == expected)
+		}
+	}
+	for offset in 0 ..= 15 {
+		_, ok := shaping.caret_position(result, offset, .Leading)
+		expected := offset == 0 || offset == 3 || offset == 14 || offset == 15
+		testing.expectf(t, ok == expected, "caret validity at byte %d: got %v", offset, ok)
+	}
+	for offset in starts {
+		x := caret_x(t, result, offset, .Leading)
+		hit, ok := shaping.hit_test(result, x)
+		testing.expect(t, ok && hit.offset == offset)
+	}
+	x := caret_x(t, result, 15, .Trailing)
+	hit, ok := shaping.hit_test(result, x)
+	testing.expect(t, ok && hit.offset == 15)
+}
+
+@(test)
+test_hit_test_synthetic_ligature_grapheme_positions :: proc(t: ^testing.T) {
+	result := shaping.Text{
+		runs = make([dynamic]shaping.Run),
+		total_advance = 600,
+	}
+	run := shaping.Run{
+		source_start = 0,
+		source_end = 4,
+		direction = .RTL,
+		glyphs = make([dynamic]shaping.Glyph, 1),
+		clusters = make([dynamic]shaping.Cluster, 2),
+		advance = 600,
+	}
+	run.glyphs[0] = {cluster = 0, x_advance = 600}
+	run.clusters[0] = {source_start = 2, source_end = 4, x = 0, advance = 300}
+	run.clusters[1] = {source_start = 0, source_end = 2, x = 300, advance = 300}
+	append(&result.runs, run)
+	defer shaping.destroy(&result)
+
+	start := caret_x(t, result, 0, .Leading)
+	middle := caret_x(t, result, 2, .Leading)
+	end := caret_x(t, result, 4, .Trailing)
+	testing.expect(t, end == 0 && middle == 300.0 / 64 && start == 600.0 / 64)
+	hit, ok := shaping.hit_test(result, middle)
+	testing.expect(t, ok && hit.offset == 2 && hit.x == middle)
+
+	lam, lam_err := shaping.selection_spans(result, 0, 2)
+	testing.expect(t, errs.ok(lam_err))
+	defer delete(lam)
+	alef, alef_err := shaping.selection_spans(result, 2, 4)
+	testing.expect(t, errs.ok(alef_err))
+	defer delete(alef)
+	if testing.expect(t, len(lam) == 1 && len(alef) == 1) {
+		testing.expect(t, lam[0].start == middle && lam[0].end == start)
+		testing.expect(t, alef[0].start == end && alef[0].end == middle)
+	}
+}
+
+@(test)
+test_hit_test_rtl_edges_and_round_trips :: proc(t: ^testing.T) {
+	fixtures := fixture_fonts_open(t)
+	defer fixture_fonts_destroy(&fixtures)
+	fonts := [1]shaping.Font{{font_id = 1, native = rawptr(fixtures.hebrew)}}
+	result := shape_fixture(t, "אבג", fonts[:])
+	defer shaping.destroy(&result)
+	if !testing.expect(t, len(result.runs) == 1) {
+		return
+	}
+	run := result.runs[0]
+	if !testing.expect(t, run.direction == .RTL && len(run.clusters) == 3) {
+		return
+	}
+	for cluster, index in run.clusters {
+		testing.expect(t, cluster.source_start == 4 - 2 * index && cluster.source_end == 6 - 2 * index)
+		left := f32(cluster.x) / 64
+		right := f32(cluster.x + cluster.advance) / 64
+		testing.expect(t, caret_x(t, result, cluster.source_start, .Leading) == right)
+		testing.expect(t, caret_x(t, result, cluster.source_end, .Trailing) == left)
+		left_hit, left_ok := shaping.hit_test(result, left + f32(cluster.advance) / 256)
+		testing.expect(t, left_ok && left_hit.offset == cluster.source_end && left_hit.edge == .Trailing)
+		right_hit, right_ok := shaping.hit_test(result, right - f32(cluster.advance) / 256)
+		testing.expect(t, right_ok && right_hit.offset == cluster.source_start && right_hit.edge == .Leading)
+		edges := [2]shaping.Edge{.Leading, .Trailing}
+		for edge in edges {
+			offset := cluster.source_start
+			if edge == .Trailing {
+				offset = cluster.source_end
+			}
+			x := caret_x(t, result, offset, edge)
+			hit, ok := shaping.hit_test(result, x)
+			testing.expect(t, ok && hit.offset == offset)
+		}
+	}
+}
+
+@(test)
+test_hit_test_mixed_bidi_affinity_and_selection :: proc(t: ^testing.T) {
+	fixtures := fixture_fonts_open(t)
+	defer fixture_fonts_destroy(&fixtures)
+	fonts := [2]shaping.Font{
+		{font_id = 1, native = rawptr(fixtures.mono)},
+		{font_id = 2, native = rawptr(fixtures.hebrew)},
+	}
+	result := shape_fixture(t, "abc אבג", fonts[:])
+	defer shaping.destroy(&result)
+	if !testing.expect(t, len(result.runs) == 2) {
+		return
+	}
+	ltr_end := caret_x(t, result, 4, .Trailing)
+	rtl_start := caret_x(t, result, 4, .Leading)
+	testing.expect(t, ltr_end == f32(result.runs[0].advance) / 64)
+	testing.expect(t, rtl_start == f32(result.total_advance) / 64 && rtl_start > ltr_end)
+	ltr_hit, ltr_ok := shaping.hit_test(result, ltr_end)
+	testing.expect(t, ltr_ok && ltr_hit.offset == 4 && ltr_hit.edge == .Trailing)
+	rtl_hit, rtl_ok := shaping.hit_test(result, rtl_start)
+	testing.expect(t, rtl_ok && rtl_hit.offset == 4 && rtl_hit.edge == .Leading)
+
+	spans, span_err := shaping.selection_spans(result, 2, 6)
+	testing.expect(t, errs.ok(span_err))
+	defer delete(spans)
+	if testing.expect(t, len(spans) == 2) {
+		testing.expect(t, spans[0].start == caret_x(t, result, 2, .Leading) && spans[0].end == ltr_end)
+		testing.expect(t, spans[1].start == caret_x(t, result, 6, .Leading) && spans[1].end == rtl_start)
+	}
+	all, all_err := shaping.selection_spans(result, 10, 0)
+	testing.expect(t, errs.ok(all_err))
+	defer delete(all)
+	if testing.expect(t, len(all) == 1) {
+		testing.expect(t, all[0].start == 0 && all[0].end == f32(result.total_advance) / 64)
+	}
+
+	invalid, invalid_err := shaping.selection_spans(result, 4, 5)
+	testing.expect(t, invalid_err.kind == .Invalid_Input && len(invalid) == 0)
+	delete(invalid)
+	errs_destroy_shape(&invalid_err)
+}
+
+@(test)
+test_hit_test_empty_text :: proc(t: ^testing.T) {
+	result := shaping.Text{}
+	hit, ok := shaping.hit_test(result, 100)
+	testing.expect(t, ok && hit.offset == 0 && hit.edge == .Leading && hit.x == 0)
+	_, start_ok := shaping.caret_position(result, 0, .Leading)
+	_, end_ok := shaping.caret_position(result, 0, .Trailing)
+	_, invalid_ok := shaping.caret_position(result, 1, .Leading)
+	testing.expect(t, start_ok && end_ok && !invalid_ok)
+	spans, err := shaping.selection_spans(result, 0, 0)
+	testing.expect(t, errs.ok(err) && len(spans) == 0)
+	delete(spans)
+}
+
+@(test)
+test_hit_test_fractional_dpi_scale :: proc(t: ^testing.T) {
+	fixtures := fixture_fonts_open(t)
+	defer fixture_fonts_destroy(&fixtures)
+	fonts := [1]shaping.Font{{font_id = 1, native = rawptr(fixtures.mono)}}
+	result := shape_fixture(t, "abc", fonts[:])
+	defer shaping.destroy(&result)
+	scales := [2]f32{1.25, 2}
+	for scale in scales {
+		for offset in 0 ..= 3 {
+			x, ok := shaping.caret_position(result, offset, .Leading, scale)
+			testing.expect(t, ok)
+			hit, hit_ok := shaping.hit_test(result, x, scale)
+			testing.expect(t, hit_ok && hit.offset == offset && hit.x == x)
+		}
+		spans, err := shaping.selection_spans(result, 0, 3, scale)
+		testing.expect(t, errs.ok(err) && len(spans) == 1)
+		if len(spans) == 1 {
+			testing.expect(t, spans[0].start == 0 && spans[0].end == f32(result.total_advance) / (64 * scale))
+		}
+		delete(spans)
+	}
+	_, hit_ok := shaping.hit_test(result, 0, 0)
+	_, caret_ok := shaping.caret_position(result, 0, .Leading, 0)
+	testing.expect(t, !hit_ok && !caret_ok)
+	invalid, invalid_err := shaping.selection_spans(result, 0, 3, 0)
+	testing.expect(t, invalid_err.kind == .Invalid_Input && len(invalid) == 0)
+	delete(invalid)
+	errs_destroy_shape(&invalid_err)
+}
+
+caret_x :: proc(t: ^testing.T, text: shaping.Text, offset: int, edge: shaping.Edge, scale := f32(1)) -> f32 {
+	x, ok := shaping.caret_position(text, offset, edge, scale)
+	testing.expectf(t, ok, "caret position at byte %d, edge %v", offset, edge)
+	return x
+}
+
 errs_destroy_shape :: proc(err: ^errs.Error) {
 	errs.destroy(err)
 }

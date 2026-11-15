@@ -1,5 +1,6 @@
-// Positioned text runs. Text owns all run/glyph/diagnostic arrays; destroy
-// releases them. Glyphs use absolute source-byte clusters and 26.6 positions.
+// Positioned text runs. Text owns all run/glyph/grapheme/diagnostic arrays;
+// destroy releases them. Glyphs and grapheme layouts use absolute source-byte
+// clusters and 26.6 positions.
 package shaping
 
 import glyphcache "../glyphcache"
@@ -34,6 +35,15 @@ Glyph :: struct {
 	y_offset:  i32,
 }
 
+// Cluster is one grapheme in visual order. Ligature advances are subdivided
+// across their graphemes so every source grapheme boundary remains usable.
+Cluster :: struct {
+	source_start: int,
+	source_end:   int,
+	x:            i32,
+	advance:      i32,
+}
+
 Run :: struct {
 	source_start:    int,
 	source_end:      int,
@@ -44,6 +54,7 @@ Run :: struct {
 	variation_count: u8,
 	variations:      [glyphcache.MAX_VARIATIONS]glyphcache.Variation,
 	glyphs:          [dynamic]Glyph,
+	clusters:        [dynamic]Cluster,
 	advance:         i32,
 }
 
@@ -62,6 +73,7 @@ Text :: struct {
 destroy :: proc(text: ^Text) {
 	for run in text.runs {
 		delete(run.glyphs)
+		delete(run.clusters)
 	}
 	delete(text.runs)
 	delete(text.missing)

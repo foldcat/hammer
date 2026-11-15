@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M05.05 — Implement selection/caret hit testing from shaped runs
+## Current task: M05.06 — Implement DPI change invalidation
