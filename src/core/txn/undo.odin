@@ -20,10 +20,10 @@
 // whole run.
 //
 // Selection state (SPECS.md §8.3): `Selection` records the anchor end,
-// the active end (the direction-preserving pair), the affinity, and
-// the preferred visual column. M06 owns real selection behavior; the
-// txn layer validates bounds at apply time and records/restores the
-// state. `visual_column` is 0 when no column is preferred.
+// the active end (the direction-preserving pair), the affinity, and the
+// preferred visual column. The editing package owns real selection behavior;
+// the txn layer validates bounds at apply time and records/restores the state.
+// `visual_column` is a preferred grapheme column; 0 means none or column zero.
 package txn
 
 import errs "../errs"
@@ -31,7 +31,7 @@ import errs "../errs"
 // Selection is the recorded selection state of an undo node
 // (SPECS.md §8.3): byte offsets for the anchor and active ends
 // (direction is preserved by which is which), the affinity, and the
-// preferred visual column (0 = none; real column policy is M06's).
+// preferred grapheme column (0 = none or column zero).
 Selection :: struct {
 	anchor:        int,
 	active:        int,
