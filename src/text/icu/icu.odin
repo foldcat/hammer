@@ -112,6 +112,7 @@ foreign lib {
 	ubidi_getDirection :: proc(bidi: Bidi) -> Bidi_Direction ---
 	ubidi_getParaLevel :: proc(bidi: Bidi) -> Bidi_Level ---
 	ubidi_countRuns :: proc(bidi: Bidi, status: ^Error_Code) -> i32 ---
+	ubidi_getVisualRun :: proc(bidi: Bidi, run_index: i32, logical_start, length: ^i32) -> Bidi_Direction ---
 	ubidi_getLogicalMap :: proc(bidi: Bidi, index_map: [^]i32, status: ^Error_Code) ---
 	ubidi_getVisualMap :: proc(bidi: Bidi, index_map: [^]i32, status: ^Error_Code) ---
 	ubidi_getLogicalIndex :: proc(bidi: Bidi, visual_index: i32, status: ^Error_Code) -> i32 ---

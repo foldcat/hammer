@@ -102,6 +102,7 @@ foreign lib {
 	hb_font_destroy :: proc(font: ^Font) ---
 	hb_font_set_scale :: proc(font: ^Font, x_scale, y_scale: c.int) ---
 	hb_font_set_ppem :: proc(font: ^Font, x_ppem, y_ppem: c.uint) ---
+	hb_font_set_variations :: proc(font: ^Font, variations: [^]Variation, num_variations: c.uint) ---
 	hb_ft_font_create_referenced :: proc(ft_face: ft.Face) -> ^Font ---
 	hb_ft_font_changed :: proc(font: ^Font) ---
 	hb_ft_font_set_load_flags :: proc(font: ^Font, load_flags: c.int) ---
