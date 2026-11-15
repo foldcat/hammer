@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M06.05 — Implement delayed-paste target validation
+## Current task: M06.06 — Implement multiline indent/outdent transaction

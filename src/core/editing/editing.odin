@@ -1,6 +1,6 @@
-// Package editing implements backend-free movement, selection, and text-input
-// actions over transactional documents (M06.01–M06.03). Selections remain
-// view-owned; text mutations go through the transaction engine.
+// Package editing implements backend-free movement, selection, text-input, and
+// delayed-paste actions over transactional documents (M06.01–M06.05). Selections
+// remain view-owned; text mutations go through the transaction engine.
 package editing
 
 import "core:math"
