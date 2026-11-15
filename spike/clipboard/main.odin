@@ -11,7 +11,7 @@
 // paste, ownership monitoring, cancellation, etc.). Findings are recorded
 // in docs/notes/m00-04-clipboard.md.
 //
-// Two modes, run as separate processes sharing one X display:
+// Peer modes, run as separate processes sharing one X display:
 //
 //     clipboard_spike serve <CLIPBOARD|PRIMARY> <file>
 //         Owns the selection and serves the file's bytes as UTF8_STRING
@@ -608,6 +608,100 @@ wait_for_event :: proc(display: ^xlib.Display, deadline: time.Time) -> bool {
 	return true
 }
 
+// ---- clipboard-manager test peer -------------------------------------------
+
+// manage implements the UTF8_STRING subset of SAVE_TARGETS needed by the
+// product interoperability harness. A second X connection retrieves the
+// current CLIPBOARD while the product owner continues serving requests.
+manage :: proc(scratch_path: string) -> int {
+	display, window, ok := open_display()
+	if !ok {
+		return 1
+	}
+	defer xlib.CloseDisplay(display)
+
+	clipboard := xlib.InternAtom(display, cstring("CLIPBOARD"), false)
+	clipboard_manager := xlib.InternAtom(display, cstring("CLIPBOARD_MANAGER"), false)
+	save_targets := xlib.InternAtom(display, cstring("SAVE_TARGETS"), false)
+	atoms := make_atoms(display, clipboard)
+	xlib.SetSelectionOwner(display, clipboard_manager, window, xlib.CurrentTime)
+	xlib.Sync(display, false)
+	if x_error_seen || xlib.GetSelectionOwner(display, clipboard_manager) != window {
+		fmt.eprintln("error: could not acquire CLIPBOARD_MANAGER")
+		return 1
+	}
+	fmt.println("ready CLIPBOARD_MANAGER")
+
+	saved_data: []byte
+	defer delete(saved_data)
+	has_saved := false
+	incr: Incr_State
+	for {
+		event: xlib.XEvent
+		xlib.NextEvent(display, &event)
+		#partial switch event.type {
+		case .SelectionRequest:
+			request := event.xselectionrequest
+			if request.selection == clipboard_manager && request.target == save_targets {
+				reply_property := xlib.Atom(xlib.None)
+				if !has_saved && get("CLIPBOARD", scratch_path, 2 * time.Second, false) == 0 {
+					data, read_err := os.read_entire_file(scratch_path, context.allocator)
+					if read_err == nil {
+						delete(saved_data)
+						saved_data = data
+						has_saved = true
+						xlib.SetSelectionOwner(display, clipboard, window, xlib.CurrentTime)
+						xlib.Sync(display, false)
+						if !x_error_seen && xlib.GetSelectionOwner(display, clipboard) == window {
+							reply_property = request.property
+							fmt.printf("saved CLIPBOARD len=%d\n", len(saved_data))
+						} else {
+							has_saved = false
+						}
+					}
+				}
+				notify := xlib.XEvent{}
+				notify.xselection.type = .SelectionNotify
+				notify.xselection.display = display
+				notify.xselection.requestor = request.requestor
+				notify.xselection.selection = request.selection
+				notify.xselection.target = request.target
+				notify.xselection.property = reply_property
+				notify.xselection.time = request.time
+				xlib.SendEvent(display, request.requestor, false, {}, &notify)
+				xlib.Flush(display)
+			} else if request.selection == clipboard && has_saved {
+				handle_selection_request(display, &atoms, saved_data, &incr, request)
+			} else {
+				notify := xlib.XEvent{}
+				notify.xselection.type = .SelectionNotify
+				notify.xselection.display = display
+				notify.xselection.requestor = request.requestor
+				notify.xselection.selection = request.selection
+				notify.xselection.target = request.target
+				notify.xselection.property = xlib.None
+				notify.xselection.time = request.time
+				xlib.SendEvent(display, request.requestor, false, {}, &notify)
+				xlib.Flush(display)
+			}
+		case .SelectionClear:
+			if event.xselectionclear.selection == clipboard_manager {
+				fmt.eprintln("error: another client took CLIPBOARD_MANAGER")
+				return 1
+			}
+			if event.xselectionclear.selection == clipboard {
+				return 0
+			}
+		case .PropertyNotify:
+			property := event.xproperty
+			if has_saved && incr.active && property.window == incr.requestor &&
+				property.atom == incr.property && property.state == .PropertyDelete {
+				incr_step(display, saved_data, &incr)
+			}
+		}
+	}
+}
+
 // ---- CLI -------------------------------------------------------------------
 
 usage :: proc() {
@@ -616,7 +710,9 @@ usage :: proc() {
       Own the selection and serve the file's bytes as UTF8_STRING until killed.
   clipboard_spike get <CLIPBOARD|PRIMARY> [-o outfile] [--timeout-ms n] [--targets]
       Fetch the selection as UTF8_STRING (INCR-aware) to stdout or outfile.
-      --targets lists the owner's advertised targets instead of fetching text.`)
+      --targets lists the owner's advertised targets instead of fetching text.
+  clipboard_spike manage <scratch-file>
+      Preserve CLIPBOARD through the UTF8_STRING subset of SAVE_TARGETS.`)
 }
 
 run_get :: proc(args: []string) -> int {
@@ -706,6 +802,12 @@ main :: proc() {
 		os.exit(serve(args[1], args[2]))
 	case "get":
 		os.exit(run_get(args[1:]))
+	case "manage":
+		if len(args) != 2 {
+			usage()
+			os.exit(2)
+		}
+		os.exit(manage(args[1]))
 	case:
 		usage()
 		os.exit(2)

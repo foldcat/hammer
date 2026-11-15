@@ -13,9 +13,9 @@
 //     odin run make.odin -file -- windows --release
 //     odin run make.odin -file -- test             # core unit tests
 //     odin run make.odin -file -- text-test        # M05.01 native text dependencies
-//     odin run make.odin -file -- clipboard-test   # M06.04 X11 native clipboard
+//     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
-//     odin run make.odin -file -- clipboard-windows-test  # M06.04 Windows/Wine clipboard
+//     odin run make.odin -file -- clipboard-windows-test  # M06.04/M06.08 Windows/Wine clipboard
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
@@ -96,9 +96,13 @@ RECOVERY_TEST_HARNESS :: RECOVERY_TEST_DIR + "/kill_harness.py"
 
 TEXT_TEST_DIR :: #directory + "/tests/integration/textdeps"
 CLIPBOARD_TEST_DIR :: #directory + "/tests/integration/clipboard"
+CLIPBOARD_INTEROP_DRIVER_DIR :: CLIPBOARD_TEST_DIR + "/driver"
+CLIPBOARD_INTEROP_DRIVER :: OUT_DIR + "/clipboard_interop_driver"
+CLIPBOARD_INTEROP_HARNESS :: CLIPBOARD_TEST_DIR + "/interop_harness.py"
 IME_TEST_DIR :: #directory + "/tests/integration/ime"
 CLIPBOARD_WINDOWS_TEST_DIR :: #directory + "/tests/integration/clipboard_windows"
 CLIPBOARD_WINDOWS_TEST_BINARY :: OUT_DIR + "/clipboard_windows_test.exe"
+CLIPBOARD_WINDOWS_INTEROP_HARNESS :: CLIPBOARD_WINDOWS_TEST_DIR + "/interop_harness.py"
 FREETYPE_PKG_VERSION :: "26.7.20" // FreeType 2.15.0 libtool/pkg-config version
 HARFBUZZ_VERSION :: "12.3.2"
 ICU_VERSION :: "78.3"
@@ -312,6 +316,25 @@ main :: proc() {
 	if len(args) > 1 && args[1] == "clipboard-test" {
 		when ODIN_OS == .Linux {
 			run_odin([]string{"xvfb-run", "-a", "odin", "test", CLIPBOARD_TEST_DIR, "-vet", HAMMER_COLLECTION, "-define:ODIN_TEST_THREADS=1"})
+			run_odin([]string {
+				"odin",
+				"build",
+				CLIPBOARD_INTEROP_DRIVER_DIR,
+				"-vet",
+				HAMMER_COLLECTION,
+				"-out:" + CLIPBOARD_INTEROP_DRIVER,
+			})
+			run_odin([]string{"odin", "build", SPIKE_CLIPBOARD_DIR, "-vet", "-out:" + CLIPBOARD_SPIKE_PATH})
+			run_odin([]string {
+				"xvfb-run",
+				"-a",
+				"python3",
+				CLIPBOARD_INTEROP_HARNESS,
+				"--driver",
+				CLIPBOARD_INTEROP_DRIVER,
+				"--peer",
+				CLIPBOARD_SPIKE_PATH,
+			}, true)
 		} else {
 			fmt.eprintln("[Test] clipboard-test currently requires Linux/X11")
 			os.exit(1)
@@ -894,6 +917,14 @@ clipboard_windows_main :: proc() {
 		"-out:" + CLIPBOARD_WINDOWS_TEST_BINARY,
 	})
 	run_odin([]string{"xvfb-run", "-a", "env", "WINEDEBUG=-all", "wine", CLIPBOARD_WINDOWS_TEST_BINARY}, true)
+	run_odin([]string {
+		"xvfb-run",
+		"-a",
+		"python3",
+		CLIPBOARD_WINDOWS_INTEROP_HARNESS,
+		"--binary",
+		CLIPBOARD_WINDOWS_TEST_BINARY,
+	}, true)
 }
 
 // windows_main cross-builds hammer.exe for windows_amd64. Modes: debug by

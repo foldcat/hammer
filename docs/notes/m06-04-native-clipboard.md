@@ -107,8 +107,9 @@ validations with isolated displays and no user clipboard access.
 
 ## Limits and next task
 
-- Real clipboard-manager persistence and interoperability with separate external
-  desktop applications remain unvalidated; M06.08 owns interoperability coverage.
+- M06.08 added separate-process interoperability and test-manager persistence
+  coverage; see `m06-08-clipboard-interoperability.md`. Real desktop clipboard
+  managers, real Windows, and Wayland remain unvalidated.
 - Windows retry contention was not fault-injected. Only Wine, not real Windows,
   executed the native adapter.
 - The 64 MiB ceiling was not exercised; tested large payloads were 256 KiB.
