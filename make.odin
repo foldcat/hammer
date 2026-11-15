@@ -108,6 +108,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/input",
 	"tests/unit/queue",
 	"tests/unit/layout",
+	"tests/unit/glyphcache",
 	"tests/unit/chunk",
 	"tests/unit/rope",
 	"tests/unit/txn",

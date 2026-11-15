@@ -161,6 +161,7 @@ init :: proc "c" () {
 	// crashing (M01 acceptance).
 	_, _, scale := window_metrics("window")
 	init_fonts()
+	init_glyph_cache(scale)
 
 	// The font point size through the §9.6 chain: points → logical px
 	// (×96/72) → physical px (× scale). M05 turns this into the
@@ -246,6 +247,7 @@ event :: proc "c" (ev: ^sapp.Event) {
 cleanup :: proc "c" () {
 	context = app_context()
 
+	glyph_cache_destroy()
 	fonts.destroy(&font_set)
 	sg.shutdown()
 	lifecycle.app_enter_shutdown(&app)
