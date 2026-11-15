@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M06.02 — Implement keyboard binding resolver
+## Current task: M06.04 — Implement native clipboard service on both OS families

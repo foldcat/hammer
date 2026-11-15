@@ -108,6 +108,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/dpi",
 	"tests/unit/input",
 	"tests/unit/editing",
+	"tests/unit/keybind",
 	"tests/unit/queue",
 	"tests/unit/layout",
 	"tests/unit/glyphcache",

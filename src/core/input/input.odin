@@ -301,8 +301,8 @@ Mouse_Button :: enum u8 {
 // reported by the backend in move events.
 Mouse_Buttons :: bit_set[Mouse_Button; u8]
 
-// Key_Down is a key press. `repeat` marks a backend auto-repeat; a
-// chord or shortcut consumer should ignore repeats.
+// Key_Down is a key press. `repeat` marks a backend auto-repeat; one-shot
+// chord or shortcut consumers should ignore repeats, while movement may repeat.
 Key_Down :: struct {
 	key:       Key,
 	repeat:    bool,

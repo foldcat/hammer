@@ -1,6 +1,6 @@
-// Package editing implements backend-free movement and selection actions
-// over transactional documents (M06.01). Selections remain view-owned; these
-// procedures only change the selection value supplied by the caller.
+// Package editing implements backend-free movement, selection, and text-input
+// actions over transactional documents (M06.01–M06.03). Selections remain
+// view-owned; text mutations go through the transaction engine.
 package editing
 
 import "core:math"
@@ -39,10 +39,13 @@ Select_All :: struct {}
 Action :: union {
 	Move,
 	Select_All,
+	Insert_Text,
+	Delete_Backward,
+	Delete_Forward,
 }
 
-// perform applies one semantic action to a view selection. It never changes
-// document text, history, or revision.
+// perform applies one semantic action to a document and view selection.
+// Movement does not change text; insertion and deletion go through doc_apply.
 perform :: proc(
 	doc: ^txn.Doc,
 	selection: ^txn.Selection,
@@ -58,6 +61,12 @@ perform :: proc(
 	case Select_All:
 		select_all(doc, selection)
 		return {}
+	case Insert_Text:
+		return insert_text(doc, selection, a.text, a.grouping_key, allocator)
+	case Delete_Backward:
+		return delete_at_selection(doc, selection, .Left, allocator)
+	case Delete_Forward:
+		return delete_at_selection(doc, selection, .Right, allocator)
 	}
 	return {}
 }
