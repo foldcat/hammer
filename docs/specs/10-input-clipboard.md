@@ -113,7 +113,30 @@ When no selection exists:
 
 - Insert a tab or indentation spaces according to effective settings.
 
-## 10.6 Clipboard service
+## 10.6 Newline indentation (tab inheritance)
+
+When Enter/Return inserts a line break, the new line inherits the leading
+whitespace of the line the caret was on, so the next line begins at the same
+indentation level.
+
+Rules:
+
+- The inherited prefix is the run of leading spaces/tabs of the current line,
+  up to but excluding its first non-whitespace character.
+- The caret position within the line does not change the prefix: a caret at
+  line start, in the middle, or at line end all inherit the full leading
+  whitespace.
+- A line with no leading whitespace yields no inherited indentation.
+- The prefix is inserted using the effective tabs/spaces setting, not by
+  copying the source bytes verbatim.
+- Enter with an active selection first replaces the selection, then inherits
+  indentation from the line where the replacement begins.
+- The newline plus inherited indentation is one undo transaction.
+
+This is baseline literal inheritance. Reindenting against surrounding
+bracket/brace structure is not part of this behavior.
+
+## 10.7 Clipboard service
 
 Use a platform service:
 

@@ -221,9 +221,11 @@ M05.08  Add mixed-script/DPI visual fixtures.
 ### Deliverables
 
 - Basic editor usable by keyboard.
+- Text typed and rendered in the product window.
 - Native copy/cut/paste.
 - Selection extension.
 - Indent/outdent.
+- Newline indentation inheritance.
 - IME support.
 
 ### Tasks
@@ -237,10 +239,15 @@ M06.05  Implement delayed-paste target validation.
 M06.06  Implement multiline indent/outdent transaction.
 M06.07  Implement IME preedit/commit handling.
 M06.08  Add clipboard interoperability tests.
+M06.09  Implement product text-input consumption and typed-text rendering.
+M06.10  Implement newline indentation inheritance (tab level kept on Enter).
+M06.11  Implement parenthesis/bracket/quote autopair policy.
 ```
 
 ### Acceptance
 
+- Typed characters appear in the product window and are undoable.
+- Enter keeps the current line's indentation in one undo step.
 - Copy/paste works with external applications.
 - Large Unicode transfers work.
 - Clipboard failure is visible, not replaced by stale content.
