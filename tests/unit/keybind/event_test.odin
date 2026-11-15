@@ -7,13 +7,15 @@ import input "hammer:core/input"
 import keybind "hammer:core/keybind"
 
 expect_event_action :: proc(t: ^testing.T, event: input.Event, want: keybind.Action, has_selection := false) {
-	got, ok := keybind.resolve_event(event, has_selection)
+	_ = has_selection
+	got, ok := keybind.resolve_event(event)
 	testing.expectf(t, ok, "%v: expected an action", event)
 	testing.expectf(t, got == want, "%v: got %v, want %v", event, got, want)
 }
 
 expect_event_unbound :: proc(t: ^testing.T, event: input.Event, has_selection := false) {
-	got, ok := keybind.resolve_event(event, has_selection)
+	_ = has_selection
+	got, ok := keybind.resolve_event(event)
 	testing.expectf(t, !ok, "%v: unexpectedly resolved to %v", event, got)
 }
 
@@ -51,10 +53,10 @@ test_special_editing_keys_are_key_down_actions :: proc(t: ^testing.T) {
 	expect_event_action(t, input.Key_Down{key = .Delete}, editing.Delete_Forward{})
 	expect_event_action(t, input.Key_Down{key = .Enter}, editing.Insert_Text{text = '\n'})
 	expect_event_action(t, input.Key_Down{key = .KP_Enter}, editing.Insert_Text{text = '\n'})
-	expect_event_action(t, input.Key_Down{key = .Tab}, editing.Insert_Text{text = '\t'})
+	expect_event_action(t, input.Key_Down{key = .Tab}, keybind.Indent{})
 	expect_event_action(t, input.Key_Down{key = .Backspace, repeat = true}, editing.Delete_Backward{})
 	expect_event_action(t, input.Key_Down{key = .Enter, repeat = true}, editing.Insert_Text{text = '\n'})
-	expect_event_action(t, input.Key_Down{key = .Tab, repeat = true}, editing.Insert_Text{text = '\t'})
+	expect_event_unbound(t, input.Key_Down{key = .Tab, repeat = true})
 	expect_event_unbound(t, input.Key_Down{key = .Tab, repeat = true}, true)
 	expect_event_unbound(t, input.Key_Down{key = .Backspace, modifiers = {.Ctrl}})
 	expect_event_unbound(t, input.Key_Down{key = .Enter, modifiers = {.Shift}})

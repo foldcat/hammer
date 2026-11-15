@@ -30,7 +30,7 @@ test_resolved_input_sequence_matches_transaction_model :: proc(t: ^testing.T) {
 		input.Key_Down{key = .Tab},
 	}
 	for event in events {
-		action, ok := keybind.resolve_event(event, selection.anchor != selection.active)
+		action, ok := keybind.resolve_event(event)
 		if !ok {
 			continue
 		}
@@ -44,6 +44,10 @@ test_resolved_input_sequence_matches_transaction_model :: proc(t: ^testing.T) {
 			err = editing.perform(&doc, &selection, a)
 		case keybind.Copy:
 			copy_count += 1
+		case keybind.Indent:
+			err = editing.indent(&doc, &selection, .Indent, {style = .Tabs})
+		case keybind.Outdent:
+			err = editing.indent(&doc, &selection, .Outdent, {style = .Tabs})
 		case:
 		}
 		testing.expectf(t, errs.ok(err), "%v: %v", event, errs.describe(err))

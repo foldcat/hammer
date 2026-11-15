@@ -7,13 +7,15 @@ import input "hammer:core/input"
 import keybind "hammer:core/keybind"
 
 expect_action :: proc(t: ^testing.T, event: input.Key_Down, want: keybind.Action, has_selection := false) {
-	got, ok := keybind.resolve(event, has_selection)
+	_ = has_selection
+	got, ok := keybind.resolve(event)
 	testing.expectf(t, ok, "%v: expected an action", event)
 	testing.expectf(t, got == want, "%v: got %v, want %v", event, got, want)
 }
 
 expect_unbound :: proc(t: ^testing.T, event: input.Key_Down, has_selection := false) {
-	got, ok := keybind.resolve(event, has_selection)
+	_ = has_selection
+	got, ok := keybind.resolve(event)
 	testing.expectf(t, !ok, "%v: unexpectedly resolved to %v", event, got)
 }
 
@@ -117,9 +119,9 @@ test_altgr_never_resolves_commands :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_tab_depends_on_selection :: proc(t: ^testing.T) {
+test_tab_is_independent_of_selection :: proc(t: ^testing.T) {
 	expect_action(t, {key = .Tab}, keybind.Indent{}, true)
-	expect_unbound(t, {key = .Tab}, false)
+	expect_action(t, {key = .Tab}, keybind.Indent{}, false)
 	expect_action(t, {key = .Tab, modifiers = {.Shift}}, keybind.Outdent{}, false)
 	expect_action(t, {key = .Tab, modifiers = {.Shift}}, keybind.Outdent{}, true)
 	expect_unbound(t, {key = .Tab, modifiers = {.Ctrl}}, true)

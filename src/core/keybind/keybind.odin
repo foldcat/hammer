@@ -71,12 +71,11 @@ DEFAULT_COMMAND_BINDINGS :: []Command_Binding {
 	{key = .Enter, modifiers = {.Alt}, action = Look_Text{}},
 }
 
-// resolve maps one normalized key-down event to an action. has_selection is
-// needed only for Tab: it indents with a non-empty selection and remains
-// unbound otherwise so text-input handling can insert indentation later.
+// resolve maps one normalized key-down event to an action. Tab always resolves
+// to Indent so the consumer can apply the buffer's effective tabs/spaces setting.
 // Movement is repeatable; commands and selection-all ignore auto-repeat.
 // Ctrl+Alt is always unbound so AltGr text cannot trigger a command.
-resolve :: proc(event: input.Key_Down, has_selection: bool) -> (Action, bool) {
+resolve :: proc(event: input.Key_Down) -> (Action, bool) {
 	if .Ctrl in event.modifiers && .Alt in event.modifiers {
 		return {}, false
 	}
@@ -90,7 +89,7 @@ resolve :: proc(event: input.Key_Down, has_selection: bool) -> (Action, bool) {
 	if event.key == .Tab && event.modifiers == {.Shift} {
 		return Outdent{}, true
 	}
-	if event.key == .Tab && event.modifiers == {} && has_selection {
+	if event.key == .Tab && event.modifiers == {} {
 		return Indent{}, true
 	}
 	for binding in DEFAULT_COMMAND_BINDINGS {
@@ -144,12 +143,12 @@ resolve_movement :: proc(key: input.Key, modifiers: input.Modifiers) -> (Action,
 
 // resolve_event separates committed text from key commands. Printable Text is
 // inserted only with no command modifiers or with Ctrl+Alt (AltGr). Control
-// scalars are handled as key-down edits instead, preventing Enter/Tab from being
+// scalars are handled as key-down edits instead, preventing Enter from being
 // applied once as a command and again as text. Other event kinds are ignored.
-resolve_event :: proc(event: input.Event, has_selection: bool) -> (Action, bool) {
+resolve_event :: proc(event: input.Event) -> (Action, bool) {
 	#partial switch e in event {
 	case input.Key_Down:
-		if action, ok := resolve(e, has_selection); ok {
+		if action, ok := resolve(e); ok {
 			return action, true
 		}
 		if e.modifiers != {} {
@@ -162,10 +161,6 @@ resolve_event :: proc(event: input.Event, has_selection: bool) -> (Action, bool)
 			return editing.Delete_Forward{}, true
 		case .Enter, .KP_Enter:
 			return editing.Insert_Text{text = '\n'}, true
-		case .Tab:
-			if !has_selection {
-				return editing.Insert_Text{text = '\t'}, true
-			}
 		case:
 		}
 	case input.Text:
