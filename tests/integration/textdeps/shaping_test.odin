@@ -383,6 +383,22 @@ test_hit_test_fractional_dpi_scale :: proc(t: ^testing.T) {
 	errs_destroy_shape(&invalid_err)
 }
 
+@(test)
+test_missing_glyph_diagnostics_are_bounded :: proc(t: ^testing.T) {
+	fixtures := fixture_fonts_open(t)
+	defer fixture_fonts_destroy(&fixtures)
+	fonts := [1]shaping.Font{{font_id = 1, native = rawptr(fixtures.mono)}}
+	bytes := make([]u8, 200)
+	defer delete(bytes)
+	for index := 0; index < len(bytes); index += 2 {
+		bytes[index] = 0xd7
+		bytes[index + 1] = 0x90
+	}
+	result := shape_fixture(t, string(bytes), fonts[:])
+	defer shaping.destroy(&result)
+	testing.expect(t, len(result.missing) == shaping.MAX_MISSING_DIAGNOSTICS)
+}
+
 caret_x :: proc(t: ^testing.T, text: shaping.Text, offset: int, edge: shaping.Edge, scale := f32(1)) -> f32 {
 	x, ok := shaping.caret_position(text, offset, edge, scale)
 	testing.expectf(t, ok, "caret position at byte %d, edge %v", offset, edge)

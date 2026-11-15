@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M05.07 — Implement huge-line bounded rendering
+## Current task: M05.08 — Add mixed-script/DPI visual fixtures

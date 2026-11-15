@@ -225,11 +225,14 @@ shape_visual_run :: proc(
 	return errs.Error{}
 }
 
+MAX_MISSING_DIAGNOSTICS :: 64
+
 choose_font :: proc(result: ^Text, codepoints: []Codepoint, cluster: Byte_Range, fonts: []Font, allocator := context.allocator) -> int {
+	cluster_points := codepoints_for_grapheme(codepoints, cluster)
 	for font, index in fonts {
 		supported := true
-		for codepoint in codepoints {
-			if codepoint.start >= cluster.start && codepoint.end <= cluster.end && ft.FT_Get_Char_Index(ft.Face(font.native), ft.ULong(codepoint.r)) == 0 {
+		for codepoint in cluster_points {
+			if ft.FT_Get_Char_Index(ft.Face(font.native), ft.ULong(codepoint.r)) == 0 {
 				supported = false
 				break
 			}
@@ -238,12 +241,32 @@ choose_font :: proc(result: ^Text, codepoints: []Codepoint, cluster: Byte_Range,
 			return index
 		}
 	}
-	for codepoint in codepoints {
-		if codepoint.start >= cluster.start && codepoint.end <= cluster.end && ft.FT_Get_Char_Index(ft.Face(fonts[0].native), ft.ULong(codepoint.r)) == 0 {
+	for codepoint in cluster_points {
+		if len(result.missing) >= MAX_MISSING_DIAGNOSTICS {
+			break
+		}
+		if ft.FT_Get_Char_Index(ft.Face(fonts[0].native), ft.ULong(codepoint.r)) == 0 {
 			append(&result.missing, Missing_Glyph{font_id = fonts[0].font_id, codepoint = codepoint.r, source_offset = codepoint.start})
 		}
 	}
 	return 0
+}
+
+codepoints_for_grapheme :: proc(codepoints: []Codepoint, cluster: Byte_Range) -> []Codepoint {
+	low, high := 0, len(codepoints)
+	for low < high {
+		middle := low + (high - low) / 2
+		if codepoints[middle].start < cluster.start {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	end := low
+	for end < len(codepoints) && codepoints[end].end <= cluster.end {
+		end += 1
+	}
+	return codepoints[low:end]
 }
 
 shape_segment :: proc(result: ^Text, text: string, segment: Segment, direction: Direction, graphemes: []Byte_Range, fonts: []Font, options: Options, allocator := context.allocator) -> errs.Error {
@@ -339,14 +362,26 @@ shape_segment :: proc(result: ^Text, text: string, segment: Segment, direction: 
 }
 
 build_clusters :: proc(run: ^Run, segment: Segment, direction: Direction, graphemes: []Byte_Range, allocator := context.allocator) -> errs.Error {
-	first := 0
-	for first < len(graphemes) && graphemes[first].end <= segment.range.start {
-		first += 1
+	first_low, first_high := 0, len(graphemes)
+	for first_low < first_high {
+		middle := first_low + (first_high - first_low) / 2
+		if graphemes[middle].end <= segment.range.start {
+			first_low = middle + 1
+		} else {
+			first_high = middle
+		}
 	}
-	last := first
-	for last < len(graphemes) && graphemes[last].start < segment.range.end {
-		last += 1
+	first := first_low
+	last_low, last_high := first, len(graphemes)
+	for last_low < last_high {
+		middle := last_low + (last_high - last_low) / 2
+		if graphemes[middle].start < segment.range.end {
+			last_low = middle + 1
+		} else {
+			last_high = middle
+		}
 	}
+	last := last_low
 	if first == last {
 		return errs.new(.Internal, "shaping found no graphemes for a nonempty run", allocator = allocator)
 	}
@@ -402,6 +437,9 @@ build_clusters :: proc(run: ^Run, segment: Segment, direction: Direction, graphe
 }
 
 diagnose_zero_glyph :: proc(result: ^Text, font_id: u64, cluster: int) {
+	if len(result.missing) >= MAX_MISSING_DIAGNOSTICS {
+		return
+	}
 	for diagnostic in result.missing {
 		if diagnostic.font_id == font_id && diagnostic.source_offset == cluster {
 			return

@@ -70,6 +70,20 @@ Text :: struct {
 	total_advance: i32,
 }
 
+Visible :: struct {
+	text:      Text,
+	start:     int,
+	end:       int,
+	done:      bool,
+	segmented: bool,
+}
+
+Measurement :: struct {
+	offset:    int,
+	advance:   i64,
+	segmented: bool,
+}
+
 destroy :: proc(text: ^Text) {
 	for run in text.runs {
 		delete(run.glyphs)
