@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M06.09 — Implement product text-input consumption and typed-text rendering
+## Current task: M06.10 — Implement newline indentation inheritance (tab level kept on Enter)

@@ -1,4 +1,4 @@
-// Rendering (M01.06, M05.06): the basic column/tag/body rectangles.
+// Rendering (M01.06, M05.06, M06.09): window rectangles and document text.
 //
 // This is the application-layer renderer (package main): it draws the
 // logical window geometry from `core/layout` with sokol_gfx,
@@ -47,8 +47,8 @@ Vertex :: struct {
 	color: [4]f32,
 }
 
-// QUAD_VERTEX_COUNT: two rectangles x two triangles x three vertices.
 QUAD_VERTEX_COUNT :: 12
+MAX_QUADS_PER_DRAW :: 4096
 
 render_pipeline: sg.Pipeline
 render_vertex_buffer: sg.Buffer
@@ -85,16 +85,12 @@ render_setup :: proc() {
 	}
 	render_vertex_buffer = sg.make_buffer({
 		usage = {vertex_buffer = true, write_transient = true},
-		size = QUAD_VERTEX_COUNT * size_of(Vertex),
+		size = MAX_QUADS_PER_DRAW * 6 * size_of(Vertex),
 		label = "hammer-quad-buffer",
 	})
+	text_render_setup()
 }
 
-// render_frame draws the current window state: the tag strip and the
-// body area in the configured theme colors (M01.06). Called every
-// frame inside the render pass. The window clear color is the body
-// background, so the border padding between the rectangles and the
-// window edges reads as body color.
 render_frame :: proc() {
 	width, height := services.window.framebuffer_size(services.user)
 	phys := coords.Physical_Size{f32(width), f32(height)}
@@ -107,9 +103,6 @@ render_frame :: proc() {
 		logical_size = coords.Logical_Size{phys.width, phys.height}
 	}
 
-	// Tag strip height: the configured font point size through the
-	// §9.6 chain, plus one pad above and below (M05 replaces this
-	// with real glyph metrics).
 	font_px := coords.points_to_logical_px(cfg.Font_Size_Points)
 	pad := f32(2)
 	win, lerr := layout.window(logical_size, font_px + 2 * pad, pad)
@@ -118,23 +111,31 @@ render_frame :: proc() {
 		return
 	}
 
-	verts: [QUAD_VERTEX_COUNT]Vertex
+	verts := make([dynamic]Vertex, QUAD_VERTEX_COUNT, context.temp_allocator)
 	quad_vertices(verts[0:6], win.tag, cfg.Theme.Tag_Bg, phys)
 	quad_vertices(verts[6:12], win.body, cfg.Theme.Body_Bg, phys)
-	sg.write_buffer_transient({
-		src = {data = {ptr = raw_data(verts[:]), size = size_of(verts)}},
-		dst = {buffer = render_vertex_buffer, offset = 0},
-		size = size_of(verts),
-	})
-	bindings := sg.Bindings{vertex_buffers = {0 = render_vertex_buffer}}
-	sg.apply_pipeline(render_pipeline)
-	sg.apply_bindings(bindings)
-	sg.draw(0, 6, 1)
-	sg.draw(6, 6, 1)
+	text_render_document(win, phys, &verts)
+	draw_quads(verts[:])
+	text_render_draw(win.body, phys)
 
 	when ODIN_OS == .Linux {
 		render_probe_maybe(win, phys)
 	}
+}
+
+draw_quads :: proc(verts: []Vertex) {
+	if len(verts) == 0 || len(verts) % 6 != 0 || len(verts) > MAX_QUADS_PER_DRAW * 6 ||
+		render_pipeline.id == 0 || render_vertex_buffer.id == 0 {
+		return
+	}
+	sg.write_buffer_transient({
+		src = {data = {ptr = raw_data(verts), size = len(verts) * size_of(Vertex)}},
+		dst = {buffer = render_vertex_buffer},
+		size = len(verts) * size_of(Vertex),
+	})
+	sg.apply_pipeline(render_pipeline)
+	sg.apply_bindings({vertex_buffers = {0 = render_vertex_buffer}})
+	sg.draw(0, len(verts), 1)
 }
 
 // quad_vertices fills `verts[0:6]` with the two triangles of the

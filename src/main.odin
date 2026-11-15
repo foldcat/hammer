@@ -158,6 +158,11 @@ init :: proc "c" () {
 		clear_value = sg.Color{c[0], c[1], c[2], c[3]},
 	}
 
+	if err := editor_init(); !errs.ok(err) {
+		request_quit(.Init_Failed, "editor-init", err)
+		return
+	}
+
 	// M01.06: the basic column/tag/body rectangle renderer.
 	render_setup()
 
@@ -237,22 +242,18 @@ event :: proc "c" (ev: ^sapp.Event) {
 
 	#partial switch ev.type {
 	case .KEY_DOWN, .KEY_UP, .CHAR, .MOUSE_DOWN, .MOUSE_UP, .MOUSE_MOVE, .MOUSE_SCROLL:
-		// M01.04: normalize the backend event into an editor input
-		// event (logical coordinates, editor keys, validated text)
-		// and dispatch. M06/M07 replace the ESC handling with the
-		// shortcut and chord layers.
+		// Normalize backend facts, then resolve and execute editor actions.
+		// M07 adds the Acme pointer chord layer.
 		e, ok := normalize_sapp_event(ev)
 		if !ok {
 			return
 		}
-		log_input_event(e)
+		editor_consume_input(e)
 		if kd, is_down := e.(input.Key_Down); is_down && !kd.repeat && kd.key == .Escape {
-			request_quit(.User_Request, "esc")
+			editor_request_close(.Quit, .Keyboard)
 		}
 	case .QUIT_REQUESTED:
-		// This demo has no editable document buffers. Their product integration
-		// must route this event through lifecycle.Close_Guard before quitting.
-		request_quit(.User_Request, "window-close")
+		editor_request_close(.Quit, .OS_Close)
 	case .RESIZED:
 		// Resize must survive any scale value the backend reports
 		// (M01 acceptance): the conversion validates and falls back.
@@ -265,8 +266,10 @@ cleanup :: proc "c" () {
 
 	cleanup_product_ime()
 	ime.destroy(&state.preedit)
+	text_render_destroy()
 	glyph_cache_destroy()
 	fonts.destroy(&font_set)
+	editor_destroy()
 	sg.shutdown()
 	lifecycle.app_enter_shutdown(&app)
 	log.infof(
@@ -392,7 +395,7 @@ handle_product_ime :: proc(user: rawptr, event: platform.IME_Event) {
 		ime.done(&state.preedit)
 		log_input_event(input.Preedit{})
 	case .Commit:
-		log_input_event(input.Commit_Text{text = string(event.text)})
+		editor_consume_input(input.Commit_Text{text = string(event.text)})
 	case .Error:
 	}
 }
