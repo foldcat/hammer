@@ -211,6 +211,31 @@ def main() -> int:
                 raise HarnessFailure("the second undo did not restore the initial pixels")
             print("PASS: redo and repeated undo round-trip through the product")
 
+            for keysym in (ord("a"), 0xFF09, ord("b")):
+                x11.tap(keysym)
+            time.sleep(0.3)
+            tabbed = x11.pixels(window)
+            for _ in range(3):
+                x11.key(0xFFE3, True)
+                x11.tap(ord("z"))
+                x11.key(0xFFE3, False)
+                time.sleep(0.2)
+            if x11.pixels(window) != initial:
+                raise HarnessFailure("undoing the Tab editing sequence did not restore the initial pixels")
+            for keysym in (ord("a"), 0x20, 0x20, 0x20, ord("b")):
+                x11.tap(keysym)
+            time.sleep(0.3)
+            spaced = x11.pixels(window)
+            if tabbed == initial:
+                raise HarnessFailure("Tab produced no visible text change")
+            if spaced != tabbed:
+                raise HarnessFailure(f"Tab pixels {tabbed.hex()} differ from three spaces {spaced.hex()}")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.2)
+            print("PASS: Tab renders as whitespace to the next four-column tab stop")
+
             x11.tap(ord("x"))
             x11.tap(0xFF08)
             time.sleep(0.3)

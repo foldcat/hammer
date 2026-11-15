@@ -27,6 +27,12 @@ uses the shaped clusters for selection spans, caret placement, and IME preedit
 geometry. Preedit is displayed as a temporary insertion with an underline and
 never mutates the document before commit.
 
+Tabs remain single `\t` bytes in the document. `src/text/shaping/tabs.odin`
+expands them for display to the next four-grapheme tab stop and maps source
+offsets to expanded offsets for caret and selection geometry. Control-scalar IME
+commits are ignored by key resolution so the X11 Tab commit cannot duplicate the
+Tab key-down indentation action.
+
 Glyph vertices are grouped by atlas page and uploaded once per frame. Quad
 vertices likewise have one upload per frame; this respects Sokol's rule against
 writing a transient buffer after binding it. `src/glyph_atlas.odin` now owns a
@@ -49,6 +55,7 @@ reads to verify:
 - `abc`, Enter, and `d` change the body text pixels;
 - one Ctrl+Z undoes the complete typing run;
 - Ctrl+Shift+Z redoes it and a second undo restores the initial pixels;
+- `a`, Tab, `b` renders exactly like `a`, three spaces, `b`;
 - Backspace deletes through the product dispatcher;
 - Escape cannot close dirty text, and closing succeeds after returning to the
   saved revision.
@@ -64,7 +71,7 @@ odin run make.odin -file -- typing-test
 odin run make.odin -file -- test
     -> all 300 core unit tests passed, allocator tracking clean
 odin run make.odin -file -- text-test
-    -> all 26 native text tests passed; four visual golden hashes matched
+    -> all 28 native text tests passed; four visual golden hashes matched
 odin run make.odin -file -- ime-test
     -> native X11 preedit/dead-key integration test passed
 xvfb-run -a env HAMMER_AUTOQUIT_FRAMES=12 \

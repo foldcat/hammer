@@ -73,6 +73,10 @@ test_ime_commit_and_preedit_separation :: proc(t: ^testing.T) {
 	)
 	expect_event_unbound(t, input.Commit_Text{text = "x", modifiers = {.Ctrl}})
 	expect_event_unbound(t, input.Commit_Text{})
+	controls := []string{"\t", "\r", "\n", "text\n"}
+	for control in controls {
+		expect_event_unbound(t, input.Commit_Text{text = control})
+	}
 	expect_event_unbound(t, input.Preedit{text = "中", caret = 1})
 }
 

@@ -267,19 +267,31 @@ text_render_line :: proc(
 		return
 	}
 
+	expansion, tab_err := shaping.expand_tabs(string(line_bytes), shaping.DEFAULT_TAB_WIDTH, context.temp_allocator)
+	if !errs.ok(tab_err) {
+		text_render_error(tab_err)
+		return
+	}
 	composing := preedit.active && caret_line == line_index &&
 		editor.selection.active >= start && editor.selection.active <= start + len(line_bytes)
-	display := string(line_bytes)
-	caret_offset := editor.selection.active - start
+	display := string(expansion.text[:])
+	caret_offset := 0
+	if caret_line == line_index {
+		mapped, mapped_ok := shaping.tab_display_offset(expansion, editor.selection.active - start)
+		if !mapped_ok {
+			return
+		}
+		caret_offset = mapped
+	}
 	preedit_start := 0
 	preedit_end := 0
 	if composing {
 		preedit_start = caret_offset
 		preedit_end = caret_offset + len(preedit.text)
-		composed := make([]byte, len(line_bytes) + len(preedit.text), context.temp_allocator)
-		copy(composed, line_bytes[:caret_offset])
+		composed := make([]byte, len(expansion.text) + len(preedit.text), context.temp_allocator)
+		copy(composed, expansion.text[:caret_offset])
 		copy(composed[caret_offset:], preedit.text)
-		copy(composed[preedit_end:], line_bytes[caret_offset:])
+		copy(composed[preedit_end:], expansion.text[caret_offset:])
 		display = string(composed)
 		caret_offset += preedit_caret_byte(preedit.text, preedit.caret)
 	}
@@ -303,7 +315,7 @@ text_render_line :: proc(
 	defer shaping.destroy(&visible.text)
 
 	if !composing {
-		text_render_selection(visible.text, start, end, body, line_top, line_height, fb, quads)
+		text_render_selection(visible.text, expansion, start, end, body, line_top, line_height, fb, quads)
 	}
 	text_collect_glyphs(visible.text, font_list, body.x * state.dpi.scale, baseline, fb)
 
@@ -408,6 +420,7 @@ preedit_caret_byte :: proc(text: string, scalar_caret: int) -> int {
 
 text_render_selection :: proc(
 	text: shaping.Text,
+	expansion: shaping.Tab_Expansion,
 	line_start, line_end: int,
 	body: layout.Rect,
 	line_top, line_height: f32,
@@ -416,20 +429,25 @@ text_render_selection :: proc(
 ) {
 	selection_start := min(editor.selection.anchor, editor.selection.active)
 	selection_end := max(editor.selection.anchor, editor.selection.active)
-	start := max(selection_start, line_start)
-	end := min(selection_end, line_end)
-	if start >= end {
+	source_start := max(selection_start, line_start)
+	source_end := min(selection_end, line_end)
+	if source_start >= source_end {
 		return
 	}
-	start = min(start, line_start + measurement_end(text))
-	end = min(end, line_start + measurement_end(text))
+	start, start_ok := shaping.tab_display_offset(expansion, source_start - line_start)
+	end, end_ok := shaping.tab_display_offset(expansion, source_end - line_start)
+	if !start_ok || !end_ok {
+		return
+	}
+	start = min(start, measurement_end(text))
+	end = min(end, measurement_end(text))
 	if start >= end {
 		return
 	}
 	spans, err := shaping.selection_spans(
 		text,
-		start - line_start,
-		end - line_start,
+		start,
+		end,
 		state.dpi.scale,
 		context.temp_allocator,
 	)

@@ -142,10 +142,11 @@ resolve_movement :: proc(key: input.Key, modifiers: input.Modifiers) -> (Action,
 }
 
 
-// resolve_event separates committed text from key commands. Printable Text is
-// inserted only with no command modifiers or with Ctrl+Alt (AltGr). Control
-// scalars are handled as key-down edits instead, preventing Enter from being
-// applied once as a command and again as text. Other event kinds are ignored.
+// resolve_event separates committed text from key commands. Printable Text and
+// IME commits are inserted only with no command modifiers or with Ctrl+Alt
+// (AltGr). Control scalars are handled as key-down edits instead, preventing
+// Enter or Tab from being applied once as a command and again as text. Other
+// event kinds are ignored.
 resolve_event :: proc(event: input.Event) -> (Action, bool) {
 	#partial switch e in event {
 	case input.Key_Down:
@@ -175,6 +176,11 @@ resolve_event :: proc(event: input.Event) -> (Action, bool) {
 	case input.Commit_Text:
 		if e.text == "" || !text_modifiers_allowed(e.modifiers) {
 			return {}, false
+		}
+		for r in e.text {
+			if r < 0x20 || r >= 0x7f && r <= 0x9f {
+				return {}, false
+			}
 		}
 		return editing.Commit_Text{text = e.text}, true
 	case:
