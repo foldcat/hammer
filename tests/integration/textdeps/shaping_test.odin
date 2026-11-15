@@ -11,10 +11,14 @@ Fixture_Fonts :: struct {
 	mono:    ft.Face,
 	hebrew:  ft.Face,
 	arabic:  ft.Face,
+	cjk:     ft.Face,
+	emoji:   ft.Face,
 }
 
 FIXTURE_HEBREW_FONT :: FIXTURE_DIR + "/FixtureHebrew.ttf"
 FIXTURE_ARABIC_FONT :: FIXTURE_DIR + "/FixtureArabic.ttf"
+FIXTURE_CJK_FONT :: FIXTURE_DIR + "/FixtureCJK.otf"
+FIXTURE_EMOJI_FONT :: FIXTURE_DIR + "/FixtureEmoji.ttf"
 
 fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	fixtures: Fixture_Fonts
@@ -27,11 +31,23 @@ fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_HEBREW_FONT, 0, &fixtures.hebrew) == 0) {
 		return fixtures
 	}
-	testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_ARABIC_FONT, 0, &fixtures.arabic) == 0)
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_ARABIC_FONT, 0, &fixtures.arabic) == 0) {
+		return fixtures
+	}
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_CJK_FONT, 0, &fixtures.cjk) == 0) {
+		return fixtures
+	}
+	testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_EMOJI_FONT, 0, &fixtures.emoji) == 0)
 	return fixtures
 }
 
 fixture_fonts_destroy :: proc(fixtures: ^Fixture_Fonts) {
+	if fixtures.emoji != nil {
+		ft.FT_Done_Face(fixtures.emoji)
+	}
+	if fixtures.cjk != nil {
+		ft.FT_Done_Face(fixtures.cjk)
+	}
 	if fixtures.arabic != nil {
 		ft.FT_Done_Face(fixtures.arabic)
 	}
