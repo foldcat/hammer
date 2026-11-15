@@ -34,10 +34,11 @@ Window_Service :: struct {
 }
 
 // Services is the set of platform capabilities the application layer
-// implements for the core. Clipboard is added by M06.04; IME follows in M06.07.
+// implements for the core.
 Services :: struct {
 	// user is passed as the first argument to every proc below.
 	user:      rawptr,
 	window:    Window_Service,
 	clipboard: Clipboard_Service,
+	ime:       IME_Service,
 }

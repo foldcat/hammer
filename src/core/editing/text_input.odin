@@ -13,6 +13,13 @@ Insert_Text :: struct {
 	grouping_key: u64,
 }
 
+// Commit_Text inserts one complete IME commit atomically. text is borrowed only
+// during perform; the transaction log owns its copy.
+Commit_Text :: struct {
+	text:         string,
+	grouping_key: u64,
+}
+
 Delete_Backward :: struct {}
 Delete_Forward :: struct {}
 
@@ -23,22 +30,56 @@ insert_text :: proc(
 	grouping_key: u64,
 	allocator := context.allocator,
 ) -> errs.Error {
-	if !utf8.valid_rune(text) || text == 0 ||
-		(text != '\n' && text != '\t' && (text < 0x20 || text >= 0x7f && text <= 0x9f)) {
+	if !valid_committed_rune(text) {
 		return errs.new(.Invalid_Input, "editing: invalid committed text scalar", allocator = allocator)
 	}
+	encoded, width := utf8.encode_rune(text)
+	return insert_committed_bytes(doc, selection, encoded[:width], grouping_key, allocator)
+}
+
+insert_committed_text :: proc(
+	doc: ^txn.Doc,
+	selection: ^txn.Selection,
+	text: string,
+	grouping_key: u64,
+	allocator := context.allocator,
+) -> errs.Error {
+	if !utf8.valid_string(text) {
+		return errs.new(.Invalid_Input, "editing: IME commit is not valid UTF-8", allocator = allocator)
+	}
+	for r in text {
+		if !valid_committed_rune(r) {
+			return errs.new(.Invalid_Input, "editing: IME commit contains an invalid scalar", allocator = allocator)
+		}
+	}
+	return insert_committed_bytes(doc, selection, transmute([]byte)text, grouping_key, allocator)
+}
+
+valid_committed_rune :: proc(text: rune) -> bool {
+	return utf8.valid_rune(text) && text != 0 &&
+		(text == '\n' || text == '\t' || text >= 0x20 && (text < 0x7f || text > 0x9f))
+}
+
+insert_committed_bytes :: proc(
+	doc: ^txn.Doc,
+	selection: ^txn.Selection,
+	text: []byte,
+	grouping_key: u64,
+	allocator := context.allocator,
+) -> errs.Error {
 	if err := validate_edit_selection(doc, selection^, allocator); !errs.ok(err) {
 		return err
 	}
-
-	encoded, width := utf8.encode_rune(text)
+	if len(text) == 0 {
+		return {}
+	}
 	range := selection_range(selection^)
-	caret := range.start + width
+	caret := range.start + len(text)
 	operation: txn.Operation
 	if range.start == range.end {
-		operation = txn.Insert{pos = range.start, data = encoded[:width]}
+		operation = txn.Insert{pos = range.start, data = text}
 	} else {
-		operation = txn.Replace{range = range, data = encoded[:width]}
+		operation = txn.Replace{range = range, data = text}
 	}
 	return apply_text_operation(doc, selection, operation, caret, grouping_key, allocator)
 }

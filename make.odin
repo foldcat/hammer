@@ -14,6 +14,7 @@
 //     odin run make.odin -file -- test             # core unit tests
 //     odin run make.odin -file -- text-test        # M05.01 native text dependencies
 //     odin run make.odin -file -- clipboard-test   # M06.04 X11 native clipboard
+//     odin run make.odin -file -- ime-test         # M06.07 X11 IME
 //     odin run make.odin -file -- clipboard-windows-test  # M06.04 Windows/Wine clipboard
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
@@ -95,6 +96,7 @@ RECOVERY_TEST_HARNESS :: RECOVERY_TEST_DIR + "/kill_harness.py"
 
 TEXT_TEST_DIR :: #directory + "/tests/integration/textdeps"
 CLIPBOARD_TEST_DIR :: #directory + "/tests/integration/clipboard"
+IME_TEST_DIR :: #directory + "/tests/integration/ime"
 CLIPBOARD_WINDOWS_TEST_DIR :: #directory + "/tests/integration/clipboard_windows"
 CLIPBOARD_WINDOWS_TEST_BINARY :: OUT_DIR + "/clipboard_windows_test.exe"
 FREETYPE_PKG_VERSION :: "26.7.20" // FreeType 2.15.0 libtool/pkg-config version
@@ -112,6 +114,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/coords",
 	"tests/unit/dpi",
 	"tests/unit/input",
+	"tests/unit/ime",
 	"tests/unit/editing",
 	"tests/unit/keybind",
 	"tests/unit/queue",
@@ -142,6 +145,7 @@ SOKOL_C_COMMIT :: "93aa187b5d387cc24b7290b3ca3f13f61e139e7c"
 SOKOL_C_URL :: "https://codeload.github.com/floooh/sokol/tar.gz/" + SOKOL_C_COMMIT
 SOKOL_C_SHA256 :: "3e5a1b365cd221a8bd386a472cc9450eb7a0a6e93ce9a7fe6f86f8eb07a785c9"
 SOKOL_C_DIR :: #directory + "/third_party/sokol-c"
+SOKOL_X11_IME_PATCH :: #directory + "/third_party/patches/sokol-app-x11-ime.patch"
 SOKOL_GEN_DIR :: OUT_DIR + "/sokol"
 
 SOKOL_HEADERS := []string {
@@ -310,6 +314,16 @@ main :: proc() {
 			run_odin([]string{"xvfb-run", "-a", "odin", "test", CLIPBOARD_TEST_DIR, "-vet", HAMMER_COLLECTION, "-define:ODIN_TEST_THREADS=1"})
 		} else {
 			fmt.eprintln("[Test] clipboard-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "ime-test" {
+		when ODIN_OS == .Linux {
+			run_odin([]string{"xvfb-run", "-a", "odin", "test", IME_TEST_DIR, "-vet", HAMMER_COLLECTION, "-define:ODIN_TEST_THREADS=1"})
+		} else {
+			fmt.eprintln("[Test] ime-test currently requires Linux/X11")
 			os.exit(1)
 		}
 		return
@@ -623,6 +637,15 @@ setup_sokol_linux :: proc() -> bool {
 			return false
 		}
 	}
+	patched, patch_ok := patch_sokol_x11_ime()
+	if !patch_ok {
+		return false
+	}
+	if patched {
+		for variant in SOKOL_VARIANTS {
+			os.remove(sokol_lib_path("sokol_app", "app", variant))
+		}
+	}
 	if !system_deps_present() {
 		return false
 	}
@@ -706,6 +729,25 @@ sha256_ok :: proc(path, expected: string) -> bool {
 		return false
 	}
 	return line[:len(expected)] == expected
+}
+
+patch_sokol_x11_ime :: proc() -> (changed, ok: bool) {
+	data, err := os.read_entire_file(SOKOL_C_DIR + "/sokol_app.h", context.temp_allocator)
+	if err != nil {
+		fmt.eprintf("[Setup] cannot inspect Sokol X11 IME hook: %v\n", err)
+		return false, false
+	}
+	if strings.contains(string(data), "hammer_sapp_x11_set_event_filter") {
+		return false, true
+	}
+	fmt.println("[Setup] Applying the pinned Sokol X11 IME pre-dispatch hook...")
+	if !run_tool([]string {
+		"patch", "--no-backup-if-mismatch", "-d", SOKOL_C_DIR, "-p1", "-i", SOKOL_X11_IME_PATCH,
+	}, true) {
+		fmt.eprintln("[Setup] failed to apply the Sokol X11 IME patch")
+		return false, false
+	}
+	return true, true
 }
 
 system_deps_present :: proc() -> bool {

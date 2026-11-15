@@ -88,6 +88,8 @@ test_describe :: proc(t: ^testing.T) {
 	expect_describe(t, input.Text{text = '中'}, "text '中' (U+4E2D)")
 	expect_describe(t, input.Text{text = 0x01}, "text U+0001")
 	expect_describe(t, input.Text{text = ' ', modifiers = {.Shift}}, "text ' ' (U+0020) mods=SHIFT")
+	expect_describe(t, input.Preedit{text = "中", caret = 1}, "ime preedit \"中\" caret=1")
+	expect_describe(t, input.Commit_Text{text = "é中"}, "ime commit \"é中\"")
 	expect_describe(t, input.Pointer_Down{button = .Left, pos = at}, "pointer down LEFT at 150,100")
 	expect_describe(t, input.Pointer_Up{button = .Middle, pos = at}, "pointer up MIDDLE at 150,100")
 	expect_describe(t, input.Pointer_Move{pos = at}, "move at 150,100")
@@ -106,6 +108,8 @@ test_event_union_roundtrip :: proc(t: ^testing.T) {
 		input.Key_Down{key = .Escape, repeat = false},
 		input.Key_Up{key = .Enter, modifiers = {.Alt}},
 		input.Text{text = 'é'},
+		input.Preedit{text = "中", caret = 1},
+		input.Commit_Text{text = "é中"},
 		input.Pointer_Down{button = .Right, pos = coords.Logical_Point{3.5, 7}},
 		input.Pointer_Up{button = .Left, pos = coords.Logical_Point{1, 2}},
 		input.Pointer_Move{pos = coords.Logical_Point{9, 8}, buttons = {.Middle}},
@@ -123,6 +127,12 @@ test_event_union_roundtrip :: proc(t: ^testing.T) {
 		case input.Text:
 			matched = true
 			testing.expect(t, v.text == 'é')
+		case input.Preedit:
+			matched = true
+			testing.expect(t, v.text == "中" && v.caret == 1)
+		case input.Commit_Text:
+			matched = true
+			testing.expect(t, v.text == "é中")
 		case input.Pointer_Down:
 			matched = true
 			testing.expect(t, v.button == .Right && v.pos == coords.Logical_Point{3.5, 7})

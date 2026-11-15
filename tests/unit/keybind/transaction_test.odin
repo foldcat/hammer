@@ -28,6 +28,7 @@ test_resolved_input_sequence_matches_transaction_model :: proc(t: ^testing.T) {
 		input.Key_Down{key = .Backspace},
 		input.Text{text = '\n'},
 		input.Key_Down{key = .Tab},
+		input.Commit_Text{text = "é中"},
 	}
 	for event in events {
 		action, ok := keybind.resolve_event(event)
@@ -37,6 +38,8 @@ test_resolved_input_sequence_matches_transaction_model :: proc(t: ^testing.T) {
 		err: errs.Error
 		#partial switch a in action {
 		case editing.Insert_Text:
+			err = editing.perform(&doc, &selection, a)
+		case editing.Commit_Text:
 			err = editing.perform(&doc, &selection, a)
 		case editing.Delete_Backward:
 			err = editing.perform(&doc, &selection, a)
@@ -57,10 +60,10 @@ test_resolved_input_sequence_matches_transaction_model :: proc(t: ^testing.T) {
 	got, read_err := rope.tree_read_all(&doc.tree, {0, rope.tree_byte_count(&doc.tree)})
 	defer delete(got)
 	testing.expect(t, errs.ok(read_err))
-	testing.expectf(t, bytes.equal(got, transmute([]byte)string("a\n\t")), "got %q", string(got))
+	testing.expectf(t, bytes.equal(got, transmute([]byte)string("a\n\té中")), "got %q", string(got))
 	testing.expect(t, copy_count == 1)
-	testing.expect(t, selection.anchor == 3 && selection.active == 3)
-	testing.expect(t, txn.doc_log_len(&doc) == 5)
+	testing.expect(t, selection.anchor == 8 && selection.active == 8)
+	testing.expect(t, txn.doc_log_len(&doc) == 6)
 	check_err := txn.doc_check(&doc)
 	defer errs.destroy(&check_err)
 	testing.expect(t, errs.ok(check_err))

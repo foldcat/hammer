@@ -1,5 +1,5 @@
 // Package keybind resolves normalized input facts into semantic editor actions
-// (M06.02–M06.03). It separates committed text from commands but does not execute actions.
+// (M06.02–M06.07). It separates committed text from commands but does not execute actions.
 package keybind
 
 import editing "../editing"
@@ -43,6 +43,7 @@ Action :: union {
 	Execute_Text,
 	Look_Text,
 	editing.Insert_Text,
+	editing.Commit_Text,
 	editing.Delete_Backward,
 	editing.Delete_Forward,
 }
@@ -167,14 +168,23 @@ resolve_event :: proc(event: input.Event) -> (Action, bool) {
 		if e.text < 0x20 || e.text >= 0x7f && e.text <= 0x9f {
 			return {}, false
 		}
-		ctrl := .Ctrl in e.modifiers
-		alt := .Alt in e.modifiers
-		altgr := ctrl && alt && .Super not_in e.modifiers
-		if !altgr && (ctrl || alt || .Super in e.modifiers) {
+		if !text_modifiers_allowed(e.modifiers) {
 			return {}, false
 		}
 		return editing.Insert_Text{text = e.text}, true
+	case input.Commit_Text:
+		if e.text == "" || !text_modifiers_allowed(e.modifiers) {
+			return {}, false
+		}
+		return editing.Commit_Text{text = e.text}, true
 	case:
 	}
 	return {}, false
+}
+
+text_modifiers_allowed :: proc(modifiers: input.Modifiers) -> bool {
+	ctrl := .Ctrl in modifiers
+	alt := .Alt in modifiers
+	altgr := ctrl && alt && .Super not_in modifiers
+	return altgr || (!ctrl && !alt && .Super not_in modifiers)
 }

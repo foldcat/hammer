@@ -1,0 +1,50 @@
+--- a/sokol_app.h
++++ b/sokol_app.h
+@@ -13941,7 +13941,7 @@
+     }
+ }
+ 
+-_SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event) {
++_SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event, bool emit_char) {
+     int keycode = (int)event->xkey.keycode;
+ 
+     const sapp_keycode key = _sapp_x11_translate_key(keycode);
+@@ -13955,7 +13955,7 @@
+     KeySym keysym;
+     XLookupString(&event->xkey, NULL, 0, &keysym, NULL);
+     int32_t chr = _sapp_x11_keysym_to_unicode(keysym);
+-    if (chr > 0) {
++    if (emit_char && (chr > 0)) {
+         _sapp_x11_char_event((uint32_t)chr, repeat, mods);
+     }
+ }
+@@ -14207,7 +14207,20 @@
+     XSendEvent(_sapp.x11.display, req->requestor, False, 0, (XEvent*) &reply);
+ }
+ 
++static int (*_hammer_sapp_x11_event_filter)(XEvent* event) = NULL;
++
++void hammer_sapp_x11_set_event_filter(int (*filter)(XEvent* event)) {
++    _hammer_sapp_x11_event_filter = filter;
++}
++
+ _SOKOL_PRIVATE void _sapp_x11_process_event(XEvent* event) {
++    int filter_result = 0;
++    if (_hammer_sapp_x11_event_filter) {
++        filter_result = _hammer_sapp_x11_event_filter(event);
++        if (filter_result == 1) {
++            return;
++        }
++    }
+     switch (event->type) {
+         case GenericEvent:
+             _sapp_x11_on_genericevent(event);
+@@ -14219,7 +14232,7 @@
+             _sapp_x11_on_focusout(event);
+             break;
+         case KeyPress:
+-            _sapp_x11_on_keypress(event);
++            _sapp_x11_on_keypress(event, filter_result != 2);
+             break;
+         case KeyRelease:
+             _sapp_x11_on_keyrelease(event);

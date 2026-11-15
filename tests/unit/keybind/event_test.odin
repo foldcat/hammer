@@ -64,6 +64,19 @@ test_special_editing_keys_are_key_down_actions :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_ime_commit_and_preedit_separation :: proc(t: ^testing.T) {
+	expect_event_action(t, input.Commit_Text{text = "é中🙂"}, editing.Commit_Text{text = "é中🙂"})
+	expect_event_action(
+		t,
+		input.Commit_Text{text = "@", modifiers = {.Ctrl, .Alt}},
+		editing.Commit_Text{text = "@"},
+	)
+	expect_event_unbound(t, input.Commit_Text{text = "x", modifiers = {.Ctrl}})
+	expect_event_unbound(t, input.Commit_Text{})
+	expect_event_unbound(t, input.Preedit{text = "中", caret = 1})
+}
+
+@(test)
 test_non_input_events_are_ignored :: proc(t: ^testing.T) {
 	expect_event_unbound(t, input.Key_Up{key = .A})
 	expect_event_unbound(t, input.Pointer_Down{button = .Left})

@@ -1,6 +1,6 @@
 // Package editing implements backend-free movement, selection, text-input,
-// delayed-paste, and indentation actions over transactional documents
-// (M06.01–M06.06). Selections remain view-owned; text mutations go through the
+// delayed-paste, indentation, and IME commit actions over transactional documents
+// (M06.01–M06.07). Selections remain view-owned; text mutations go through the
 // transaction engine.
 package editing
 
@@ -41,6 +41,7 @@ Action :: union {
 	Move,
 	Select_All,
 	Insert_Text,
+	Commit_Text,
 	Delete_Backward,
 	Delete_Forward,
 }
@@ -64,6 +65,8 @@ perform :: proc(
 		return {}
 	case Insert_Text:
 		return insert_text(doc, selection, a.text, a.grouping_key, allocator)
+	case Commit_Text:
+		return insert_committed_text(doc, selection, a.text, a.grouping_key, allocator)
 	case Delete_Backward:
 		return delete_at_selection(doc, selection, .Left, allocator)
 	case Delete_Forward:

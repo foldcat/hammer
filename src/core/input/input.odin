@@ -315,11 +315,24 @@ Key_Up :: struct {
 	modifiers: Modifiers,
 }
 
-// Text is a committed character (backend CHAR events; M06.07 routes
-// IME commits here too). `text` is a valid Unicode scalar value —
-// validated by `normalize_text` at the adapter boundary.
+// Text is a committed character from an ordinary backend CHAR event. `text` is
+// a valid Unicode scalar value validated by normalize_text at the adapter.
 Text :: struct {
 	text:      rune,
+	modifiers: Modifiers,
+}
+
+// Preedit is transient IME composition text. text is borrowed for the event's
+// dispatch only; caret is a Unicode scalar index, not a byte offset.
+Preedit :: struct {
+	text:  string,
+	caret: int,
+}
+
+// Commit_Text is one complete IME commit. text is valid UTF-8 and borrowed only
+// during dispatch; editing performs it as one transaction rather than per scalar.
+Commit_Text :: struct {
+	text:      string,
 	modifiers: Modifiers,
 }
 
@@ -362,6 +375,8 @@ Event :: union {
 	Key_Down,
 	Key_Up,
 	Text,
+	Preedit,
+	Commit_Text,
 	Pointer_Down,
 	Pointer_Up,
 	Pointer_Move,
@@ -501,6 +516,10 @@ describe :: proc(e: Event, allocator := context.temp_allocator) -> string {
 			mods_suffix(v.modifiers, allocator),
 			allocator = allocator,
 		)
+	case Preedit:
+		return fmt.aprintf("ime preedit %q caret=%d", v.text, v.caret, allocator = allocator)
+	case Commit_Text:
+		return fmt.aprintf("ime commit %q%s", v.text, mods_suffix(v.modifiers, allocator), allocator = allocator)
 	case Pointer_Down:
 		return fmt.aprintf(
 			"pointer down %s at %v,%v%s",

@@ -37,6 +37,7 @@ import coords "core/coords"
 import config "core/config"
 import "core/dpi"
 import input "core/input"
+import "core/ime"
 import fonts "text/fonts"
 
 MAX_TEST_DPI_SCALES :: 8
@@ -52,6 +53,7 @@ State :: struct {
 	// dpi is the editor-owned, always-valid scale and font-size state.
 	// Input normalization and rendering trust this validated cache.
 	dpi:             dpi.State,
+	preedit:         ime.State,
 	test_dpi_scales: [MAX_TEST_DPI_SCALES]f32,
 	test_dpi_count:  int,
 }
@@ -166,6 +168,11 @@ init :: proc "c" () {
 	_, _, scale := window_metrics("window")
 	init_fonts()
 	init_glyph_cache(scale)
+	if preedit_err := ime.init(&state.preedit, {allocator = permanent()}); !errs.ok(preedit_err) {
+		request_quit(.Init_Failed, "ime-init", preedit_err)
+		return
+	}
+	init_product_ime()
 
 	// The font point size through the §9.6 chain: points → logical px
 	// (×96/72) → physical px (× scale). M05 turns this into the
@@ -256,6 +263,8 @@ event :: proc "c" (ev: ^sapp.Event) {
 cleanup :: proc "c" () {
 	context = app_context()
 
+	cleanup_product_ime()
+	ime.destroy(&state.preedit)
 	glyph_cache_destroy()
 	fonts.destroy(&font_set)
 	sg.shutdown()
@@ -344,6 +353,47 @@ setup_services :: proc() {
 			framebuffer_size = sokol_framebuffer_size,
 			dpi_scale = sokol_dpi_scale,
 		},
+		ime = {notify = handle_product_ime},
+	}
+}
+
+handle_product_ime :: proc(user: rawptr, event: platform.IME_Event) {
+	if event.kind == .Error {
+		log.errorf("ime: %s", event.err.message)
+		return
+	}
+	switch event.kind {
+	case .Preedit:
+		if !ime.snapshot(&state.preedit).active {
+			if err := ime.begin(&state.preedit); !errs.ok(err) {
+				log.errorf("ime: %s", err.message)
+				errs.destroy(&err)
+				return
+			}
+		}
+		err := ime.update(&state.preedit, event.text, event.caret)
+		if !errs.ok(err) {
+			log.errorf("ime: %s", err.message)
+			errs.destroy(&err)
+			return
+		}
+		snapshot := ime.snapshot(&state.preedit)
+		log_input_event(input.Preedit{text = snapshot.text, caret = snapshot.caret})
+	case .Preedit_Caret:
+		err := ime.set_caret(&state.preedit, event.caret)
+		if !errs.ok(err) {
+			log.errorf("ime: %s", err.message)
+			errs.destroy(&err)
+			return
+		}
+		snapshot := ime.snapshot(&state.preedit)
+		log_input_event(input.Preedit{text = snapshot.text, caret = snapshot.caret})
+	case .Preedit_Done:
+		ime.done(&state.preedit)
+		log_input_event(input.Preedit{})
+	case .Commit:
+		log_input_event(input.Commit_Text{text = string(event.text)})
+	case .Error:
 	}
 }
 
