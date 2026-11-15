@@ -95,6 +95,7 @@ TEXT_TEST_DIR :: #directory + "/tests/integration/textdeps"
 FREETYPE_PKG_VERSION :: "26.7.20" // FreeType 2.15.0 libtool/pkg-config version
 HARFBUZZ_VERSION :: "12.3.2"
 ICU_VERSION :: "78.3"
+FONTCONFIG_VERSION :: "2.18.3"
 SHADERC_VERSION :: "shaderc-2026.3"
 
 CORE_TEST_PACKAGES := []string {
@@ -557,6 +558,7 @@ text_deps_present :: proc() -> bool {
 		{"freetype2", FREETYPE_PKG_VERSION, "--exact-version=" + FREETYPE_PKG_VERSION},
 		{"harfbuzz", HARFBUZZ_VERSION, "--exact-version=" + HARFBUZZ_VERSION},
 		{"icu-uc", ICU_VERSION, "--exact-version=" + ICU_VERSION},
+		{"fontconfig", FONTCONFIG_VERSION, "--exact-version=" + FONTCONFIG_VERSION},
 	}
 	for pin in pins {
 		if !run_tool([]string{"pkg-config", pin.exact, pin.pkg}, true) {
@@ -570,10 +572,11 @@ text_deps_present :: proc() -> bool {
 		return false
 	}
 	fmt.printf(
-		"[Test] pins: FreeType 2.15.0 (%s), HarfBuzz %s, ICU %s, %s\n",
+		"[Setup] pins: FreeType 2.15.0 (%s), HarfBuzz %s, ICU %s, fontconfig %s, %s\n",
 		FREETYPE_PKG_VERSION,
 		HARFBUZZ_VERSION,
 		ICU_VERSION,
+		FONTCONFIG_VERSION,
 		SHADERC_VERSION,
 	)
 	return true
@@ -582,6 +585,9 @@ text_deps_present :: proc() -> bool {
 // --- Sokol setup (Linux only) -----------------------------------------
 
 setup_sokol_linux :: proc() -> bool {
+	if !text_deps_present() {
+		return false
+	}
 	if !sokol_headers_present() {
 		fmt.println("[Setup] Sokol C headers not found; downloading the pinned revision...")
 		if !fetch_sokol_headers() {

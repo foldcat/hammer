@@ -27,6 +27,13 @@ font_families:
   - "DejaVu Sans Mono"
   - "monospace"
 
+# Optional per-role stacks; omitted roles inherit font_families.
+# tag_font_families: ["JetBrains Mono", "monospace"]
+# console_font_families: ["JetBrains Mono", "monospace"]
+
+# Optional explicit font file (face index 0), overriding every family stack.
+# font_path: "/path/to/font.ttf"
+
 # Font size in points (4..72). Default 12.
 font_size_points: 13
 

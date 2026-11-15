@@ -41,11 +41,12 @@ odin run make.odin -file -- test            # core unit tests (headless)
 odin run make.odin -file -- text-test       # pinned native text bindings (Linux)
 ```
 
-M05.01 adds narrow Linux bindings for FreeType 2.15.0, HarfBuzz 12.3.2,
-and ICU4C 78.3 (Unicode 17.0, with unversioned C symbols). The text test
-requires those exact `pkg-config` versions plus shaderc/glslc 2026.3. These
-libraries are not yet used for product font rendering; M05.02 begins that
-integration.
+The native text stack is pinned to FreeType 2.15.0, HarfBuzz 12.3.2, ICU4C
+78.3 (Unicode 17.0, with unversioned C symbols), fontconfig 2.18.3, and
+shaderc/glslc 2026.3. Linux product startup discovers and opens body/tag/
+console faces through `src/text/fonts`; other platforms currently report font
+discovery as unsupported. See `configs/example.yaml` for ordered role stacks
+and the explicit `font_path` override.
 
 ### Configuration
 

@@ -22,11 +22,18 @@ import errs "../errs"
 // config_destroy releases the strings owned by a Config produced by
 // `build_config`/`resolve_from_yaml`. `allocator` must match the one
 // that built the Config. Safe on a zero Config.
-config_destroy :: proc(c: ^Config, allocator := context.allocator) {
-	for family in c.Font_Families {
+destroy_families :: proc(families: []string, allocator: runtime.Allocator) {
+	for family in families {
 		delete(family, allocator)
 	}
-	delete(c.Font_Families, allocator)
+	delete(families, allocator)
+}
+
+config_destroy :: proc(c: ^Config, allocator := context.allocator) {
+	destroy_families(c.Font_Families, allocator)
+	destroy_families(c.Tag_Font_Families, allocator)
+	destroy_families(c.Console_Font_Families, allocator)
+	delete(c.Font_Path, allocator)
 	c^ = Config{}
 }
 
@@ -35,10 +42,10 @@ config_destroy :: proc(c: ^Config, allocator := context.allocator) {
 // `allocator` must match the one that produced the Resolved. Never call
 // it on the generated package's static value. Safe on a zero Resolved.
 resolved_destroy :: proc(r: ^Resolved, allocator := context.allocator) {
-	for family in r.Font_Families {
-		delete(family, allocator)
-	}
-	delete(r.Font_Families, allocator)
+	destroy_families(r.Font_Families, allocator)
+	destroy_families(r.Tag_Font_Families, allocator)
+	destroy_families(r.Console_Font_Families, allocator)
+	delete(r.Font_Path, allocator)
 	r^ = Resolved{}
 }
 
@@ -86,6 +93,7 @@ resolved :: proc(c: Config, source: Source, allocator := context.allocator) -> (
 	d := defaults()
 
 	r := Resolved{
+		Font_Path = strings.clone(c.Font_Path, allocator),
 		Font_Size_Points = c.Font_Size_Points,
 		Line_Height = c.Line_Height,
 		Ligatures = c.Ligatures,
@@ -113,6 +121,14 @@ resolved :: proc(c: Config, source: Source, allocator := context.allocator) -> (
 		r.Font_Families = clone_families(c.Font_Families, allocator)
 	} else {
 		r.Font_Families = clone_families(d.Font_Families, allocator)
+	}
+	r.Tag_Font_Families = clone_families(c.Tag_Font_Families, allocator)
+	if len(r.Tag_Font_Families) == 0 {
+		r.Tag_Font_Families = clone_families(r.Font_Families, allocator)
+	}
+	r.Console_Font_Families = clone_families(c.Console_Font_Families, allocator)
+	if len(r.Console_Font_Families) == 0 {
+		r.Console_Font_Families = clone_families(r.Font_Families, allocator)
 	}
 
 	// Theme: any zero color means "defaults were not fully provided";
@@ -152,12 +168,13 @@ describe :: proc(r: Resolved, allocator := context.allocator) -> string {
 		families = "?"
 	}
 	return fmt.aprintf(
-		"config: source=%s, font_size=%.1fpt, line_height=%.2f, ligatures=%v, families=[%s], body_bg=#%02x%02x%02x",
+		"config: source=%s, font_size=%.1fpt, line_height=%.2f, ligatures=%v, families=[%s], font_path=%q, body_bg=#%02x%02x%02x",
 		source_name(r.Source),
 		r.Font_Size_Points,
 		r.Line_Height,
 		r.Ligatures,
 		families,
+		r.Font_Path,
 		u8(r.Theme.Body_Bg[0] * 255.0 + 0.5),
 		u8(r.Theme.Body_Bg[1] * 255.0 + 0.5),
 		u8(r.Theme.Body_Bg[2] * 255.0 + 0.5),
@@ -180,32 +197,25 @@ build_config :: proc(root: ^map_node, allocator := context.allocator) -> (Config
 	for key, node in root.entries {
 		seen[key] = true
 		switch key {
-		case "font_families":
-			list, is_list := node.([]value)
-			if !is_list {
-				return cfg, errs.newf(
-					.Invalid_Input,
-					"config: line %d: font_families must be a list",
-					root.lines[key],
-				)
+		case "font_families", "tag_font_families", "console_font_families":
+			families, family_err := build_family_list(node, key, root.lines[key], allocator)
+			if !errs.ok(family_err) {
+				return cfg, family_err
 			}
-			families := make([]string, len(list), allocator)
-			for item, i in list {
-				if item.kind != .String {
-					for done in families[:i] {
-						delete(done)
-					}
-					delete(families)
-					return cfg, errs.newf(
-						.Invalid_Input,
-						"config: line %d: font_families[%d] must be a quoted string",
-						root.lines[key],
-						i,
-					)
-				}
-				families[i] = strings.clone(item.text, allocator)
+			switch key {
+			case "font_families":
+				cfg.Font_Families = families
+			case "tag_font_families":
+				cfg.Tag_Font_Families = families
+			case "console_font_families":
+				cfg.Console_Font_Families = families
 			}
-			cfg.Font_Families = families
+		case "font_path":
+			scalar, is_scalar := node.(value)
+			if !is_scalar || scalar.kind != .String {
+				return cfg, errs.newf(.Invalid_Input, "config: line %d: font_path must be a quoted string", root.lines[key])
+			}
+			cfg.Font_Path = strings.clone(scalar.text, allocator)
 		case "font_size_points":
 			scalar, is_scalar := node.(value)
 			if !is_scalar || scalar.kind == .String {
@@ -258,6 +268,25 @@ build_config :: proc(root: ^map_node, allocator := context.allocator) -> (Config
 		}
 	}
 	return cfg, errs.Error{}
+}
+
+build_family_list :: proc(node: value_node, key: string, line: int, allocator := context.allocator) -> ([]string, errs.Error) {
+	list, is_list := node.([]value)
+	if !is_list {
+		return nil, errs.newf(.Invalid_Input, "config: line %d: %s must be a list", line, key)
+	}
+	families := make([]string, len(list), allocator)
+	for item, i in list {
+		if item.kind != .String {
+			for done in families[:i] {
+				delete(done, allocator)
+			}
+			delete(families, allocator)
+			return nil, errs.newf(.Invalid_Input, "config: line %d: %s[%d] must be a quoted string", line, key, i)
+		}
+		families[i] = strings.clone(item.text, allocator)
+	}
+	return families, errs.Error{}
 }
 
 // build_theme reads the `theme:` mapping into a Theme. A partial theme
@@ -333,7 +362,7 @@ build_theme :: proc(theme: ^Theme, node: ^map_node, allocator := context.allocat
 // ignoring.
 is_reserved_key :: proc(key: string) -> bool {
 	switch key {
-	case "tag_font_families", "console_font_families", "keybindings", "touchpad_bindings", "syntax_styles", "large_file_threshold", "history_budget", "recovery_interval", "shell", "clipboard_policy", "finder_exclusions", "terminal":
+	case "keybindings", "touchpad_bindings", "syntax_styles", "large_file_threshold", "history_budget", "recovery_interval", "shell", "clipboard_policy", "finder_exclusions", "terminal":
 		return true
 	}
 	return false

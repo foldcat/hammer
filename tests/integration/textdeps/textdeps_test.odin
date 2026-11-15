@@ -2,6 +2,7 @@ package textdeps_test
 
 import "core:testing"
 
+import fc "hammer:text/fontconfig"
 import ft "hammer:text/freetype"
 import hb "hammer:text/harfbuzz"
 import icu "hammer:text/icu"
@@ -160,4 +161,10 @@ test_icu_bidi_and_properties :: proc(t: ^testing.T) {
 	testing.expect(t, icu.u_hasBinaryProperty('A', icu.ALPHABETIC) != 0)
 	testing.expect(t, icu.u_hasBinaryProperty(' ', icu.WHITE_SPACE) != 0)
 	testing.expect(t, icu.u_hasBinaryProperty(0x200e, icu.BIDI_CONTROL) != 0)
+}
+
+
+@(test)
+test_fontconfig_version :: proc(t: ^testing.T) {
+	testing.expectf(t, fc.FcGetVersion() == fc.EXPECTED_VERSION, "fontconfig pin mismatch: got %d", fc.FcGetVersion())
 }

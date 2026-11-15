@@ -83,6 +83,7 @@ exact build/runtime checks; the other versions are recorded below:
 | FreeType        | 2.15.0 (pkg-config 26.7.20)                        | pinned/bound M05.01; FTL                                                          |
 | HarfBuzz        | 12.3.2                                             | pinned/bound M05.01; Old MIT                                                      |
 | ICU4C           | 78.3, Unicode 17.0; unversioned C symbols          | pinned/bound M05.01; Unicode-3.0                                                  |
+| fontconfig      | 2.18.3                                             | pinned/bound M05.02; MIT-style license                                            |
 | kernel / FUSE   | 6.18.50; FUSE protocol 7.45 offered                | FUSE spike                                                                         |
 | fusermount3     | libfuse 3.18.3, setuid root                        | FUSE deployment helper                                                             |
 | Mesa            | 26.1.8 (llvmpipe software GL used headless)        | all GL validation                                                                  |

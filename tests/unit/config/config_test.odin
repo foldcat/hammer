@@ -217,7 +217,7 @@ test_generate_source_carries_resolved_values :: proc(t: ^testing.T) {
 	testing.expect(t, src != "")
 	testing.expect(t, strings.contains(src, config.GENERATED_HEADER))
 	testing.expect(t, strings.contains(src, "package generated"))
-	testing.expect(t, strings.contains(src, "Font_Size_Points = 20"))
+	testing.expect(t, strings.contains(src, "Font_Size_Points      = 20"))
 	testing.expect(t, strings.contains(src, "Source = .Builtin"))
 	// 0x11 = 17/255 = 0.06666667 (Odin %v shortest round-trip).
 	testing.expect(t, strings.contains(src, "0.06666667"))
@@ -267,4 +267,44 @@ test_arena_allocator_end_to_end :: proc(t: ^testing.T) {
 	// One reset reclaims every allocation made above.
 	mem_virtual.arena_free_all(&arena)
 	testing.expect(t, arena.total_used == 0)
+}
+
+
+@(test)
+test_font_path_and_role_stacks :: proc(t: ^testing.T) {
+	yaml := `font_families: ["Body Mono", "monospace"]
+tag_font_families: ["Tag Mono"]
+console_font_families: ["Console Mono", "monospace"]
+font_path: "/tmp/font.ttf"
+`
+	r, err := config.resolve_from_yaml(yaml)
+	defer config.resolved_destroy(&r)
+	testing.expect(t, errs.ok(err))
+	testing.expect(t, r.Font_Path == "/tmp/font.ttf")
+	testing.expect(t, len(r.Font_Families) == 2 && r.Font_Families[0] == "Body Mono")
+	testing.expect(t, len(r.Tag_Font_Families) == 1 && r.Tag_Font_Families[0] == "Tag Mono")
+	testing.expect(t, len(r.Console_Font_Families) == 2 && r.Console_Font_Families[0] == "Console Mono")
+
+	src := config.generate_source(r)
+	defer delete(src)
+	testing.expect(t, strings.contains(src, `Tag_Font_Families     = []string {"Tag Mono"}`))
+	testing.expect(t, strings.contains(src, `Console_Font_Families = []string {"Console Mono", "monospace"}`))
+	testing.expect(t, strings.contains(src, `Font_Path             = "/tmp/font.ttf"`))
+}
+
+@(test)
+test_empty_role_stacks_inherit_body :: proc(t: ^testing.T) {
+	r, err := config.resolve_from_yaml("font_families: [\"Body Mono\"]\n")
+	defer config.resolved_destroy(&r)
+	testing.expect(t, errs.ok(err))
+	testing.expect(t, len(r.Tag_Font_Families) == 1 && r.Tag_Font_Families[0] == "Body Mono")
+	testing.expect(t, len(r.Console_Font_Families) == 1 && r.Console_Font_Families[0] == "Body Mono")
+	testing.expect(t, r.Font_Path == "")
+}
+
+@(test)
+test_rejects_invalid_font_fields :: proc(t: ^testing.T) {
+	expect_fail(t, "font_path: 42\n", "invalid input")
+	expect_fail(t, "tag_font_families: [\"\"]\n", "invalid input")
+	expect_fail(t, "console_font_families: [42]\n", "invalid input")
 }

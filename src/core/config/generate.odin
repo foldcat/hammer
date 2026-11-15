@@ -18,6 +18,15 @@ import errs "../errs"
 // tells humans (and diff tools) not to edit it by hand.
 GENERATED_HEADER :: "// GENERATED FILE — do not edit by hand."
 
+family_list_literal :: proc(families: []string, allocator := context.allocator) -> string {
+	if len(families) == 0 {
+		return strings.clone("nil", allocator)
+	}
+	joined := strings.join(families, "\", \"", allocator)
+	defer delete(joined, allocator)
+	return strings.concatenate([]string{"[]string {\"", joined, "\"}"}, allocator)
+}
+
 // write_staged generates the staged package source for `r` and writes
 // it to `path` atomically (temp file + rename): a failed or interrupted
 // build can never leave a torn generated file, and an existing file is
@@ -46,22 +55,12 @@ generate_source :: proc(r: Resolved, allocator := context.allocator) -> string {
 		source_kind = ".File"
 	}
 
-	families_literal := "nil"
-	families_owned := false
-	if len(r.Font_Families) > 0 {
-		// Family names are validated to be plain strings without quotes
-		// or backslashes (see `validate`), so a ".." Odin literal is a
-		// faithful representation.
-		joined := strings.join(r.Font_Families, "\", \"", allocator)
-		families_literal = strings.concatenate([]string{"[]string {\"", joined, "\"}"}, allocator)
-		delete(joined, allocator)
-		families_owned = true
-	}
-	// Proc-scope defer (Odin defers are block-scoped): the literal must
-	// stay alive until aprintf below has copied it.
-	defer if families_owned {
-		delete(families_literal, allocator)
-	}
+	families_literal := family_list_literal(r.Font_Families, allocator)
+	tag_families_literal := family_list_literal(r.Tag_Font_Families, allocator)
+	console_families_literal := family_list_literal(r.Console_Font_Families, allocator)
+	defer delete(families_literal, allocator)
+	defer delete(tag_families_literal, allocator)
+	defer delete(console_families_literal, allocator)
 
 	t := r.Theme
 	return fmt.aprintf(
@@ -76,10 +75,13 @@ import config "../../core/config"
 #assert(config.SCHEMA_VERSION == %d, "generated config was staged with a different schema version; rebuild via make.odin")
 
 resolved :: config.Resolved {{
-    Font_Families    = %s,
-    Font_Size_Points = %v,
-    Line_Height      = %v,
-    Ligatures        = %v,
+    Font_Families         = %s,
+    Tag_Font_Families     = %s,
+    Console_Font_Families = %s,
+    Font_Path             = "%s",
+    Font_Size_Points      = %v,
+    Line_Height           = %v,
+    Ligatures             = %v,
     Theme            = config.Theme{{
         Body_Bg      = [4]f32 {{%v, %v, %v, %v}},
         Body_Fg      = [4]f32 {{%v, %v, %v, %v}},
@@ -99,6 +101,9 @@ resolved :: config.Resolved {{
 		source_name(r.Source),
 		SCHEMA_VERSION,
 		families_literal,
+		tag_families_literal,
+		console_families_literal,
+		r.Font_Path,
 		r.Font_Size_Points,
 		r.Line_Height,
 		r.Ligatures,

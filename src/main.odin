@@ -34,6 +34,7 @@ import generated "config/generated"
 import coords "core/coords"
 import config "core/config"
 import input "core/input"
+import fonts "text/fonts"
 
 State :: struct {
 	pass_action:     sg.Pass_Action,
@@ -159,6 +160,7 @@ init :: proc "c" () {
 	// core/coords (M01.03). A garbage scale degrades to 1.0 instead of
 	// crashing (M01 acceptance).
 	_, _, scale := window_metrics("window")
+	init_fonts()
 
 	// The font point size through the §9.6 chain: points → logical px
 	// (×96/72) → physical px (× scale). M05 turns this into the
@@ -244,6 +246,7 @@ event :: proc "c" (ev: ^sapp.Event) {
 cleanup :: proc "c" () {
 	context = app_context()
 
+	fonts.destroy(&font_set)
 	sg.shutdown()
 	lifecycle.app_enter_shutdown(&app)
 	log.infof(

@@ -42,23 +42,29 @@ Theme :: struct {
 // no way to spell "empty" for a color or a negative font size, so
 // zero-means-default is unambiguous.
 Config :: struct {
-	Font_Families:    []string,
-	Font_Size_Points: f32,
-	Line_Height:      f32,
-	Ligatures:        bool,
-	Theme:            Theme,
+	Font_Families:        []string,
+	Tag_Font_Families:    []string,
+	Console_Font_Families: []string,
+	Font_Path:            string,
+	Font_Size_Points:     f32,
+	Line_Height:          f32,
+	Ligatures:            bool,
+	Theme:                Theme,
 }
 
 // Resolved is the fully-resolved configuration after validation and
 // default filling. This is what `load` returns and what the generated
-// package carries.
+// package carries. Empty role family lists inherit Font_Families.
 Resolved :: struct {
-	Font_Families:    []string,
-	Font_Size_Points: f32,
-	Line_Height:      f32,
-	Ligatures:        bool,
-	Theme:            Theme,
-	Source:           Source, // where the config came from
+	Font_Families:         []string,
+	Tag_Font_Families:     []string,
+	Console_Font_Families: []string,
+	Font_Path:             string,
+	Font_Size_Points:      f32,
+	Line_Height:           f32,
+	Ligatures:             bool,
+	Theme:                 Theme,
+	Source:                Source, // where the config came from
 }
 
 // Source identifies where a configuration came from.
@@ -87,11 +93,12 @@ MIN_LINE_HEIGHT :: 0.5
 MAX_LINE_HEIGHT :: 3.0
 MAX_FONT_FAMILIES :: 4
 MAX_FONT_FAMILY_LEN :: 64
+MAX_FONT_PATH_LEN :: 4096
 
 // SCHEMA_VERSION is bumped whenever the generated-package shape
 // changes. The generated file carries the version it was staged with
 // and fails to compile against a mismatching schema.
-SCHEMA_VERSION :: 1
+SCHEMA_VERSION :: 2
 
 // parse_hex_color converts "#RRGGBB" into a [4]f32 RGBA color (alpha
 // forced to 1). Returns `.Invalid_Input` on a malformed string.
@@ -127,42 +134,47 @@ parse_hex_color :: proc(text: string) -> ([4]f32, errs.Error) {
 	return [4]f32{r, g, b, 1.0}, errs.Error{}
 }
 
+validate_font_families :: proc(families: []string, key: string) -> errs.Error {
+	if len(families) > MAX_FONT_FAMILIES {
+		return errs.newf(.Invalid_Input, "config: %s allows at most %d families, got %d", key, MAX_FONT_FAMILIES, len(families))
+	}
+	for family, i in families {
+		if len(family) == 0 || len(family) > MAX_FONT_FAMILY_LEN {
+			return errs.newf(.Invalid_Input, "config: %s[%d] is empty or longer than %d bytes", key, i, MAX_FONT_FAMILY_LEN)
+		}
+		if err := validate_staged_string(family, key); !errs.ok(err) {
+			return err
+		}
+	}
+	return errs.Error{}
+}
+
+validate_staged_string :: proc(text, key: string) -> errs.Error {
+	for c in text {
+		if c == 0 || c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' {
+			return errs.newf(.Invalid_Input, "config: %s contains a character that cannot be staged (%q)", key, c)
+		}
+	}
+	return errs.Error{}
+}
+
 // validate checks the user-facing constraints of `c`. Zero/empty values
 // are fine here — resolution fills them from defaults first.
 validate :: proc(c: Config) -> errs.Error {
-	if len(c.Font_Families) > MAX_FONT_FAMILIES {
-		return errs.newf(
-			.Invalid_Input,
-			"config: at most %d font families allowed, got %d",
-			MAX_FONT_FAMILIES,
-			len(c.Font_Families),
-		)
+	if err := validate_font_families(c.Font_Families, "font_families"); !errs.ok(err) {
+		return err
 	}
-	for family, i in c.Font_Families {
-		if len(family) == 0 {
-			return errs.newf(.Invalid_Input, "config: font_families[%d] is empty", i)
-		}
-		if len(family) > MAX_FONT_FAMILY_LEN {
-			return errs.newf(
-				.Invalid_Input,
-				"config: font_families[%d] longer than %d bytes",
-				i,
-				MAX_FONT_FAMILY_LEN,
-			)
-		}
-		// The generator stages family names as ".." Odin string
-		// literals; reject characters that cannot be represented that
-		// way (they are also meaningless in a font family name).
-		for c in family {
-			if c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' {
-				return errs.newf(
-					.Invalid_Input,
-					"config: font_families[%d] contains a character that cannot be staged (%q)",
-					i,
-					c,
-				)
-			}
-		}
+	if err := validate_font_families(c.Tag_Font_Families, "tag_font_families"); !errs.ok(err) {
+		return err
+	}
+	if err := validate_font_families(c.Console_Font_Families, "console_font_families"); !errs.ok(err) {
+		return err
+	}
+	if len(c.Font_Path) > MAX_FONT_PATH_LEN {
+		return errs.newf(.Invalid_Input, "config: font_path is longer than %d bytes", MAX_FONT_PATH_LEN)
+	}
+	if err := validate_staged_string(c.Font_Path, "font_path"); !errs.ok(err) {
+		return err
 	}
 	if c.Font_Size_Points != 0 {
 		if c.Font_Size_Points < MIN_FONT_SIZE || c.Font_Size_Points > MAX_FONT_SIZE {
