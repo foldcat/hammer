@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X11 typing, rendering, undo, and dirty-close smoke test."""
+"""Real X11 typing, mouse selection, rendering, undo, and dirty-close smoke test."""
 
 from __future__ import annotations
 
@@ -68,9 +68,22 @@ class X11:
         lib.XGetPixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
         lib.XGetPixel.restype = ctypes.c_ulong
         lib.XDestroyImage.argtypes = [ctypes.c_void_p]
+        lib.XWarpPointer.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+            ctypes.c_uint,
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
         lib.XCloseDisplay.argtypes = [ctypes.c_void_p]
         self.xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
         self.xtst.XTestFakeKeyEvent.restype = ctypes.c_int
+        self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self.xtst.XTestFakeButtonEvent.restype = ctypes.c_int
 
     def close(self) -> None:
         self.lib.XCloseDisplay(self.display)
@@ -118,10 +131,33 @@ class X11:
         self.key(keysym, False)
         self.lib.XSync(self.display, 0)
 
-    def pixels(self, window: int) -> bytes:
+    def move(self, window: int, x: int, y: int) -> None:
+        self.lib.XWarpPointer(self.display, 0, window, 0, 0, 0, 0, x, y)
+        self.lib.XSync(self.display, 0)
+
+    def button(self, button: int, down: bool) -> None:
+        if not self.xtst.XTestFakeButtonEvent(self.display, button, int(down), 0):
+            raise HarnessFailure("XTestFakeButtonEvent failed")
+        self.lib.XSync(self.display, 0)
+
+    def drag(self, window: int, start: tuple[int, int], end: tuple[int, int]) -> None:
+        self.move(window, *start)
+        self.button(1, True)
+        for step in range(1, 7):
+            x = start[0] + (end[0] - start[0]) * step // 6
+            y = start[1] + (end[1] - start[1]) * step // 6
+            self.move(window, x, y)
+            time.sleep(0.03)
+        self.button(1, False)
+
+    def image(self, window: int) -> ctypes.c_void_p:
         image = self.lib.XGetImage(self.display, window, 0, 0, 800, 600, 0xFFFFFFFFFFFFFFFF, 2)
         if not image:
             raise HarnessFailure("XGetImage failed")
+        return image
+
+    def pixels(self, window: int) -> bytes:
+        image = self.image(window)
         try:
             digest = hashlib.sha256()
             for y in range(24, 80):
@@ -129,6 +165,18 @@ class X11:
                     pixel = self.lib.XGetPixel(image, x, y)
                     digest.update(int(pixel).to_bytes(8, sys.byteorder))
             return digest.digest()
+        finally:
+            self.lib.XDestroyImage(image)
+
+    def selection_pixels(self, window: int) -> int:
+        image = self.image(window)
+        try:
+            count = 0
+            for y in range(24, 80):
+                for x in range(2, 220):
+                    if self.lib.XGetPixel(image, x, y) & 0xFFFFFF == 0x33B1FF:
+                        count += 1
+            return count
         finally:
             self.lib.XDestroyImage(image)
 
@@ -247,6 +295,35 @@ def main() -> int:
                 x11.tap(ord("z"))
                 x11.key(0xFFE3, False)
                 time.sleep(0.2)
+
+            for keysym in (
+                ord("a"), ord("b"), ord("c"), ord("d"), ord("e"), ord("f"),
+                0xFF0D,
+                ord("g"), ord("h"), ord("i"), ord("j"), ord("k"), ord("l"),
+            ):
+                x11.tap(keysym)
+            time.sleep(0.3)
+            if x11.selection_pixels(window) != 0:
+                raise HarnessFailure("unexpected selection highlight before mouse input")
+            x11.drag(window, (3, 34), (60, 56))
+            time.sleep(0.3)
+            selected = x11.selection_pixels(window)
+            if selected < 20:
+                raise HarnessFailure(f"mouse drag produced only {selected} selection pixels; log: {log_path}")
+            x11.move(window, 3, 34)
+            x11.button(1, True)
+            x11.button(1, False)
+            time.sleep(0.3)
+            if x11.selection_pixels(window) != 0:
+                raise HarnessFailure("primary click did not collapse the mouse selection")
+            print("PASS: primary-button drag selects across lines and click collapses the selection")
+
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.2)
+            if x11.pixels(window) != initial:
+                raise HarnessFailure("undo after mouse selection did not restore the initial pixels")
 
             x11.tap(ord("x"))
             time.sleep(0.2)

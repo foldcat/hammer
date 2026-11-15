@@ -2,6 +2,7 @@ package main
 
 import "core:log"
 
+import coords "core/coords"
 import editing "core/editing"
 import errs "core/errs"
 import input "core/input"
@@ -15,6 +16,7 @@ Editor :: struct {
 	saved_revision:  u64,
 	typing_group:    u64,
 	next_group:      u64,
+	mouse_selecting: bool,
 	close_guard:     lifecycle.Close_Guard,
 }
 
@@ -39,6 +41,19 @@ editor_destroy :: proc() {
 
 editor_consume_input :: proc(event: input.Event) {
 	log_input_event(event)
+	#partial switch e in event {
+	case input.Pointer_Down:
+		editor_pointer_down(e)
+		return
+	case input.Pointer_Move:
+		editor_pointer_move(e)
+		return
+	case input.Pointer_Up:
+		editor_pointer_up(e)
+		return
+	}
+	editor_cancel_mouse_selection()
+
 	action, ok := keybind.resolve_event(event)
 	if !ok {
 		return
@@ -110,6 +125,57 @@ editor_consume_input :: proc(event: input.Event) {
 		log.debugf("edit: action %T is not connected in this milestone", action)
 	case keybind.Request_Quit, keybind.Close_Window:
 	}
+}
+
+editor_pointer_down :: proc(event: input.Pointer_Down) {
+	editor_cancel_mouse_selection()
+	if event.button != .Left || .Ctrl in event.modifiers || .Alt in event.modifiers || .Super in event.modifiers {
+		return
+	}
+	hit, ok := text_hit_test(event.pos, false)
+	if !ok {
+		return
+	}
+	editor.typing_group = 0
+	editor_cancel_close_review()
+	anchor := hit.offset
+	if .Shift in event.modifiers {
+		anchor = editor.selection.anchor
+	}
+	editor.selection = txn.Selection{anchor = anchor, active = hit.offset, affinity = hit.affinity}
+	editor.mouse_selecting = true
+}
+
+editor_pointer_move :: proc(event: input.Pointer_Move) {
+	if !editor.mouse_selecting {
+		return
+	}
+	if .Left not_in event.buttons {
+		editor_cancel_mouse_selection()
+		return
+	}
+	editor_update_mouse_selection(event.pos)
+}
+
+editor_pointer_up :: proc(event: input.Pointer_Up) {
+	if event.button == .Left && editor.mouse_selecting {
+		editor_update_mouse_selection(event.pos)
+	}
+	editor_cancel_mouse_selection()
+}
+
+editor_update_mouse_selection :: proc(pos: coords.Logical_Point) {
+	hit, ok := text_hit_test(pos, true)
+	if !ok {
+		return
+	}
+	editor.selection.active = hit.offset
+	editor.selection.affinity = hit.affinity
+	editor.selection.visual_column = 0
+}
+
+editor_cancel_mouse_selection :: proc() {
+	editor.mouse_selecting = false
 }
 
 editor_perform :: proc(action: editing.Action) {

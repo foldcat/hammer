@@ -240,13 +240,16 @@ M06.06  Implement multiline indent/outdent transaction.
 M06.07  Implement IME preedit/commit handling.
 M06.08  Add clipboard interoperability tests.
 M06.09  Implement product text-input consumption and typed-text rendering.
-M06.10  Implement newline indentation inheritance (tab level kept on Enter).
-M06.11  Implement parenthesis/bracket/quote autopair policy.
+M06.10  Implement mouse selection of text.
+M06.11  Implement copy and paste keybind (control + c / control + v).
+M06.12  Implement newline indentation inheritance (tab level kept on Enter).
+M06.13  Implement parenthesis/bracket/quote autopair policy.
 ```
 
 ### Acceptance
 
 - Typed characters appear in the product window and are undoable.
+- Primary-button click places the caret and drag selects grapheme-safe text.
 - Enter keeps the current line's indentation in one undo step.
 - Copy/paste works with external applications.
 - Large Unicode transfers work.

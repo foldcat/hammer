@@ -20,7 +20,18 @@ test_tab_expansion_uses_grapheme_tab_stops_and_preserves_offsets :: proc(t: ^tes
 	for item in offsets {
 		actual, ok := shaping.tab_display_offset(expansion, item.source)
 		testing.expect(t, ok && actual == item.display)
+		source, source_ok := shaping.tab_source_offset(expansion, item.display)
+		testing.expect(t, source_ok && source == item.source)
 	}
+
+	inside_tabs := []struct{display, source: int}{{2, 1}, {3, 2}, {6, 3}, {7, 4}}
+	for item in inside_tabs {
+		source, ok := shaping.tab_source_offset(expansion, item.display)
+		testing.expect(t, ok && source == item.source)
+	}
+	_, negative_ok := shaping.tab_source_offset(expansion, -1)
+	_, past_end_ok := shaping.tab_source_offset(expansion, len(expansion.text) + 1)
+	testing.expect(t, !negative_ok && !past_end_ok)
 }
 
 @(test)

@@ -15,7 +15,7 @@
 //     odin run make.odin -file -- text-test        # M05.01 native text dependencies
 //     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
-//     odin run make.odin -file -- typing-test      # M06.09 X11 typing/rendering
+//     odin run make.odin -file -- typing-test      # M06.09/M06.10 X11 typing/rendering/mouse
 //     odin run make.odin -file -- clipboard-windows-test  # M06.04/M06.08 Windows/Wine clipboard
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks

@@ -254,6 +254,8 @@ event :: proc "c" (ev: ^sapp.Event) {
 		}
 	case .QUIT_REQUESTED:
 		editor_request_close(.Quit, .OS_Close)
+	case .UNFOCUSED, .ICONIFIED, .SUSPENDED:
+		editor_cancel_mouse_selection()
 	case .RESIZED:
 		// Resize must survive any scale value the backend reports
 		// (M01 acceptance): the conversion validates and falls back.

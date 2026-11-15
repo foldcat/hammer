@@ -1,4 +1,4 @@
-// Rendering (M01.06, M05.06, M06.09): window rectangles and document text.
+// Rendering (M01.06, M05.06, M06.09–M06.10): window rectangles and document text.
 //
 // This is the application-layer renderer (package main): it draws the
 // logical window geometry from `core/layout` with sokol_gfx,
@@ -92,22 +92,8 @@ render_setup :: proc() {
 }
 
 render_frame :: proc() {
-	width, height := services.window.framebuffer_size(services.user)
-	phys := coords.Physical_Size{f32(width), f32(height)}
-	if phys.width <= 0 || phys.height <= 0 {
-		return
-	}
-	logical_size, err := coords.to_logical_size(phys, state.dpi.scale)
-	if !errs.ok(err) {
-		errs.destroy(&err)
-		logical_size = coords.Logical_Size{phys.width, phys.height}
-	}
-
-	font_px := coords.points_to_logical_px(cfg.Font_Size_Points)
-	pad := f32(2)
-	win, lerr := layout.window(logical_size, font_px + 2 * pad, pad)
-	if !errs.ok(lerr) {
-		errs.destroy(&lerr)
+	win, phys, ok := current_window()
+	if !ok {
 		return
 	}
 
@@ -121,6 +107,28 @@ render_frame :: proc() {
 	when ODIN_OS == .Linux {
 		render_probe_maybe(win, phys)
 	}
+}
+
+current_window :: proc() -> (layout.Window, coords.Physical_Size, bool) {
+	width, height := services.window.framebuffer_size(services.user)
+	phys := coords.Physical_Size{f32(width), f32(height)}
+	if phys.width <= 0 || phys.height <= 0 {
+		return {}, phys, false
+	}
+	logical_size, err := coords.to_logical_size(phys, state.dpi.scale)
+	if !errs.ok(err) {
+		errs.destroy(&err)
+		logical_size = coords.Logical_Size{phys.width, phys.height}
+	}
+
+	font_px := coords.points_to_logical_px(cfg.Font_Size_Points)
+	pad := f32(2)
+	win, layout_err := layout.window(logical_size, font_px + 2 * pad, pad)
+	if !errs.ok(layout_err) {
+		errs.destroy(&layout_err)
+		return {}, phys, false
+	}
+	return win, phys, true
 }
 
 draw_quads :: proc(verts: []Vertex) {

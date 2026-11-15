@@ -87,5 +87,5 @@ xvfb-run -a env WINEDEBUG=-all HAMMER_AUTOQUIT_FRAMES=10 HAMMER_LOG= wine ./buil
 
 - No Windows text rendering, Wayland renderer, real IM server preedit, mouse hit
   testing, scrolling, product clipboard dispatch, or save/discard UI is claimed.
-- M06.10 should make Enter inherit the current line's indentation in the same
-  transaction, with core tests and product validation.
+- M06.10 should connect primary-button click and drag to grapheme-safe text hit
+  testing, with product validation. M06.12 adds newline indentation inheritance.
