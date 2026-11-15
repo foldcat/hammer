@@ -13,6 +13,8 @@
 //     odin run make.odin -file -- windows --release
 //     odin run make.odin -file -- test             # core unit tests
 //     odin run make.odin -file -- text-test        # M05.01 native text dependencies
+//     odin run make.odin -file -- clipboard-test   # M06.04 X11 native clipboard
+//     odin run make.odin -file -- clipboard-windows-test  # M06.04 Windows/Wine clipboard
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
@@ -92,6 +94,9 @@ RECOVERY_TEST_BINARY :: OUT_DIR + "/recovery_kill_test"
 RECOVERY_TEST_HARNESS :: RECOVERY_TEST_DIR + "/kill_harness.py"
 
 TEXT_TEST_DIR :: #directory + "/tests/integration/textdeps"
+CLIPBOARD_TEST_DIR :: #directory + "/tests/integration/clipboard"
+CLIPBOARD_WINDOWS_TEST_DIR :: #directory + "/tests/integration/clipboard_windows"
+CLIPBOARD_WINDOWS_TEST_BINARY :: OUT_DIR + "/clipboard_windows_test.exe"
 FREETYPE_PKG_VERSION :: "26.7.20" // FreeType 2.15.0 libtool/pkg-config version
 HARFBUZZ_VERSION :: "12.3.2"
 ICU_VERSION :: "78.3"
@@ -295,6 +300,26 @@ main :: proc() {
 			run_odin([]string{"odin", "test", TEXT_TEST_DIR, "-vet", HAMMER_COLLECTION})
 		} else {
 			fmt.eprintln("[Test] text-test currently requires Linux")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "clipboard-test" {
+		when ODIN_OS == .Linux {
+			run_odin([]string{"xvfb-run", "-a", "odin", "test", CLIPBOARD_TEST_DIR, "-vet", HAMMER_COLLECTION, "-define:ODIN_TEST_THREADS=1"})
+		} else {
+			fmt.eprintln("[Test] clipboard-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "clipboard-windows-test" {
+		when ODIN_OS == .Linux {
+			clipboard_windows_main()
+		} else {
+			fmt.eprintln("[Test] clipboard-windows-test currently cross-builds from Linux")
 			os.exit(1)
 		}
 		return
@@ -801,6 +826,32 @@ WINDOWS_SYSTEM_LIBS := []string {
 	"ucrtbase.lib", // UCRT: malloc/free/memcpy/fputs/abort/... from the mingw build
 	"libgcc.lib", // ___chkstk_ms and friends (symlinked into the SDK root)
 	"mingwex.lib", // _assert from the mingw build (lib prefix stripped like the other imports)
+}
+
+clipboard_windows_main :: proc() {
+	if !setup_windows() {
+		fmt.eprintln("[Test] Windows clipboard test setup failed")
+		os.exit(1)
+	}
+	lib_flags := "/libpath:" + WINDOWS_SDK_DIR
+	for lib in WINDOWS_SYSTEM_LIBS {
+		lib_flags = fmt.tprintf("%s %s", lib_flags, lib)
+	}
+	run_odin([]string {
+		"odin",
+		"build",
+		CLIPBOARD_WINDOWS_TEST_DIR,
+		"-target:windows_amd64",
+		"-linker:lld",
+		"-windows-sdk-root:" + WINDOWS_SDK_DIR,
+		"-no-crt",
+		"-no-thread-local",
+		"-vet",
+		HAMMER_COLLECTION,
+		fmt.tprintf("-extra-linker-flags:%s", lib_flags),
+		"-out:" + CLIPBOARD_WINDOWS_TEST_BINARY,
+	})
+	run_odin([]string{"xvfb-run", "-a", "env", "WINEDEBUG=-all", "wine", CLIPBOARD_WINDOWS_TEST_BINARY}, true)
 }
 
 // windows_main cross-builds hammer.exe for windows_amd64. Modes: debug by
