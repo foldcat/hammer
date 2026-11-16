@@ -20,30 +20,40 @@ TEXT_GLYPH_VS :: `#version 410
 layout(location = 0) in vec2 position;
 layout(location = 1) in vec2 texcoord;
 layout(location = 2) in vec4 color0;
+layout(location = 3) in float native_color;
 layout(location = 0) out vec2 uv;
 layout(location = 1) out vec4 color;
+layout(location = 2) out float color_mode;
 void main() {
     gl_Position = vec4(position, 0.0, 1.0);
     uv = texcoord;
     color = color0;
+    color_mode = native_color;
 }
 `
 
 TEXT_GLYPH_FS :: `#version 410
 layout(location = 0) in vec2 uv;
 layout(location = 1) in vec4 color;
+layout(location = 2) in float color_mode;
 layout(location = 0) out vec4 frag_color;
 uniform sampler2D glyph_tex;
 void main() {
-    float coverage = texture(glyph_tex, uv).r;
-    frag_color = vec4(color.rgb, color.a * coverage);
+    vec4 texel = texture(glyph_tex, uv);
+    if (color_mode > 0.5) {
+        frag_color = texel;
+    } else {
+        float alpha = color.a * texel.r;
+        frag_color = vec4(color.rgb * alpha, alpha);
+    }
 }
 `
 
 Glyph_Vertex :: struct {
-	pos:   [2]f32,
-	uv:    [2]f32,
-	color: [4]f32,
+	pos:        [2]f32,
+	uv:         [2]f32,
+	color:      [4]f32,
+	color_mode: f32,
 }
 
 Glyph_Draw :: struct {
@@ -73,6 +83,7 @@ text_render_setup :: proc() {
 			0 = {glsl_name = "position"},
 			1 = {glsl_name = "texcoord"},
 			2 = {glsl_name = "color0"},
+			3 = {glsl_name = "native_color"},
 		},
 		views = {0 = {texture = {stage = .FRAGMENT, image_type = ._2D, sample_type = .FLOAT}}},
 		samplers = {0 = {stage = .FRAGMENT, sampler_type = .FILTERING}},
@@ -90,12 +101,13 @@ text_render_setup :: proc() {
 			0 = {format = .FLOAT2},
 			1 = {format = .FLOAT2},
 			2 = {format = .FLOAT4},
+			3 = {format = .FLOAT},
 		}},
 		colors = {0 = {blend = {
 			enabled = true,
-			src_factor_rgb = .SRC_ALPHA,
+			src_factor_rgb = .ONE,
 			dst_factor_rgb = .ONE_MINUS_SRC_ALPHA,
-			src_factor_alpha = .SRC_ALPHA,
+			src_factor_alpha = .ONE,
 			dst_factor_alpha = .ONE_MINUS_SRC_ALPHA,
 		}}},
 		primitive_type = .TRIANGLES,
@@ -154,11 +166,8 @@ text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads
 		return
 	}
 
-	font_list := [1]shaping.Font{{
-		font_id = u64(fonts.Role.Body) + 1,
-		face_index = selected.face_index,
-		native = selected.native,
-	}}
+	font_storage: [2]shaping.Font
+	font_list := product_shaping_fonts(&font_storage)
 	font_logical := coords.points_to_logical_px(cfg.Font_Size_Points)
 	line_height := font_logical * cfg.Line_Height
 	if line_height <= 0 {
@@ -530,13 +539,17 @@ text_append_glyph :: proc(x, y: f32, entry: glyphcache.Entry, fb: coords.Physica
 	v0 := f32(entry.rect.y) / f32(page.height)
 	v1 := f32(entry.rect.y + entry.rect.height) / f32(page.height)
 	color := cfg.Theme.Body_Fg
+	color_mode := f32(0)
+	if page.format == .RGBA {
+		color_mode = 1
+	}
 	append(&text_vertices,
-		Glyph_Vertex{{x0, y1}, {u0, v1}, color},
-		Glyph_Vertex{{x1, y1}, {u1, v1}, color},
-		Glyph_Vertex{{x1, y0}, {u1, v0}, color},
-		Glyph_Vertex{{x0, y1}, {u0, v1}, color},
-		Glyph_Vertex{{x1, y0}, {u1, v0}, color},
-		Glyph_Vertex{{x0, y0}, {u0, v0}, color},
+		Glyph_Vertex{{x0, y1}, {u0, v1}, color, color_mode},
+		Glyph_Vertex{{x1, y1}, {u1, v1}, color, color_mode},
+		Glyph_Vertex{{x1, y0}, {u1, v0}, color, color_mode},
+		Glyph_Vertex{{x0, y1}, {u0, v1}, color, color_mode},
+		Glyph_Vertex{{x1, y0}, {u1, v0}, color, color_mode},
+		Glyph_Vertex{{x0, y0}, {u0, v0}, color, color_mode},
 	)
 }
 

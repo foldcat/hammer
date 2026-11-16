@@ -78,6 +78,9 @@ init :: proc(set: ^Set, options: Options, allocator := context.allocator) -> err
 	for role_index in 0 ..< ROLE_COUNT {
 		role := Role(role_index)
 		role_options := options.roles[role_index]
+		if role == .Emoji && role_options.path == "" && len(role_options.families) == 0 {
+			continue
+		}
 		if role_options.path != "" {
 			location := Location{path = role_options.path, face_index = 0}
 			if err := load_face(set, role, location); !errs.ok(err) {
@@ -106,7 +109,7 @@ init :: proc(set: ^Set, options: Options, allocator := context.allocator) -> err
 			resolved = true
 			break
 		}
-		if !resolved {
+		if !resolved && role != .Emoji {
 			destroy(set)
 			return errs.newf(.NotFound, "no configured font family for the %s role could be loaded", role_name(role), allocator = allocator)
 		}
@@ -146,7 +149,7 @@ validate_options :: proc(options: Options, allocator := context.allocator) -> er
 		if err := validate_path(role_options.path, role_name(role), allocator); !errs.ok(err) {
 			return err
 		}
-		if role_options.path == "" && len(role_options.families) == 0 {
+		if role != .Emoji && role_options.path == "" && len(role_options.families) == 0 {
 			return errs.newf(.Invalid_Input, "%s font role has neither a path nor families", role_name(role), allocator = allocator)
 		}
 		if len(role_options.families) > MAX_FAMILIES {

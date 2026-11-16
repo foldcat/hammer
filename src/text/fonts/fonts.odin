@@ -1,17 +1,19 @@
 // Font discovery and role selection. A Set owns one native face per role,
 // each face's path/family strings, and the platform discovery resources.
-// init is all-or-nothing: on error, partial resources are released. destroy
-// is safe on zero, partially initialized, and fully initialized sets.
+// Required roles are initialized all-or-nothing; the optional Emoji role may be
+// absent. On error, partial resources are released. destroy is safe on zero,
+// partially initialized, and fully initialized sets.
 package fonts
 
 import "base:runtime"
 
 Role :: enum int {
-	Body   = 0,
-	Tag    = 1,
+	Body    = 0,
+	Tag     = 1,
 	Console = 2,
+	Emoji   = 3,
 }
-ROLE_COUNT :: 3
+ROLE_COUNT :: 4
 
 Role_Options :: struct {
 	// path selects face index zero directly and takes precedence over families.
@@ -59,6 +61,8 @@ role_name :: proc(role: Role) -> string {
 		return "tag"
 	case .Console:
 		return "console"
+	case .Emoji:
+		return "emoji"
 	}
 	return "unknown"
 }

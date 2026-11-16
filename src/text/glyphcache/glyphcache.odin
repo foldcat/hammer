@@ -1,6 +1,7 @@
 // Bounded glyph cache and CPU atlas pages. Cache owns every page, entry, and
-// copied bitmap. Rasterized input pixels are borrowed only during get. Page
-// pixel slices are invalidated by any cache mutation. Entries are values.
+// copied bitmap. Rasterized input pixels are borrowed unless owned is true;
+// owned buffers are released after copying. Page pixel slices are invalidated
+// by any cache mutation. Entries are values.
 package glyphcache
 
 import "base:runtime"
@@ -18,6 +19,12 @@ Variation :: struct {
 Render_Mode :: enum u8 {
 	Normal = 0,
 	Mono   = 1,
+	Color  = 2,
+}
+
+Pixel_Format :: enum u8 {
+	Alpha,
+	RGBA,
 }
 
 Key :: struct {
@@ -43,6 +50,8 @@ Rasterized :: struct {
 	pitch:    int,
 	pixels:   []u8,
 	metrics:  Metrics,
+	format:   Pixel_Format,
+	owned:    bool, // allocated with the get allocator; released after copying
 }
 
 Rasterize_Proc :: proc(user: rawptr, key: Key, allocator: runtime.Allocator) -> (Rasterized, errs.Error)
@@ -76,6 +85,7 @@ Page :: struct {
 	row_height: int,
 	last_used:  u64,
 	dirty:      bool,
+	format:     Pixel_Format,
 }
 
 Stats :: struct {
@@ -163,6 +173,7 @@ get :: proc(cache: ^Cache, key: Key, rasterize: Rasterize_Proc, user: rawptr) ->
 	if !errs.ok(raster_err) {
 		return {}, raster_err
 	}
+	defer rasterized_destroy(&bitmap, cache.allocator)
 	if err := validate_bitmap(bitmap, cache.options, cache.allocator); !errs.ok(err) {
 		return {}, err
 	}
@@ -172,15 +183,16 @@ get :: proc(cache: ^Cache, key: Key, rasterize: Rasterize_Proc, user: rawptr) ->
 		return Entry{key = key, page = -1, metrics = bitmap.metrics}, errs.Error{}
 	}
 
-	page_index, rect, alloc_err := allocate(cache, bitmap.width, bitmap.height)
+	page_index, rect, alloc_err := allocate(cache, bitmap.width, bitmap.height, bitmap.format)
 	if !errs.ok(alloc_err) {
 		return {}, alloc_err
 	}
 	page := &cache.pages[page_index]
+	channels := pixel_channels(bitmap.format)
 	for row in 0 ..< bitmap.height {
-		dst_start := (rect.y + row) * page.width + rect.x
+		dst_start := ((rect.y + row) * page.width + rect.x) * channels
 		src_start := row * bitmap.pitch
-		copy(page.pixels[dst_start:dst_start + bitmap.width], bitmap.pixels[src_start:src_start + bitmap.width])
+		copy(page.pixels[dst_start:dst_start + bitmap.width * channels], bitmap.pixels[src_start:src_start + bitmap.width * channels])
 	}
 	page.last_used = cache.tick
 	page.dirty = true
@@ -190,11 +202,29 @@ get :: proc(cache: ^Cache, key: Key, rasterize: Rasterize_Proc, user: rawptr) ->
 	return entry, errs.Error{}
 }
 
+rasterized_destroy :: proc(bitmap: ^Rasterized, allocator: runtime.Allocator) {
+	if bitmap.owned {
+		delete(bitmap.pixels, allocator)
+	}
+	bitmap^ = Rasterized{}
+}
+
 page_pixels :: proc(cache: ^Cache, page_index: int) -> []u8 {
 	if page_index < 0 || page_index >= len(cache.pages) {
 		return nil
 	}
 	return cache.pages[page_index].pixels
+}
+
+pixel_channels :: proc(format: Pixel_Format) -> int {
+	return 4 if format == .RGBA else 1
+}
+
+page_channels :: proc(cache: ^Cache, page_index: int) -> int {
+	if page_index < 0 || page_index >= len(cache.pages) {
+		return 0
+	}
+	return pixel_channels(cache.pages[page_index].format)
 }
 
 page_dirty :: proc(cache: ^Cache, page_index: int) -> bool {
@@ -222,7 +252,11 @@ validate_key :: proc(key: Key, allocator := context.allocator) -> errs.Error {
 }
 
 validate_bitmap :: proc(bitmap: Rasterized, options: Options, allocator := context.allocator) -> errs.Error {
-	if bitmap.width < 0 || bitmap.height < 0 || bitmap.pitch < bitmap.width {
+	if bitmap.format != .Alpha && bitmap.format != .RGBA {
+		return errs.new(.Invalid_Input, "rasterizer returned an invalid pixel format", allocator = allocator)
+	}
+	channels := pixel_channels(bitmap.format)
+	if bitmap.width < 0 || bitmap.height < 0 || bitmap.pitch < bitmap.width * channels {
 		return errs.new(.Invalid_Input, "rasterizer returned invalid glyph dimensions", allocator = allocator)
 	}
 	if bitmap.width == 0 || bitmap.height == 0 {
@@ -237,9 +271,12 @@ validate_bitmap :: proc(bitmap: Rasterized, options: Options, allocator := conte
 	return errs.Error{}
 }
 
-allocate :: proc(cache: ^Cache, width, height: int) -> (int, Rect, errs.Error) {
+allocate :: proc(cache: ^Cache, width, height: int, format: Pixel_Format) -> (int, Rect, errs.Error) {
 	for {
 		for _, index in cache.pages {
+			if cache.pages[index].format != format {
+				continue
+			}
 			if rect, ok := pack_glyph(&cache.pages[index], width, height); ok {
 				return index, rect, errs.Error{}
 			}
@@ -249,7 +286,7 @@ allocate :: proc(cache: ^Cache, width, height: int) -> (int, Rect, errs.Error) {
 				return 0, {}, errs.new(.Resource_Limit, "glyph cache cannot allocate an atlas page", allocator = cache.allocator)
 			}
 		}
-		if page_index, ok := new_page(cache); ok {
+		if page_index, ok := new_page(cache, format); ok {
 			rect, placed := pack_glyph(&cache.pages[page_index], width, height)
 			if placed {
 				return page_index, rect, errs.Error{}
@@ -259,7 +296,7 @@ allocate :: proc(cache: ^Cache, width, height: int) -> (int, Rect, errs.Error) {
 	}
 }
 
-new_page :: proc(cache: ^Cache) -> (int, bool) {
+new_page :: proc(cache: ^Cache, format: Pixel_Format) -> (int, bool) {
 	index := len(cache.pages)
 	for page, i in cache.pages {
 		if page.pixels == nil {
@@ -270,11 +307,12 @@ new_page :: proc(cache: ^Cache) -> (int, bool) {
 	page := Page{
 		width = cache.options.page_width,
 		height = cache.options.page_height,
-		pixels = make([]u8, cache.options.page_width * cache.options.page_height, cache.allocator),
+		pixels = make([]u8, cache.options.page_width * cache.options.page_height * pixel_channels(format), cache.allocator),
 		keys = make([dynamic]Key, cache.allocator),
 		cursor_x = 1,
 		cursor_y = 1,
 		dirty = true,
+		format = format,
 	}
 	if index == len(cache.pages) {
 		if index >= cache.options.max_pages {

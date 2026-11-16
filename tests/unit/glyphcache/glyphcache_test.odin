@@ -218,3 +218,39 @@ test_reset_reuses_pages_and_forces_upload :: proc(t: ^testing.T) {
 	testing.expect(t, cachepkg.entry_count(&cache) == 1)
 	testing.expect(t, entry.rect == cachepkg.Rect{x = 1, y = 1, width = 2, height = 2})
 }
+
+
+FAKE_RGBA := [4]u8{10, 20, 30, 40}
+
+fake_color_rasterize :: proc(user: rawptr, key: cachepkg.Key, allocator := context.allocator) -> (cachepkg.Rasterized, errs.Error) {
+	return cachepkg.Rasterized{
+		width = 1,
+		height = 1,
+		pitch = 4,
+		pixels = FAKE_RGBA[:],
+		format = .RGBA,
+	}, {}
+}
+
+@(test)
+test_alpha_and_rgba_pages_remain_separate :: proc(t: ^testing.T) {
+	cache: cachepkg.Cache
+	new_cache(t, &cache, {page_width = 8, page_height = 8, max_pages = 2, max_entries = 4})
+	defer cachepkg.destroy(&cache)
+	fake := Fake{width = 1, height = 1, pitch = 1}
+	alpha, alpha_err := cachepkg.get(&cache, test_key(1), fake_rasterize, &fake)
+	expect_cache_ok(t, alpha, alpha_err)
+	color_key := test_key(2)
+	color_key.render_mode = .Color
+	color, color_err := cachepkg.get(&cache, color_key, fake_color_rasterize, nil)
+	expect_cache_ok(t, color, color_err)
+
+	testing.expect(t, alpha.page == 0 && color.page == 1)
+	testing.expect(t, cache.pages[0].format == .Alpha && cache.pages[1].format == .RGBA)
+	testing.expect(t, len(cache.pages[0].pixels) == 64 && len(cache.pages[1].pixels) == 256)
+	testing.expect(t, cachepkg.page_channels(&cache, 0) == 1 && cachepkg.page_channels(&cache, 1) == 4)
+	start := (color.rect.y * cache.pages[1].width + color.rect.x) * 4
+	for value, index in FAKE_RGBA {
+		testing.expect(t, cache.pages[1].pixels[start + index] == value)
+	}
+}

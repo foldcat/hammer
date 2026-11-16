@@ -1,5 +1,5 @@
 Copyright 2013 Google LLC
-Noto Emoji is licensed under the SIL Open Font License, Version 1.1.
+Noto Emoji and Noto Color Emoji are licensed under the SIL Open Font License, Version 1.1.
 
 -----------------------------------------------------------
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007

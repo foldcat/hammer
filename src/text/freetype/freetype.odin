@@ -166,6 +166,8 @@ Glyph_Slot_Rec :: struct {
 Load_Flags :: c.int
 LOAD_DEFAULT :: Load_Flags(0)
 LOAD_RENDER :: Load_Flags(1 << 2)
+LOAD_COLOR :: Load_Flags(1 << 20)
+FACE_FLAG_COLOR :: Long(1 << 14)
 
 Render_Mode :: enum c.int {
 	Normal = 0,

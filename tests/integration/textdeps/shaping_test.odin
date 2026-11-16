@@ -15,6 +15,7 @@ Fixture_Fonts :: struct {
 	emoji:           ft.Face,
 	ligature:        ft.Face,
 	coding_ligature: ft.Face,
+	color_emoji:     ft.Face,
 }
 
 FIXTURE_HEBREW_FONT :: FIXTURE_DIR + "/FixtureHebrew.ttf"
@@ -23,6 +24,7 @@ FIXTURE_CJK_FONT :: FIXTURE_DIR + "/FixtureCJK.otf"
 FIXTURE_EMOJI_FONT :: FIXTURE_DIR + "/FixtureEmoji.ttf"
 FIXTURE_LIGATURE_FONT :: FIXTURE_DIR + "/FixtureLigature.ttf"
 FIXTURE_CODING_LIGATURE_FONT :: FIXTURE_DIR + "/FixtureCodingLigature.ttf"
+FIXTURE_COLOR_EMOJI_FONT :: FIXTURE_DIR + "/FixtureColorEmoji.ttf"
 
 fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	fixtures: Fixture_Fonts
@@ -47,11 +49,17 @@ fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_LIGATURE_FONT, 0, &fixtures.ligature) == 0) {
 		return fixtures
 	}
-	testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_CODING_LIGATURE_FONT, 0, &fixtures.coding_ligature) == 0)
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_CODING_LIGATURE_FONT, 0, &fixtures.coding_ligature) == 0) {
+		return fixtures
+	}
+	testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_COLOR_EMOJI_FONT, 0, &fixtures.color_emoji) == 0)
 	return fixtures
 }
 
 fixture_fonts_destroy :: proc(fixtures: ^Fixture_Fonts) {
+	if fixtures.color_emoji != nil {
+		ft.FT_Done_Face(fixtures.color_emoji)
+	}
 	if fixtures.coding_ligature != nil {
 		ft.FT_Done_Face(fixtures.coding_ligature)
 	}

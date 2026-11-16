@@ -51,6 +51,7 @@ Run :: struct {
 	font_id:         u64,
 	face_index:      int,
 	pixel_size:      u32,
+	render_mode:     glyphcache.Render_Mode,
 	variation_count: u8,
 	variations:      [glyphcache.MAX_VARIATIONS]glyphcache.Variation,
 	glyphs:          [dynamic]Glyph,
@@ -100,6 +101,7 @@ cache_key :: proc(run: Run, glyph: Glyph) -> glyphcache.Key {
 		face_index = i32(run.face_index),
 		glyph_id = glyph.glyph_id,
 		pixel_size = run.pixel_size,
+		render_mode = run.render_mode,
 		variation_count = run.variation_count,
 		variations = run.variations,
 	}

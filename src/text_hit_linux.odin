@@ -39,11 +39,8 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool) -> (Tex
 	if !size_ok || ft.FT_Set_Pixel_Sizes(ft.Face(selected.native), 0, pixel_size) != 0 {
 		return {}, false
 	}
-	font_list := [1]shaping.Font{{
-		font_id = u64(fonts.Role.Body) + 1,
-		face_index = selected.face_index,
-		native = selected.native,
-	}}
+	font_storage: [2]shaping.Font
+	font_list := product_shaping_fonts(&font_storage)
 	line_height := coords.points_to_logical_px(cfg.Font_Size_Points) * cfg.Line_Height
 	if line_height <= 0 {
 		return {}, false

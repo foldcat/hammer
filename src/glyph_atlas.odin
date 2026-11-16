@@ -38,7 +38,7 @@ glyph_atlas_sync :: proc(atlas: ^GPU_Glyph_Atlas, cache: ^glyphcache.Cache) -> e
 		image := sg.make_image({
 			width = i32(cache.pages[page_index].width),
 			height = i32(cache.pages[page_index].height),
-			pixel_format = .R8,
+			pixel_format = .RGBA8 if cache.pages[page_index].format == .RGBA else .R8,
 			usage = {write_unsealed = true},
 			label = "hammer-glyph-atlas-page",
 		})

@@ -61,6 +61,7 @@ ALPHABETIC :: Property(0)
 BIDI_CONTROL :: Property(2)
 NONCHARACTER_CODE_POINT :: Property(24)
 WHITE_SPACE :: Property(31)
+EMOJI_PRESENTATION :: Property(58)
 
 Char_Category :: enum c.int {
 	Unassigned             = 0,

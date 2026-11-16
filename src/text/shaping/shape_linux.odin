@@ -229,15 +229,15 @@ MAX_MISSING_DIAGNOSTICS :: 64
 
 choose_font :: proc(result: ^Text, codepoints: []Codepoint, cluster: Byte_Range, fonts: []Font, allocator := context.allocator) -> int {
 	cluster_points := codepoints_for_grapheme(codepoints, cluster)
-	for font, index in fonts {
-		supported := true
-		for codepoint in cluster_points {
-			if ft.FT_Get_Char_Index(ft.Face(font.native), ft.ULong(codepoint.r)) == 0 {
-				supported = false
-				break
+	if emoji_presentation_cluster(cluster_points) {
+		for font, index in fonts {
+			if ft.Face(font.native).face_flags & ft.FACE_FLAG_COLOR != 0 && font_covers(cluster_points, font) {
+				return index
 			}
 		}
-		if supported {
+	}
+	for font, index in fonts {
+		if font_covers(cluster_points, font) {
 			return index
 		}
 	}
@@ -245,11 +245,35 @@ choose_font :: proc(result: ^Text, codepoints: []Codepoint, cluster: Byte_Range,
 		if len(result.missing) >= MAX_MISSING_DIAGNOSTICS {
 			break
 		}
+		if codepoint.r >= 0xfe00 && codepoint.r <= 0xfe0f {
+			continue
+		}
 		if ft.FT_Get_Char_Index(ft.Face(fonts[0].native), ft.ULong(codepoint.r)) == 0 {
 			append(&result.missing, Missing_Glyph{font_id = fonts[0].font_id, codepoint = codepoint.r, source_offset = codepoint.start})
 		}
 	}
 	return 0
+}
+
+font_covers :: proc(codepoints: []Codepoint, font: Font) -> bool {
+	for codepoint in codepoints {
+		if codepoint.r >= 0xfe00 && codepoint.r <= 0xfe0f {
+			continue
+		}
+		if ft.FT_Get_Char_Index(ft.Face(font.native), ft.ULong(codepoint.r)) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+emoji_presentation_cluster :: proc(codepoints: []Codepoint) -> bool {
+	for codepoint in codepoints {
+		if codepoint.r == 0x200d || codepoint.r == 0xfe0f || icu.u_hasBinaryProperty(icu.Char32(codepoint.r), icu.EMOJI_PRESENTATION) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 codepoints_for_grapheme :: proc(codepoints: []Codepoint, cluster: Byte_Range) -> []Codepoint {
@@ -272,14 +296,15 @@ codepoints_for_grapheme :: proc(codepoints: []Codepoint, cluster: Byte_Range) ->
 shape_segment :: proc(result: ^Text, text: string, segment: Segment, direction: Direction, graphemes: []Byte_Range, fonts: []Font, options: Options, allocator := context.allocator) -> errs.Error {
 	font := fonts[segment.font_index]
 	face := ft.Face(font.native)
-	if ft_result := ft.FT_Set_Pixel_Sizes(face, 0, options.pixel_size); ft_result != 0 {
-		return errs.newf(.IO, "FreeType sizing for shaping failed: %d", ft_result, allocator = allocator)
+	if _, size_err := glyphcache.native_set_pixel_size(face, options.pixel_size, allocator); !errs.ok(size_err) {
+		return size_err
 	}
 	hb_font := hb.hb_ft_font_create_referenced(face)
 	if hb_font == nil {
 		return errs.new(.Resource_Limit, "HarfBuzz could not create a font", allocator = allocator)
 	}
 	defer hb.hb_font_destroy(hb_font)
+	hb.hb_font_set_scale(hb_font, i32(options.pixel_size * 64), i32(options.pixel_size * 64))
 	variations: [glyphcache.MAX_VARIATIONS]hb.Variation
 	for index in 0 ..< int(options.variation_count) {
 		variations[index] = {tag = options.variations[index].tag, value = options.variations[index].value}
@@ -325,6 +350,7 @@ shape_segment :: proc(result: ^Text, text: string, segment: Segment, direction: 
 		font_id = font.font_id,
 		face_index = font.face_index,
 		pixel_size = options.pixel_size,
+		render_mode = .Color if face.face_flags & ft.FACE_FLAG_COLOR != 0 else .Normal,
 		variation_count = options.variation_count,
 		variations = options.variations,
 		glyphs = make([dynamic]Glyph, 0, info_count, allocator),
