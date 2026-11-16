@@ -1,7 +1,7 @@
 // Package editing implements backend-free movement, selection, text-input,
-// delayed-paste, indentation, and IME commit actions over transactional documents
-// (M06.01–M06.07). Selections remain view-owned; text mutations go through the
-// transaction engine.
+// delayed-paste, indentation, newline indentation inheritance, and IME commit
+// actions over transactional documents (M06.01–M06.12). Selections remain
+// view-owned; text mutations go through the transaction engine.
 package editing
 
 import "core:math"

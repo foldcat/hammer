@@ -43,6 +43,46 @@ test_insert_unicode_replace_selection_and_special_scalars :: proc(t: ^testing.T)
 }
 
 @(test)
+test_newline_inherits_mixed_indentation_in_one_undo_step :: proc(t: ^testing.T) {
+	doc := txn.Doc{}
+	original := " \talpha\r\nbeta"
+	doc_with_text(t, &doc, original)
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{anchor = 7, active = 7, affinity = .Right, visual_column = 6}
+	perform_edit(t, &doc, &selection, editing.Insert_Text{text = '\n'})
+	expect_content(t, &doc, " \talpha\n \t\r\nbeta")
+	testing.expect(t, selection == txn.Selection{anchor = 10, active = 10, affinity = .Left})
+	testing.expect(t, txn.doc_log_len(&doc) == 1 && len(doc.log[0].ops) == 1)
+	testing.expect(t, doc.log[0].source == .Typing)
+
+	restored, undo_err := txn.doc_undo(&doc)
+	defer errs.destroy(&undo_err)
+	testing.expect(t, errs.ok(undo_err))
+	testing.expect(t, restored == txn.Selection{})
+	selection = restored
+	expect_content(t, &doc, original)
+	redone, redo_err := txn.doc_redo(&doc)
+	defer errs.destroy(&redo_err)
+	testing.expect(t, errs.ok(redo_err))
+	testing.expect(t, redone == txn.Selection{anchor = 10, active = 10, affinity = .Left})
+	expect_content(t, &doc, " \talpha\n \t\r\nbeta")
+}
+
+@(test)
+test_newline_replaces_selection_using_first_selected_line_indent :: proc(t: ^testing.T) {
+	doc := txn.Doc{}
+	doc_with_text(t, &doc, "\tfoo\nbar")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{anchor = 7, active = 2, affinity = .Right, visual_column = 2}
+	perform_edit(t, &doc, &selection, editing.Insert_Text{text = '\n'})
+	expect_content(t, &doc, "\tf\n\tr")
+	testing.expect(t, selection == txn.Selection{anchor = 4, active = 4, affinity = .Left})
+	testing.expect(t, txn.doc_log_len(&doc) == 1 && len(doc.log[0].ops) == 1)
+	_, replaced := doc.log[0].ops[0].(txn.Replace)
+	testing.expect(t, replaced)
+}
+
+@(test)
 test_consecutive_insert_group_is_one_undo_step :: proc(t: ^testing.T) {
 	doc := txn.Doc{}
 	doc_with_text(t, &doc, "")

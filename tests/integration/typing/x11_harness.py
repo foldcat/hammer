@@ -272,7 +272,7 @@ def main() -> int:
     if not binary.is_file() or not clipboard_peer.is_file():
         parser.error("--binary and --clipboard-peer must name executables")
 
-    sandbox = Path(tempfile.mkdtemp(prefix="hammer-m06-11-typing-"))
+    sandbox = Path(tempfile.mkdtemp(prefix="hammer-m06-12-typing-"))
     process: subprocess.Popen[bytes] | None = None
     clipboard_owner: ClipboardOwner | None = None
     x11: X11 | None = None
@@ -573,6 +573,41 @@ def main() -> int:
                 time.sleep(0.2)
             if x11.pixels(window) != initial:
                 raise HarnessFailure("undoing alias paste, cut, and source typing did not restore the initial pixels")
+
+            indent_source = "\t  indented"
+            for character in indent_source:
+                x11.tap(0xFF09 if character == "\t" else ord(character))
+            x11.tap(0xFF57)
+            x11.tap(0xFF0D)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("a"))
+            x11.tap(ord("c"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            inherited_path = sandbox / "newline-indentation.txt"
+            read_external_clipboard(clipboard_peer, inherited_path, args.timeout)
+            if inherited_path.read_bytes() != b"\t  indented\n\t  ":
+                raise HarnessFailure(f"Enter did not inherit the line's exact indentation; log: {log_path}")
+            print("PASS: Enter inherits mixed tabs and spaces in the product window")
+
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.tap(ord("a"))
+            x11.tap(ord("c"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            newline_undone_path = sandbox / "newline-indentation-undone.txt"
+            read_external_clipboard(clipboard_peer, newline_undone_path, args.timeout)
+            if newline_undone_path.read_bytes() != indent_source.encode("utf-8"):
+                raise HarnessFailure("one undo did not remove the inherited newline and indentation")
+            for _ in range(2):
+                x11.key(0xFFE3, True)
+                x11.tap(ord("z"))
+                x11.key(0xFFE3, False)
+                time.sleep(0.2)
+            if x11.pixels(window) != initial:
+                raise HarnessFailure("undoing the indentation source did not restore the initial pixels")
+            print("PASS: one Ctrl+Z undoes the inherited newline as a single edit")
 
             x11.tap(ord("x"))
             time.sleep(0.2)

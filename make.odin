@@ -18,7 +18,7 @@
 //     odin run make.odin -file -- unicode-test     # M06 special-character X11 product checks
 //     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
-//     odin run make.odin -file -- typing-test      # M06.09–M06.11 X11 typing/mouse/clipboard
+//     odin run make.odin -file -- typing-test      # M06.09–M06.12 X11 typing/mouse/clipboard
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks

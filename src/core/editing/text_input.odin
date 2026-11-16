@@ -8,6 +8,7 @@ import txn "../txn"
 
 // Insert_Text replaces the current selection with one Unicode scalar. A shared
 // nonzero grouping_key joins consecutive typing transactions into one undo unit.
+// Newline insertion also inherits the first selected line's leading whitespace.
 Insert_Text :: struct {
 	text:         rune,
 	grouping_key: u64,
@@ -34,8 +35,38 @@ insert_text :: proc(
 	if !valid_committed_rune(text) {
 		return errs.new(.Invalid_Input, "editing: invalid committed text scalar", allocator = allocator)
 	}
+	if text == '\n' {
+		return insert_newline(doc, selection, grouping_key, allocator)
+	}
 	encoded, width := utf8.encode_rune(text)
 	return insert_committed_bytes(doc, selection, encoded[:width], grouping_key, allocator)
+}
+
+insert_newline :: proc(
+	doc: ^txn.Doc,
+	selection: ^txn.Selection,
+	grouping_key: u64,
+	allocator := context.allocator,
+) -> errs.Error {
+	if err := validate_edit_selection(doc, selection^, allocator); !errs.ok(err) {
+		return err
+	}
+	range := selection_range(selection^)
+	line, err := read_line_at(&doc.tree, range.start, allocator)
+	if !errs.ok(err) {
+		return err
+	}
+	defer delete(line.data, allocator)
+
+	indent_len := 0
+	for indent_len < len(line.data) && (line.data[indent_len] == ' ' || line.data[indent_len] == '\t') {
+		indent_len += 1
+	}
+	inserted := make([]byte, indent_len + 1, allocator)
+	defer delete(inserted, allocator)
+	inserted[0] = '\n'
+	copy(inserted[1:], line.data[:indent_len])
+	return insert_validated_bytes(doc, selection, inserted, grouping_key, allocator)
 }
 
 insert_committed_text :: proc(
@@ -71,6 +102,16 @@ insert_committed_bytes :: proc(
 	if err := validate_edit_selection(doc, selection^, allocator); !errs.ok(err) {
 		return err
 	}
+	return insert_validated_bytes(doc, selection, text, grouping_key, allocator)
+}
+
+insert_validated_bytes :: proc(
+	doc: ^txn.Doc,
+	selection: ^txn.Selection,
+	text: []byte,
+	grouping_key: u64,
+	allocator := context.allocator,
+) -> errs.Error {
 	if len(text) == 0 {
 		return {}
 	}
