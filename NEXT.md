@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M06.12 — Implement newline indentation inheritance (tab level kept on Enter)
+## Current task: M06-Detour-1 Fix rendering of special characters
