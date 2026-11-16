@@ -368,6 +368,56 @@ def main() -> int:
                 x11.key(0xFFE3, False)
                 time.sleep(0.2)
 
+            for character in "one tw":
+                x11.tap(ord(character))
+            time.sleep(0.3)
+            component_pixels = x11.pixels(window)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.2)
+            for character in "one ":
+                x11.tap(ord(character))
+            time.sleep(0.3)
+            word_pixels = x11.pixels(window)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.2)
+
+            for modifier_keys in ((0xFFE3,), (0xFFE1,), (0xFFE3, 0xFFE1)):
+                for character in "one two":
+                    x11.tap(ord(character))
+                for modifier in modifier_keys:
+                    x11.key(modifier, True)
+                x11.tap(0xFF08)
+                for modifier in reversed(modifier_keys):
+                    x11.key(modifier, False)
+                time.sleep(0.3)
+                if x11.pixels(window) != component_pixels:
+                    raise HarnessFailure(f"Ctrl/Shift+Backspace changed deletion behavior: {modifier_keys}")
+                for _ in range(2):
+                    x11.key(0xFFE3, True)
+                    x11.tap(ord("z"))
+                    x11.key(0xFFE3, False)
+                    time.sleep(0.2)
+            print("PASS: Ctrl and Shift preserve ordinary Backspace grapheme deletion")
+
+            for character in "one two":
+                x11.tap(ord(character))
+            x11.key(0xFFE9, True)
+            x11.tap(0xFF08)
+            x11.key(0xFFE9, False)
+            time.sleep(0.3)
+            if x11.pixels(window) != word_pixels:
+                raise HarnessFailure("Alt+Backspace did not delete the whole preceding word")
+            for _ in range(2):
+                x11.key(0xFFE3, True)
+                x11.tap(ord("z"))
+                x11.key(0xFFE3, False)
+                time.sleep(0.2)
+            print("PASS: Alt+Backspace deletes the preceding word as one undoable transaction")
+
             for keysym in (
                 ord("a"), ord("b"), ord("c"), ord("d"), ord("e"), ord("f"),
                 0xFF0D,

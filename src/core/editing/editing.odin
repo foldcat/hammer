@@ -43,6 +43,7 @@ Action :: union {
 	Insert_Text,
 	Commit_Text,
 	Delete_Backward,
+	Delete_Word_Backward,
 	Delete_Forward,
 }
 
@@ -69,6 +70,8 @@ perform :: proc(
 		return insert_committed_text(doc, selection, a.text, a.grouping_key, allocator)
 	case Delete_Backward:
 		return delete_at_selection(doc, selection, .Left, allocator)
+	case Delete_Word_Backward:
+		return delete_word_backward(doc, selection, allocator)
 	case Delete_Forward:
 		return delete_at_selection(doc, selection, .Right, allocator)
 	}

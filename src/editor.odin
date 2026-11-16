@@ -94,6 +94,9 @@ editor_consume_input :: proc(event: input.Event) {
 	case editing.Delete_Backward:
 		editor.typing_group = 0
 		editor_perform(a)
+	case editing.Delete_Word_Backward:
+		editor.typing_group = 0
+		editor_perform(a)
 	case editing.Delete_Forward:
 		editor.typing_group = 0
 		editor_perform(a)

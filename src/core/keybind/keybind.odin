@@ -45,6 +45,7 @@ Action :: union {
 	editing.Insert_Text,
 	editing.Commit_Text,
 	editing.Delete_Backward,
+	editing.Delete_Word_Backward,
 	editing.Delete_Forward,
 }
 
@@ -153,12 +154,19 @@ resolve_event :: proc(event: input.Event) -> (Action, bool) {
 		if action, ok := resolve(e); ok {
 			return action, true
 		}
+		if e.key == .Backspace {
+			if .Super in e.modifiers || (.Ctrl in e.modifiers && .Alt in e.modifiers) {
+				return {}, false
+			}
+			if .Alt in e.modifiers {
+				return editing.Delete_Word_Backward{}, true
+			}
+			return editing.Delete_Backward{}, true
+		}
 		if e.modifiers != {} {
 			return {}, false
 		}
 		#partial switch e.key {
-		case .Backspace:
-			return editing.Delete_Backward{}, true
 		case .Delete:
 			return editing.Delete_Forward{}, true
 		case .Enter, .KP_Enter:

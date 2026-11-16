@@ -21,6 +21,7 @@ Commit_Text :: struct {
 }
 
 Delete_Backward :: struct {}
+Delete_Word_Backward :: struct {}
 Delete_Forward :: struct {}
 
 insert_text :: proc(
@@ -103,6 +104,30 @@ delete_at_selection :: proc(
 			return {}
 		}
 		range = {min(target, selection.active), max(target, selection.active)}
+	} else if err := validate_edit_selection(doc, selection^, allocator); !errs.ok(err) {
+		return err
+	}
+	return apply_text_operation(doc, selection, txn.Delete{range = range}, range.start, 0, allocator)
+}
+
+delete_word_backward :: proc(
+	doc: ^txn.Doc,
+	selection: ^txn.Selection,
+	allocator := context.allocator,
+) -> errs.Error {
+	if err := validate_selection(doc, selection^, allocator); !errs.ok(err) {
+		return err
+	}
+	range := selection_range(selection^)
+	if range.start == range.end {
+		target, err := word_left(&doc.tree, selection.active, allocator)
+		if !errs.ok(err) {
+			return err
+		}
+		if target == selection.active {
+			return {}
+		}
+		range = {target, selection.active}
 	} else if err := validate_edit_selection(doc, selection^, allocator); !errs.ok(err) {
 		return err
 	}

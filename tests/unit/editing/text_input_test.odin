@@ -95,6 +95,45 @@ test_backspace_delete_and_selection_delete_use_graphemes :: proc(t: ^testing.T) 
 }
 
 @(test)
+test_word_backspace_is_one_unicode_transaction :: proc(t: ^testing.T) {
+	doc := txn.Doc{}
+	doc_with_text(t, &doc, "one,two 中\nthree")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{anchor = 17, active = 17}
+	perform_edit(t, &doc, &selection, editing.Delete_Word_Backward{})
+	expect_content(t, &doc, "one,two 中\n")
+	testing.expect(t, selection.anchor == 12 && selection.active == 12)
+	perform_edit(t, &doc, &selection, editing.Delete_Word_Backward{})
+	expect_content(t, &doc, "one,two ")
+	testing.expect(t, selection.anchor == 8 && selection.active == 8)
+	perform_edit(t, &doc, &selection, editing.Delete_Word_Backward{})
+	expect_content(t, &doc, "one,")
+	perform_edit(t, &doc, &selection, editing.Delete_Word_Backward{})
+	expect_content(t, &doc, "")
+	testing.expect(t, txn.doc_log_len(&doc) == 4)
+	_, undo_err := txn.doc_undo(&doc)
+	defer errs.destroy(&undo_err)
+	testing.expect(t, errs.ok(undo_err))
+	expect_content(t, &doc, "one,")
+
+	combining := txn.Doc{}
+	doc_with_text(t, &combining, "e\u0301lan next")
+	defer txn.doc_destroy(&combining)
+	selection = {anchor = 7, active = 7}
+	perform_edit(t, &combining, &selection, editing.Delete_Word_Backward{})
+	expect_content(t, &combining, "next")
+	testing.expect(t, selection == txn.Selection{affinity = .Left})
+
+	selected := txn.Doc{}
+	doc_with_text(t, &selected, "abc")
+	defer txn.doc_destroy(&selected)
+	selection = {anchor = 2, active = 1}
+	perform_edit(t, &selected, &selection, editing.Delete_Word_Backward{})
+	expect_content(t, &selected, "ac")
+	testing.expect(t, txn.doc_log_len(&selected) == 1)
+}
+
+@(test)
 test_invalid_text_and_split_caret_change_nothing :: proc(t: ^testing.T) {
 	doc := txn.Doc{}
 	doc_with_text(t, &doc, "A\u0301")
