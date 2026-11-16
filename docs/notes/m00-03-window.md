@@ -1,7 +1,8 @@
 # M00.03 — Build/run a window (Linux/X11 and Windows/Wine)
 
 **Status:** done (Linux/X11 validated headless; Windows cross-build
-validated under Wine). See the Windows section for the 2026-11-12 unblock.
+validated under Wine; native Windows validated 2026-11-16). See the Windows
+sections for the 2026-11-12 unblock and the later native toolchain update.
 
 ## Decision record
 
@@ -223,6 +224,27 @@ backend variant; the ESC-close path (no input injection into Wine was
 performed); `windows_386` (the pinned sokol-odin bindings only name
 `windows_x64_*` libraries); a real GPU or real desktop DPI.
 
+## Native Windows update (2026-11-16)
+
+The normal build command now works on native Windows with Odin
+`dev-2026-11-nightly:ece728c`. It uses `clang-cl`, `llvm-ar`, `lld-link`, the
+normal Windows CRT/SDK, and `.exe` output names. The Linux `windows` target
+retains the MinGW/no-CRT path; current Odin replaced `-windows-sdk-root` with
+`-ignore-vs-search`, while the staged libraries are supplied through
+`/libpath`. A Sokol toolchain marker prevents mixing MinGW and clang-cl
+objects. Using the legacy no-CRT flags for a native executable rendered and
+then hung after lifecycle shutdown, so native builds deliberately do not use
+those flags.
+
+Native validation: debug and release builds passed; window creation, GL
+rendering, and clean process exit passed with
+`HAMMER_LOG= HAMMER_AUTOQUIT_FRAMES=10 timeout 30s ./build/hammer.exe`
+(exit 0). All 302 unit tests passed, including updated Windows file metadata,
+read-only replacement, and journal guard-byte locking checks. The Windows
+clipboard test binary compiled, but its runtime/interoperability checks were
+not run because they replace the user's real desktop clipboard. Windows font
+discovery remains unsupported. Linux and Wine were not rerun in this session.
+
 ## Open follow-ups
 
 - Run the window once on a real X11 desktop to confirm visual output and
@@ -231,6 +253,5 @@ performed); `windows_386` (the pinned sokol-odin bindings only name
   machine but not yet recorded as a dependency pin).
 - Record the fetched-sokol provenance note in the compatibility inventory
   (`M00.09`).
-- Windows: build and validate the sokol **D3D11** variant (the product
-  default on Windows) under Wine; validate on a real Windows machine/CI
-  runner when available (see `docs/notes/m00-09-decisions.md` §4).
+- Windows: implement native font discovery and validate the D3D11 variant;
+  run clipboard interoperability with an explicit isolated desktop account.

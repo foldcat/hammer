@@ -6,11 +6,13 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import queue
 import selectors
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 
@@ -39,6 +41,25 @@ def run_checked(command: list[str], env: dict[str, str], timeout: float) -> None
 
 def wait_ready(process: subprocess.Popen[bytes], timeout: float) -> None:
     assert process.stdout is not None
+    if os.name == "nt":
+        lines: queue.Queue[bytes] = queue.Queue(maxsize=1)
+
+        def read_ready() -> None:
+            assert process.stdout is not None
+            lines.put(process.stdout.readline())
+
+        reader = threading.Thread(target=read_ready, daemon=True)
+        reader.start()
+        try:
+            line = lines.get(timeout=timeout)
+        except queue.Empty as error:
+            raise HarnessFailure(f"writer {process.pid} timed out waiting for clipboard ownership") from error
+        if not line:
+            raise HarnessFailure(f"writer {process.pid} exited {process.poll()} before clipboard ownership")
+        if line.strip() != b"ready clipboard owner":
+            raise HarnessFailure(f"writer {process.pid} produced unexpected readiness output: {line!r}")
+        return
+
     deadline = time.monotonic() + timeout
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
@@ -73,9 +94,9 @@ def release_owner(process: subprocess.Popen[bytes], timeout: float) -> None:
         process.stderr.close()
 
 
-def transfer(wine: str, binary: Path, writer: str, reader: str, payload: Path, output: Path, env: dict[str, str], timeout: float) -> None:
+def transfer(runner: list[str], binary: Path, writer: str, reader: str, payload: Path, output: Path, env: dict[str, str], timeout: float) -> None:
     process = subprocess.Popen(
-        [wine, str(binary), writer + "-serve", str(payload)],
+        [*runner, str(binary), writer + "-serve", str(payload)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -83,7 +104,7 @@ def transfer(wine: str, binary: Path, writer: str, reader: str, payload: Path, o
     )
     try:
         wait_ready(process, timeout)
-        run_checked([wine, str(binary), reader, str(output)], env, timeout)
+        run_checked([*runner, str(binary), reader, str(output)], env, timeout)
     finally:
         release_owner(process, timeout)
 
@@ -105,18 +126,21 @@ def main() -> int:
     binary = args.binary.resolve()
     if not binary.is_file():
         parser.error(f"test binary does not exist: {binary}")
-    wine = shutil.which("wine")
-    wineserver = shutil.which("wineserver")
-    if wine is None or wineserver is None:
-        parser.error("wine and wineserver are required")
-
     sandbox = Path(tempfile.mkdtemp(prefix="hammer-m06-08-windows-clipboard-"))
     env = os.environ.copy()
-    env.update({
-        "WINEDEBUG": "-all",
-        "WINEARCH": "win64",
-        "WINEPREFIX": str(sandbox / "wine-prefix"),
-    })
+    runner: list[str] = []
+    wineserver: str | None = None
+    if os.name != "nt":
+        wine = shutil.which("wine")
+        wineserver = shutil.which("wineserver")
+        if wine is None or wineserver is None:
+            parser.error("wine and wineserver are required outside native Windows")
+        runner = [wine]
+        env.update({
+            "WINEDEBUG": "-all",
+            "WINEARCH": "win64",
+            "WINEPREFIX": str(sandbox / "wine-prefix"),
+        })
     succeeded = False
     try:
         unicode_payload = "ASCII é Ελληνικά кириллица 漢字 A\u0301 😀 עברית\n".encode("utf-8")
@@ -126,13 +150,13 @@ def main() -> int:
         large_file = sandbox / "large.txt"
         large_file.write_bytes(large_payload)
 
-        transfer(wine, binary, "write", "peer-read", unicode_file, sandbox / "unicode-product-peer.txt", env, args.timeout)
+        transfer(runner, binary, "write", "peer-read", unicode_file, sandbox / "unicode-product-peer.txt", env, args.timeout)
         assert_payload(sandbox / "unicode-product-peer.txt", unicode_payload, "Hammer writer -> external Win32 reader")
-        transfer(wine, binary, "peer-write", "read", unicode_file, sandbox / "unicode-peer-product.txt", env, args.timeout)
+        transfer(runner, binary, "peer-write", "read", unicode_file, sandbox / "unicode-peer-product.txt", env, args.timeout)
         assert_payload(sandbox / "unicode-peer-product.txt", unicode_payload, "external Win32 writer -> Hammer reader")
-        transfer(wine, binary, "write", "peer-read", large_file, sandbox / "large-product-peer.txt", env, args.timeout)
+        transfer(runner, binary, "write", "peer-read", large_file, sandbox / "large-product-peer.txt", env, args.timeout)
         assert_payload(sandbox / "large-product-peer.txt", large_payload, "Hammer writer -> external Win32 reader, large Unicode")
-        transfer(wine, binary, "peer-write", "read", large_file, sandbox / "large-peer-product.txt", env, args.timeout)
+        transfer(runner, binary, "peer-write", "read", large_file, sandbox / "large-peer-product.txt", env, args.timeout)
         assert_payload(sandbox / "large-peer-product.txt", large_payload, "external Win32 writer -> Hammer reader, large Unicode")
         succeeded = True
         print("PASS: all Windows clipboard interoperability checks")
@@ -141,18 +165,19 @@ def main() -> int:
         print(f"FAIL: {error}; preserved sandbox: {sandbox}", file=sys.stderr)
         return 1
     finally:
-        try:
-            subprocess.run(
-                [wineserver, "-k"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=env,
-                timeout=10,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            print(f"cleanup warning: could not stop the isolated wineserver: {error}", file=sys.stderr)
+        if wineserver is not None:
+            try:
+                subprocess.run(
+                    [wineserver, "-k"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env=env,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                print(f"cleanup warning: could not stop the isolated wineserver: {error}", file=sys.stderr)
         if succeeded:
             shutil.rmtree(sandbox)
 

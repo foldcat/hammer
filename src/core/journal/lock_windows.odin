@@ -5,6 +5,7 @@ import win32 "core:sys/windows"
 
 platform_lock_file :: proc(file: ^os.File) -> (bool, os.Error) {
 	overlapped: win32.OVERLAPPED
+	overlapped.Offset = LOCK_RECORD_SIZE
 	flags := win32.LOCKFILE_EXCLUSIVE_LOCK | win32.LOCKFILE_FAIL_IMMEDIATELY
 	if win32.LockFileEx(win32.HANDLE(os.fd(file)), flags, 0, 1, 0, &overlapped) {
 		return true, nil
@@ -18,6 +19,7 @@ platform_lock_file :: proc(file: ^os.File) -> (bool, os.Error) {
 
 platform_unlock_file :: proc(file: ^os.File) -> os.Error {
 	overlapped: win32.OVERLAPPED
+	overlapped.Offset = LOCK_RECORD_SIZE
 	if win32.UnlockFileEx(win32.HANDLE(os.fd(file)), 0, 1, 0, &overlapped) {
 		return nil
 	}

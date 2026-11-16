@@ -23,11 +23,11 @@ sandbox_destroy :: proc(dir: string) {
 }
 
 journal_path :: proc(dir: string) -> string {
-	return fmt.tprintf("%s/recovery.journal", dir)
+	return fmt.tprintf("%s%srecovery.journal", dir, os.Path_Separator_String)
 }
 
 generation_path :: proc(dir, kind: string, generation: u64) -> string {
-	return fmt.tprintf("%s/%s-%06d.bin", dir, kind, generation)
+	return fmt.tprintf("%s%s%s-%06d.bin", dir, os.Path_Separator_String, kind, generation)
 }
 
 expect_ok :: proc(t: ^testing.T, err: errs.Error) -> bool {

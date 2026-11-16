@@ -30,9 +30,9 @@ Remember to setup the submodule:
 git submodule update --init --recursive
 ```
 
-Run the build script (on the first Linux run it also downloads the pinned
-Sokol C sources, verifies their checksum, and compiles the Sokol static
-libraries):
+Run the build script (on the first Linux or Windows run it also downloads
+the pinned Sokol C sources, verifies their checksum, and compiles the Sokol
+static libraries):
 
 ```bash
 odin run make.odin -file                    # debug build
@@ -65,11 +65,20 @@ built-in defaults. Malformed configs fail the build with file:line
 errors. Project-local configs are never picked up automatically.
 
 Linux/X11 requirements: a C compiler, binutils, and the X11/GL development
-packages. `make.odin` detects missing pieces and prints the packages to
-install.
+packages. Native Windows requires LLVM (`clang-cl`, `llvm-ar`, `lld-link`)
+and a Windows SDK; the normal build produces `build/hammer.exe` and uses the
+native CRT. The `windows` target still cross-builds from Linux with MinGW.
+The first Sokol download also requires `curl`, `tar`, and `sha256sum` on PATH.
+`make.odin` detects missing pieces and prints setup guidance.
 
-Headless smoke test (window create/render/shutdown, needs `xvfb-run`):
+Linux headless smoke test (window create/render/shutdown, needs `xvfb-run`):
 
 ```bash
 xvfb-run -a env HAMMER_AUTOQUIT_FRAMES=10 ./build/hammer
+```
+
+Native Windows smoke test:
+
+```bash
+HAMMER_AUTOQUIT_FRAMES=10 ./build/hammer.exe
 ```

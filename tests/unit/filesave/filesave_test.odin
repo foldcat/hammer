@@ -33,6 +33,20 @@ fixture_destroy :: proc(fixture: ^Tree_Fixture) {
 	chunk.destroy(&fixture.store)
 }
 
+create_symlink :: proc(t: ^testing.T, target, link: string) -> bool {
+	err := os.symlink(target, link)
+	if err == nil {
+		return true
+	}
+	when ODIN_OS == .Windows {
+		if err == .Unsupported {
+			return false
+		}
+	}
+	testing.expectf(t, false, "symlink failed: %v", err)
+	return false
+}
+
 expect_ok :: proc(t: ^testing.T, err: errs.Error) -> bool {
 	if errs.ok(err) {
 		return true
@@ -178,7 +192,11 @@ test_save_existing_preserves_permissions_and_refreshes_checkpoint :: proc(t: ^te
 		return
 	}
 	defer os.file_info_delete(info, context.allocator)
-	testing.expectf(t, info.mode == os.perm_number(0o640), "mode changed to %v", info.mode)
+	when ODIN_OS == .Windows {
+		testing.expectf(t, info.mode == os.Permissions_Read_Write_All, "mode changed to %v", info.mode)
+	} else {
+		testing.expectf(t, info.mode == os.perm_number(0o640), "mode changed to %v", info.mode)
+	}
 
 	result2, err2 := filesave.save_tree(
 		{tree = &fixture.tree, root = fixture.tree.root, revision = 8},
@@ -285,10 +303,7 @@ test_save_follows_symlink_without_replacing_link :: proc(t: ^testing.T) {
 	target := fmt.tprintf("%s/target.txt", dir)
 	link := fmt.tprintf("%s/link.txt", dir)
 	write_fixture(t, target, "old")
-	if err := os.symlink("target.txt", link); err != nil {
-		testing.expectf(t, false, "symlink failed: %v", err)
-		return
-	}
+	if !create_symlink(t, "target.txt", link) {return}
 	loaded: fileload.Loaded
 	if !load_fixture(t, &loaded, link) {return}
 	expected := loaded.capture
@@ -325,10 +340,7 @@ test_save_preserve_link_policy_rejects_symlink :: proc(t: ^testing.T) {
 	target := fmt.tprintf("%s/target.txt", dir)
 	link := fmt.tprintf("%s/link.txt", dir)
 	write_fixture(t, target, "old")
-	if err := os.symlink("target.txt", link); err != nil {
-		testing.expectf(t, false, "symlink failed: %v", err)
-		return
-	}
+	if !create_symlink(t, "target.txt", link) {return}
 	fixture: Tree_Fixture
 	fixture_init(t, &fixture, "new")
 	defer fixture_destroy(&fixture)
@@ -353,14 +365,8 @@ test_save_symlink_cycle_is_bounded :: proc(t: ^testing.T) {
 	defer os.remove_all(dir)
 	a := fmt.tprintf("%s/a", dir)
 	b := fmt.tprintf("%s/b", dir)
-	if err := os.symlink("b", a); err != nil {
-		testing.expectf(t, false, "symlink failed: %v", err)
-		return
-	}
-	if err := os.symlink("a", b); err != nil {
-		testing.expectf(t, false, "symlink failed: %v", err)
-		return
-	}
+	if !create_symlink(t, "b", a) {return}
+	if !create_symlink(t, "a", b) {return}
 	fixture: Tree_Fixture
 	fixture_init(t, &fixture, "new")
 	defer fixture_destroy(&fixture)
@@ -424,7 +430,11 @@ test_save_read_only_policy_and_permission_preservation :: proc(t: ^testing.T) {
 		return
 	}
 	defer os.file_info_delete(info, context.allocator)
-	testing.expect(t, info.mode == os.perm_number(0o444))
+	when ODIN_OS == .Windows {
+		testing.expect(t, info.mode == os.Permissions_Write_All)
+	} else {
+		testing.expect(t, info.mode == os.perm_number(0o444))
+	}
 }
 
 @(test)

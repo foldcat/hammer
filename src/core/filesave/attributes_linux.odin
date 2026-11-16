@@ -14,3 +14,18 @@ platform_attributes :: proc(file: ^os.File) -> (Existing_Attributes, os.Error) {
 		permissions = transmute(os.Permissions)(transmute(u32)stat.mode & 0o7777),
 	}, nil
 }
+
+platform_set_read_only :: proc(path: string, read_only: bool) -> os.Error {
+	info, err := os.stat(path, context.temp_allocator)
+	if err != nil {
+		return err
+	}
+	defer os.file_info_delete(info, context.temp_allocator)
+	mode := info.mode
+	if read_only {
+		mode -= os.Permissions_Write_All
+	} else {
+		mode += os.Permissions_Write_All
+	}
+	return os.chmod(path, mode)
+}

@@ -112,6 +112,7 @@ save_tree :: proc(
 	if options.disk_check == .Unchanged && !target.exists {
 		return result, errs.newf(.Conflict, "filesave: %s no longer exists", path, allocator = allocator)
 	}
+	target_read_only := false
 	if target.exists {
 		cap, cap_err := operation_capture(options.operations, target.path, allocator)
 		if !errs.ok(cap_err) {
@@ -129,7 +130,8 @@ save_tree :: proc(
 		if attr_err != nil {
 			return result, errs.newf(.IO, "filesave: cannot inspect %s: %v", target.path, attr_err, allocator = allocator)
 		}
-		if .Write_User not_in attrs.permissions && !options.allow_read_only {
+		target_read_only = .Write_User not_in attrs.permissions
+		if target_read_only && !options.allow_read_only {
 			return result, errs.newf(.IO, "filesave: %s is read-only", target.path, allocator = allocator)
 		}
 		if attrs.links > 1 && !options.allow_hard_link_break {
@@ -189,7 +191,13 @@ save_tree :: proc(
 		}
 	}
 	if target.exists {
-		if mode_err := operation_chmod(options.operations, temp, target.info.mode); mode_err != nil {
+		temp_mode := target.info.mode
+		when ODIN_OS == .Windows {
+			if target_read_only {
+				temp_mode += {.Write_User}
+			}
+		}
+		if mode_err := operation_chmod(options.operations, temp, temp_mode); mode_err != nil {
 			return result, errs.newf(.IO, "filesave: cannot preserve permissions on %s: %v", temp_path, mode_err, allocator = allocator)
 		}
 	}
@@ -203,6 +211,18 @@ save_tree :: proc(
 		if check_err := recheck_disk(target.path, options, allocator); !errs.ok(check_err) {
 			return result, check_err
 		}
+	}
+	restore_read_only := false
+	when ODIN_OS == .Windows {
+		if target_read_only {
+			if mode_err := platform_set_read_only(target.path, false); mode_err != nil {
+				return result, errs.newf(.IO, "filesave: cannot make %s writable for replacement: %v", target.path, mode_err, allocator = allocator)
+			}
+			restore_read_only = true
+		}
+	}
+	defer if restore_read_only && !published {
+		platform_set_read_only(target.path, true)
 	}
 	if options.disk_check == .Must_Not_Exist {
 		if link_err := operation_link(options.operations, temp_path, target.path); link_err != nil {
@@ -219,6 +239,13 @@ save_tree :: proc(
 		}
 		published = true
 		result.replaced = true
+	}
+	when ODIN_OS == .Windows {
+		if restore_read_only {
+			if mode_err := platform_set_read_only(target.path, true); mode_err != nil {
+				return result, errs.newf(.IO, "filesave: %s was published but restoring read-only failed: %v", target.path, mode_err, allocator = allocator)
+			}
+		}
 	}
 
 	cap, capture_err := operation_capture(options.operations, target.path, allocator)

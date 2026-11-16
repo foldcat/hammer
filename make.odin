@@ -9,7 +9,7 @@
 //     odin run make.odin -file -- wayland-spike    # M00.06 Wayland spike
 //     odin run make.odin -file -- pty-spike        # M00.07 PTY spike
 //     odin run make.odin -file -- fuse-spike       # M00.08 FUSE spike
-//     odin run make.odin -file -- windows          # M00.03 Windows cross-build
+//     odin run make.odin -file -- windows          # Windows build (cross-build on Linux)
 //     odin run make.odin -file -- windows --release
 //     odin run make.odin -file -- test             # core unit tests
 //     odin run make.odin -file -- text-test        # M05.01–M05.10 native text dependencies
@@ -19,16 +19,16 @@
 //     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
 //     odin run make.odin -file -- typing-test      # M06.09–M06.11 X11 typing/mouse/clipboard
-//     odin run make.odin -file -- clipboard-windows-test  # M06.04/M06.08 Windows/Wine clipboard
+//     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
-// The `windows` target cross-builds hammer.exe for windows_amd64 from
-// Linux (mingw-w64 + lld-link + the pinned Sokol C sources, GL backend);
-// the binary is validated under Wine. See docs/notes/m00-03-window.md.
+// The `windows` target builds hammer.exe for windows_amd64. It uses LLVM and
+// the normal Windows CRT/SDK on Windows, or mingw-w64 without a CRT on Linux
+// (with lld-link and the pinned Sokol C sources, GL backend).
 //
-// On Linux this tool also self-configures the Sokol dependency: it
-// downloads the pinned Sokol C sources (verified by sha256), checks the
+// On Linux and Windows this tool also self-configures the Sokol dependency:
+// it downloads the pinned Sokol C sources (verified by sha256), checks the
 // system build dependencies, and compiles the Sokol static libraries the
 // Odin bindings link against. All generated artifacts live in build/ or
 // are covered by the repository .gitignore rules.
@@ -44,7 +44,11 @@ import errs "src/core/errs"
 SRC_DIR :: #directory + "/src"
 OUT_DIR :: #directory + "/build"
 BINARY_NAME :: "hammer"
-BINARY_PATH :: OUT_DIR + "/" + BINARY_NAME
+when ODIN_OS == .Windows {
+	BINARY_PATH :: OUT_DIR + "/" + BINARY_NAME + ".exe"
+} else {
+	BINARY_PATH :: OUT_DIR + "/" + BINARY_NAME
+}
 
 // M01.02 generated configuration package: make.odin stages the trusted
 // user config into this file before every build (see stage_config).
@@ -147,9 +151,9 @@ CORE_TEST_PACKAGES := []string {
 }
 
 // Windows cross-build (M00.03 Windows half): the mingw-w64 import
-// libraries, mirrored into a task-owned "Windows SDK root" as .lib-named
-// symlinks, serve as the -windows-sdk-root for cross-linking. All of this
-// is generated under build/ (gitignored); see docs/notes/m00-03-window.md.
+// libraries are mirrored into a task-owned linker directory as .lib-named
+// symlinks. All of this is generated under build/ (gitignored); see
+// docs/notes/m00-03-window.md.
 WINDOWS_BINARY_PATH :: OUT_DIR + "/hammer.exe"
 WINDOWS_SDK_DIR :: OUT_DIR + "/windows-sdk"
 WINDOWS_LLD_SHIM :: OUT_DIR + "/lld-link-shim"
@@ -473,10 +477,10 @@ main :: proc() {
 	}
 
 	if len(args) > 1 && args[1] == "clipboard-windows-test" {
-		when ODIN_OS == .Linux {
+		when ODIN_OS == .Linux || ODIN_OS == .Windows {
 			clipboard_windows_main()
 		} else {
-			fmt.eprintln("[Test] clipboard-windows-test currently cross-builds from Linux")
+			fmt.eprintln("[Test] clipboard-windows-test requires Windows or Linux/Wine")
 			os.exit(1)
 		}
 		return
@@ -520,14 +524,17 @@ main :: proc() {
 	// M01.02: stage the configuration before every product build.
 	stage_config(args[1:])
 
-	when ODIN_OS == .Linux {
+	when ODIN_OS == .Windows {
+		windows_main(args[1:])
+		return
+	} else when ODIN_OS == .Linux {
 		if !setup_sokol_linux() {
 			fmt.eprintln("[Build] Sokol setup failed; cannot continue.")
 			os.exit(1)
 		}
 	} else {
 		fmt.println(
-			"[Build] note: automatic Sokol setup is only implemented on Linux (X11) for now.",
+			"[Build] note: automatic Sokol setup is only implemented on Linux and Windows for now.",
 		)
 	}
 
@@ -1036,20 +1043,37 @@ sokol_lib_path :: proc(name, pkg, variant: string) -> string {
 	return fmt.tprintf(SOKOL_PKG_DIR + "/%s/%s_linux_x64_gl_%s.a", pkg, name, variant)
 }
 
-// --- Windows cross-build (M00.03 Windows half) ---------------------------
+// --- Native/cross Windows build (M00.03 Windows half) --------------------
 
-// Win32 + CRT libraries the Sokol GL static libraries resolve against at
-// final link. They are passed as plain linker inputs rather than
-// /defaultlib flags: the lld-link used here honors only the last
-// /defaultlib argument (verified; see docs/notes/m00-03-window.md §Windows).
+// Linux cross-builds link MinGW's Sokol objects without a CRT. Native
+// Windows uses clang-cl and the normal Windows CRT/SDK instead.
 WINDOWS_SYSTEM_LIBS := []string {
 	"user32.lib",
 	"kernel32.lib",
 	"gdi32.lib",
 	"shell32.lib",
-	"ucrtbase.lib", // UCRT: malloc/free/memcpy/fputs/abort/... from the mingw build
-	"libgcc.lib", // ___chkstk_ms and friends (symlinked into the SDK root)
-	"mingwex.lib", // _assert from the mingw build (lib prefix stripped like the other imports)
+	"ucrtbase.lib",
+	"libgcc.lib",
+	"mingwex.lib",
+}
+
+windows_toolchain :: proc() -> (cc, ar: string) {
+	when ODIN_OS == .Windows {
+		return "clang-cl", "llvm-ar"
+	} else {
+		return "x86_64-w64-mingw32-gcc", "x86_64-w64-mingw32-ar"
+	}
+}
+
+windows_linker_flags :: proc() -> string {
+	when ODIN_OS == .Windows {
+		return ""
+	}
+	lib_flags := "/libpath:" + WINDOWS_SDK_DIR
+	for lib in WINDOWS_SYSTEM_LIBS {
+		lib_flags = fmt.tprintf("%s %s", lib_flags, lib)
+	}
+	return lib_flags
 }
 
 clipboard_windows_main :: proc() {
@@ -1057,66 +1081,75 @@ clipboard_windows_main :: proc() {
 		fmt.eprintln("[Test] Windows clipboard test setup failed")
 		os.exit(1)
 	}
-	lib_flags := "/libpath:" + WINDOWS_SDK_DIR
-	for lib in WINDOWS_SYSTEM_LIBS {
-		lib_flags = fmt.tprintf("%s %s", lib_flags, lib)
+	cmd_args: [dynamic]string
+	defer delete(cmd_args)
+	append(&cmd_args, "odin", "build", CLIPBOARD_WINDOWS_TEST_DIR)
+	append(&cmd_args, "-target:windows_amd64", "-linker:lld")
+	when ODIN_OS != .Windows {
+		append(&cmd_args, "-ignore-vs-search", "-no-crt", "-no-thread-local")
 	}
-	run_odin([]string {
-		"odin",
-		"build",
-		CLIPBOARD_WINDOWS_TEST_DIR,
-		"-target:windows_amd64",
-		"-linker:lld",
-		"-windows-sdk-root:" + WINDOWS_SDK_DIR,
-		"-no-crt",
-		"-no-thread-local",
-		"-vet",
-		HAMMER_COLLECTION,
-		fmt.tprintf("-extra-linker-flags:%s", lib_flags),
-		"-out:" + CLIPBOARD_WINDOWS_TEST_BINARY,
-	})
-	run_odin([]string{"xvfb-run", "-a", "env", "WINEDEBUG=-all", "wine", CLIPBOARD_WINDOWS_TEST_BINARY}, true)
-	run_odin([]string {
-		"xvfb-run",
-		"-a",
-		"python3",
-		CLIPBOARD_WINDOWS_INTEROP_HARNESS,
-		"--binary",
-		CLIPBOARD_WINDOWS_TEST_BINARY,
-	}, true)
+	append(&cmd_args, "-vet", HAMMER_COLLECTION)
+	if lib_flags := windows_linker_flags(); lib_flags != "" {
+		append(&cmd_args, fmt.tprintf("-extra-linker-flags:%s", lib_flags))
+	}
+	append(&cmd_args, "-out:" + CLIPBOARD_WINDOWS_TEST_BINARY)
+	run_odin(cmd_args[:])
+	when ODIN_OS == .Windows {
+		run_odin([]string{CLIPBOARD_WINDOWS_TEST_BINARY}, true)
+		run_odin([]string {
+			"python",
+			CLIPBOARD_WINDOWS_INTEROP_HARNESS,
+			"--binary",
+			CLIPBOARD_WINDOWS_TEST_BINARY,
+		}, true)
+	} else {
+		run_odin([]string{"xvfb-run", "-a", "env", "WINEDEBUG=-all", "wine", CLIPBOARD_WINDOWS_TEST_BINARY}, true)
+		run_odin([]string {
+			"xvfb-run",
+			"-a",
+			"python3",
+			CLIPBOARD_WINDOWS_INTEROP_HARNESS,
+			"--binary",
+			CLIPBOARD_WINDOWS_TEST_BINARY,
+		}, true)
+	}
 }
 
-// windows_main cross-builds hammer.exe for windows_amd64. Modes: debug by
-// default, release with --release (mirrors the Linux build modes).
+// windows_main builds hammer.exe natively on Windows and cross-builds it on
+// Linux. Modes mirror the normal build: debug by default, run, or --release.
 windows_main :: proc(args: []string) {
-	fmt.println("[Build] Windows cross-build (windows_amd64, Sokol GL)...")
+	when ODIN_OS == .Windows {
+		fmt.println("[Build] Native Windows build (windows_amd64, Sokol GL)...")
+	} else {
+		fmt.println("[Build] Windows cross-build (windows_amd64, Sokol GL)...")
+	}
 	if !setup_windows() {
-		fmt.eprintln("[Build] Windows cross-build setup failed; cannot continue.")
+		fmt.eprintln("[Build] Windows build setup failed; cannot continue.")
 		os.exit(1)
 	}
 
 	mode := "debug"
 	for arg in args {
-		if strings.contains(arg, "--release") {
+		if arg == "run" {
+			mode = "run"
+		} else if strings.contains(arg, "--release") {
 			mode = "release"
-			break
 		}
 	}
 
-	lib_flags := "/libpath:" + WINDOWS_SDK_DIR
-	for lib in WINDOWS_SYSTEM_LIBS {
-		lib_flags = fmt.tprintf("%s %s", lib_flags, lib)
-	}
-
+	command := "run" if mode == "run" else "build"
 	cmd_args: [dynamic]string
-	append(&cmd_args, "odin", "build", SRC_DIR)
-	append(&cmd_args, "-target:windows_amd64")
-	append(&cmd_args, "-linker:lld")
-	append(&cmd_args, "-windows-sdk-root:" + WINDOWS_SDK_DIR)
-	append(&cmd_args, "-no-crt", "-no-thread-local")
+	defer delete(cmd_args)
+	append(&cmd_args, "odin", command, SRC_DIR)
+	append(&cmd_args, "-target:windows_amd64", "-linker:lld")
+	when ODIN_OS != .Windows {
+		append(&cmd_args, "-ignore-vs-search", "-no-crt", "-no-thread-local")
+	}
 	append(&cmd_args, SOKOL_COLLECTION)
 	append(&cmd_args, "-define:SOKOL_USE_GL=true")
-	append(&cmd_args, fmt.tprintf("-extra-linker-flags:%s", lib_flags))
+	if lib_flags := windows_linker_flags(); lib_flags != "" {
+		append(&cmd_args, fmt.tprintf("-extra-linker-flags:%s", lib_flags))
+	}
 	append(&cmd_args, "-vet")
 	if mode == "release" {
 		fmt.println("[Build] Building project (Release) -> " + WINDOWS_BINARY_PATH + "...")
@@ -1127,51 +1160,61 @@ windows_main :: proc(args: []string) {
 	}
 	append(&cmd_args, "-out:" + WINDOWS_BINARY_PATH)
 
-	run_odin(cmd_args[:])
-	fmt.println("[Build] Windows build done. Smoke test under Wine:")
-	fmt.println("[Build]   xvfb-run -a env HAMMER_AUTOQUIT_FRAMES=10 wine " + WINDOWS_BINARY_PATH)
+	run_odin(cmd_args[:], mode == "run")
+	when ODIN_OS == .Windows {
+		fmt.println("[Build] Native Windows build done -> " + WINDOWS_BINARY_PATH)
+	} else {
+		fmt.println("[Build] Windows build done. Smoke test under Wine:")
+		fmt.println("[Build]   xvfb-run -a env HAMMER_AUTOQUIT_FRAMES=10 wine " + WINDOWS_BINARY_PATH)
+	}
 }
 
-// setup_windows verifies the mingw-w64 toolchain, assembles the Windows SDK
-// root, builds the Sokol Windows static libraries, and locates a native
-// lld-link (exported to the odin subprocess via ODIN_LLD_PATH).
+// setup_windows verifies the native LLVM or cross MinGW toolchain, fetches
+// the pinned Sokol sources, builds its static libraries, and locates lld-link.
 setup_windows :: proc() -> bool {
-	if !run_tool([]string{"x86_64-w64-mingw32-gcc", "--version"}, true) {
-		fmt.eprintln("[Setup] missing x86_64-w64-mingw32-gcc (Gentoo: cross-x86_64-w64-mingw32/gcc)")
+	cc, ar := windows_toolchain()
+	if !run_tool([]string{cc, "--version"}, true) {
+		fmt.eprintf("[Setup] missing %s (install LLVM on Windows or mingw-w64 GCC for cross-builds)\n", cc)
 		return false
 	}
-	if !run_tool([]string{"x86_64-w64-mingw32-ar", "--version"}, true) {
-		fmt.eprintln("[Setup] missing x86_64-w64-mingw32-ar (Gentoo: cross-x86_64-w64-mingw32/binutils)")
+	if !run_tool([]string{ar, "--version"}, true) {
+		fmt.eprintf("[Setup] missing %s (install the matching archiver)\n", ar)
 		return false
 	}
-
-	sysroot, sysroot_ok := tool_output([]string{"x86_64-w64-mingw32-gcc", "-print-sysroot"})
-	if !sysroot_ok || sysroot == "" {
-		fmt.eprintln("[Setup] cannot determine the mingw-w64 sysroot")
-		return false
-	}
-	libgcc_path, libgcc_ok := tool_output([]string{"x86_64-w64-mingw32-gcc", "-print-file-name=libgcc.a"})
-	if !libgcc_ok || libgcc_path == "" || !os.exists(libgcc_path) {
-		fmt.eprintln("[Setup] cannot locate libgcc.a")
-		return false
+	if !sokol_headers_present() {
+		fmt.println("[Setup] Sokol C headers not found; downloading the pinned revision...")
+		if !fetch_sokol_headers() {
+			return false
+		}
 	}
 
-	if !setup_windows_sdk(sysroot, libgcc_path) {
-		return false
+	when ODIN_OS != .Windows {
+		kernel32_path, kernel32_ok := tool_output([]string{cc, "-print-file-name=libkernel32.a"})
+		if !kernel32_ok || kernel32_path == "" || !os.exists(kernel32_path) {
+			fmt.eprintln("[Setup] cannot locate the mingw-w64 import libraries")
+			return false
+		}
+		libgcc_path, libgcc_ok := tool_output([]string{cc, "-print-file-name=libgcc.a"})
+		if !libgcc_ok || libgcc_path == "" || !os.exists(libgcc_path) {
+			fmt.eprintln("[Setup] cannot locate libgcc.a")
+			return false
+		}
+		if !setup_windows_sdk(kernel32_path, libgcc_path) {
+			return false
+		}
 	}
-	if !build_sokol_libs_windows() {
+	if !build_sokol_libs_windows(cc, ar) {
 		return false
 	}
 
 	lld_path, lld_ok := find_lld_link()
 	if !lld_ok {
 		fmt.eprintln("[Setup] no native lld-link found. Install one of:")
-		fmt.eprintln("[Setup]   - llvm-core/lld (provides lld-link)")
-		fmt.eprintln("[Setup]   - a Rust toolchain (rust-lld; auto-discovered under ~/.rustup)")
+		fmt.eprintln("[Setup]   - LLVM/LLD (provides lld-link)")
+		fmt.eprintln("[Setup]   - a Rust toolchain (rust-lld; auto-discovered under ~/.rustup on Linux)")
 		fmt.eprintln("[Setup]   - set ODIN_LLD_PATH to a native lld-link binary")
 		return false
 	}
-	// The odin subprocess execs this path as its linker.
 	if set_err := os.set_env("ODIN_LLD_PATH", lld_path); set_err != nil {
 		fmt.eprintf("[Setup] cannot set ODIN_LLD_PATH: %v\n", set_err)
 		return false
@@ -1180,12 +1223,13 @@ setup_windows :: proc() -> bool {
 }
 
 // setup_windows_sdk populates WINDOWS_SDK_DIR with .lib-named symlinks to
-// the mingw import libraries. Odin's -windows-sdk-root scans this tree
-// case-insensitively to resolve bare system library names, and lld-link
-// resolves the plain names through /libpath. Existing symlinks are reused
-// so repeated runs stay cheap.
-setup_windows_sdk :: proc(sysroot, libgcc_path: string) -> bool {
-	lib_dir := fmt.tprintf("%s/x86_64-w64-mingw32/lib", sysroot)
+// the mingw import libraries for the Linux cross-linker.
+setup_windows_sdk :: proc(kernel32_path, libgcc_path: string) -> bool {
+	lib_dir := strings.trim_suffix(kernel32_path, "/libkernel32.a")
+	if lib_dir == kernel32_path {
+		fmt.eprintf("[Setup] unexpected libkernel32.a path: %s\n", kernel32_path)
+		return false
+	}
 	os.make_directory_all(WINDOWS_SDK_DIR)
 
 	dir, derr := os.open(lib_dir)
@@ -1199,41 +1243,49 @@ setup_windows_sdk :: proc(sysroot, libgcc_path: string) -> bool {
 		fmt.eprintf("[Setup] cannot read %s: %v\n", lib_dir, rerr)
 		return false
 	}
-	prefix := "lib"
-	suffix := ".a"
 	for entry in entries {
 		name := entry.name
-		if strings.has_prefix(name, prefix) && strings.has_suffix(name, suffix) {
-			link_name := fmt.tprintf("%s.lib", name[len(prefix):len(name)-len(suffix)])
+		if strings.has_prefix(name, "lib") && strings.has_suffix(name, ".a") {
+			link_name := fmt.tprintf("%s.lib", name[len("lib"):len(name)-len(".a")])
 			dst := fmt.tprintf("%s/%s", WINDOWS_SDK_DIR, link_name)
-			if !os.exists(dst) {
-				if lerr := os.symlink(entry.fullpath, dst); lerr != nil {
-					fmt.eprintf("[Setup] cannot symlink %s: %v\n", dst, lerr)
-					return false
-				}
+			if !stage_windows_library(entry.fullpath, dst) {
+				return false
 			}
 		}
 	}
 
-	// libgcc.a (___chkstk_ms and friends) lives outside the import lib dir.
-	libgcc_dst := WINDOWS_SDK_DIR + "/libgcc.lib"
-	if !os.exists(libgcc_dst) {
-		if lerr := os.symlink(libgcc_path, libgcc_dst); lerr != nil {
-			fmt.eprintf("[Setup] cannot symlink %s: %v\n", libgcc_dst, lerr)
+	return stage_windows_library(libgcc_path, WINDOWS_SDK_DIR + "/libgcc.lib")
+}
+
+stage_windows_library :: proc(src, dst: string) -> bool {
+	if os.exists(dst) {
+		return true
+	}
+	when ODIN_OS == .Windows {
+		if err := os.copy_file(dst, src); err != nil {
+			fmt.eprintf("[Setup] cannot copy %s to %s: %v\n", src, dst, err)
+			return false
+		}
+	} else {
+		if err := os.symlink(src, dst); err != nil {
+			fmt.eprintf("[Setup] cannot symlink %s: %v\n", dst, err)
 			return false
 		}
 	}
 	return true
 }
 
-// build_sokol_libs_windows compiles the pinned Sokol C sources for
-// windows_amd64 with the mingw-w64 compiler and archives them as the .lib
-// files the sokol-odin bindings expect for the GL variant
-// (third_party/sokol/sokol/<pkg>/sokol_<pkg>_windows_x64_gl_<variant>.lib,
-// gitignored by the submodule). GL backend only for now; the D3D11 variant
-// is a recorded follow-up (docs/notes/m00-03-window.md).
-build_sokol_libs_windows :: proc() -> bool {
-	missing_any := false
+// build_sokol_libs_windows compiles the pinned Sokol C sources with the
+// selected native/cross compiler. A toolchain marker prevents accidentally
+// reusing MinGW objects in an MSVC-CRT build, or vice versa.
+build_sokol_libs_windows :: proc(cc, ar: string) -> bool {
+	os.make_directory_all(SOKOL_GEN_DIR)
+	toolchain_marker := SOKOL_GEN_DIR + "/windows-toolchain"
+	cache_current := false
+	if data, err := os.read_entire_file(toolchain_marker, context.temp_allocator); err == nil {
+		cache_current = strings.trim_space(string(data)) == cc
+	}
+	missing_any := !cache_current
 	for lib in SOKOL_LIBS {
 		for variant in SOKOL_VARIANTS {
 			if !os.exists(sokol_lib_path_windows(lib.pkg, variant)) {
@@ -1245,12 +1297,9 @@ build_sokol_libs_windows :: proc() -> bool {
 		return true
 	}
 
-	os.make_directory_all(SOKOL_GEN_DIR)
-	fmt.println("[Setup] Building Sokol Windows static libraries (one-time)...")
+	fmt.println("[Setup] Building Sokol Windows static libraries...")
 
 	for lib in SOKOL_LIBS {
-		// Same translation unit as the Linux build: the impl defines are
-		// resolved per-target at compile time.
 		tu := fmt.tprintf("%s/%s.c", SOKOL_GEN_DIR, lib.name)
 		src := fmt.tprintf("#define %s\n", lib.impl_define)
 		for header in lib.pre_includes {
@@ -1264,47 +1313,82 @@ build_sokol_libs_windows :: proc() -> bool {
 
 		for variant in SOKOL_VARIANTS {
 			lib_path := sokol_lib_path_windows(lib.pkg, variant)
-			if os.exists(lib_path) {
+			if cache_current && os.exists(lib_path) {
 				continue
 			}
 			obj := fmt.tprintf("%s/%s_windows_%s.o", SOKOL_GEN_DIR, lib.name, variant)
 			flags: []string
-			if variant == "debug" {
-				flags = []string {
-					"x86_64-w64-mingw32-gcc",
-					"-c",
-					"-g",
-					"-O0",
-					"-DSOKOL_GLCORE",
-					"-DSOKOL_NO_ENTRY",
-					"-I" + SOKOL_C_DIR,
-					tu,
-					"-o",
-					obj,
+			when ODIN_OS == .Windows {
+				if variant == "debug" {
+					flags = []string {
+						cc,
+						"/c",
+						"/Z7",
+						"/Od",
+						"/D_DEBUG",
+						"/DSOKOL_GLCORE",
+						"/DSOKOL_NO_ENTRY",
+						"/I" + SOKOL_C_DIR,
+						tu,
+						fmt.tprintf("/Fo%s", obj),
+					}
+				} else {
+					flags = []string {
+						cc,
+						"/c",
+						"/O2",
+						"/DNDEBUG",
+						"/DSOKOL_GLCORE",
+						"/DSOKOL_NO_ENTRY",
+						"/I" + SOKOL_C_DIR,
+						tu,
+						fmt.tprintf("/Fo%s", obj),
+					}
 				}
 			} else {
-				flags = []string {
-					"x86_64-w64-mingw32-gcc",
-					"-c",
-					"-O2",
-					"-DNDEBUG",
-					"-DSOKOL_GLCORE",
-					"-DSOKOL_NO_ENTRY",
-					"-I" + SOKOL_C_DIR,
-					tu,
-					"-o",
-					obj,
+				if variant == "debug" {
+					flags = []string {
+						cc,
+						"-c",
+						"-g",
+						"-O0",
+						"-mwin32",
+						"-DSOKOL_GLCORE",
+						"-DSOKOL_NO_ENTRY",
+						"-I" + SOKOL_C_DIR,
+						tu,
+						"-o",
+						obj,
+					}
+				} else {
+					flags = []string {
+						cc,
+						"-c",
+						"-O2",
+						"-DNDEBUG",
+						"-mwin32",
+						"-DSOKOL_GLCORE",
+						"-DSOKOL_NO_ENTRY",
+						"-I" + SOKOL_C_DIR,
+						tu,
+						"-o",
+						obj,
+					}
 				}
 			}
 			if !run_tool(flags) {
 				fmt.eprintf("[Setup] failed to compile %s (%s) for windows\n", lib.name, variant)
 				return false
 			}
-			if !run_tool([]string{"x86_64-w64-mingw32-ar", "rcs", lib_path, obj}) {
+			if !run_tool([]string{ar, "rcs", lib_path, obj}) {
 				fmt.eprintf("[Setup] failed to archive %s (%s) for windows\n", lib.name, variant)
 				return false
 			}
 		}
+	}
+	if werr := os.write_entire_file(toolchain_marker, cc); werr != nil {
+		fmt.eprintf("[Setup] cannot record the Sokol toolchain: %v\n", werr)
+		return false
 	}
 	fmt.println("[Setup] Sokol Windows libraries ready.")
 	return true
@@ -1314,32 +1398,42 @@ sokol_lib_path_windows :: proc(pkg, variant: string) -> string {
 	return fmt.tprintf(SOKOL_PKG_DIR + "/%s/sokol_%s_windows_x64_gl_%s.lib", pkg, pkg, variant)
 }
 
-// find_lld_link returns the path of a usable native lld-link: the
-// ODIN_LLD_PATH env var if set, `lld-link` on PATH, or a generated wrapper
-// around a Rust toolchain's rust-lld (-flavor link selects lld-link).
+// find_lld_link returns ODIN_LLD_PATH, lld-link on PATH, the linker bundled
+// with Odin on Windows, or a Linux rust-lld wrapper as a fallback.
 find_lld_link :: proc() -> (string, bool) {
 	if env, found := os.lookup_env("ODIN_LLD_PATH", context.temp_allocator); found && env != "" && os.exists(env) {
 		return env, true
 	}
-	if path, path_ok := tool_output([]string{"sh", "-c", "command -v lld-link"}); path_ok && path != "" {
-		return path, true
-	}
-	if home, found := os.lookup_env("HOME", context.temp_allocator); found && home != "" {
-		glob := fmt.tprintf("%s/.rustup/toolchains/*/lib/rustlib/*/bin/rust-lld", home)
-		rust_path, rust_ok := tool_output([]string{"sh", "-c", fmt.tprintf("ls %s 2>/dev/null | head -n 1", glob)})
-		if rust_ok && rust_path != "" {
-			shim := fmt.tprintf("#!/bin/sh\n# generated by make.odin\n\nexec \"%s\" -flavor link \"$@\"\n", rust_path)
-			if werr := os.write_entire_file(WINDOWS_LLD_SHIM, transmute([]byte)shim); werr != nil {
-				fmt.eprintf("[Setup] cannot write %s: %v\n", WINDOWS_LLD_SHIM, werr)
-				return "", false
+	when ODIN_OS == .Windows {
+		if path, path_ok := tool_output([]string{"where.exe", "lld-link"}); path_ok && path != "" {
+			return path, true
+		}
+		if root, root_ok := tool_output([]string{"odin", "root"}); root_ok && root != "" {
+			path := fmt.tprintf("%s/bin/lld-link.exe", root)
+			if os.exists(path) {
+				return path, true
 			}
-			// The shim is exec'd directly by odin, so it needs the exec bit.
-			if cerr := os.chmod(WINDOWS_LLD_SHIM, {.Read_User, .Write_User, .Execute_User}); cerr != nil {
-				fmt.eprintf("[Setup] cannot chmod %s: %v\n", WINDOWS_LLD_SHIM, cerr)
-				return "", false
+		}
+	} else {
+		if path, path_ok := tool_output([]string{"sh", "-c", "command -v lld-link"}); path_ok && path != "" {
+			return path, true
+		}
+		if home, found := os.lookup_env("HOME", context.temp_allocator); found && home != "" {
+			glob := fmt.tprintf("%s/.rustup/toolchains/*/lib/rustlib/*/bin/rust-lld", home)
+			rust_path, rust_ok := tool_output([]string{"sh", "-c", fmt.tprintf("ls %s 2>/dev/null | head -n 1", glob)})
+			if rust_ok && rust_path != "" {
+				shim := fmt.tprintf("#!/bin/sh\n# generated by make.odin\n\nexec \"%s\" -flavor link \"$@\"\n", rust_path)
+				if werr := os.write_entire_file(WINDOWS_LLD_SHIM, transmute([]byte)shim); werr != nil {
+					fmt.eprintf("[Setup] cannot write %s: %v\n", WINDOWS_LLD_SHIM, werr)
+					return "", false
+				}
+				if cerr := os.chmod(WINDOWS_LLD_SHIM, {.Read_User, .Write_User, .Execute_User}); cerr != nil {
+					fmt.eprintf("[Setup] cannot chmod %s: %v\n", WINDOWS_LLD_SHIM, cerr)
+					return "", false
+				}
+				fmt.printf("[Setup] using rust-lld via generated shim %s\n", WINDOWS_LLD_SHIM)
+				return WINDOWS_LLD_SHIM, true
 			}
-			fmt.printf("[Setup] using rust-lld via generated shim %s\n", WINDOWS_LLD_SHIM)
-			return WINDOWS_LLD_SHIM, true
 		}
 	}
 	return "", false
