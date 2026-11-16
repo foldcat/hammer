@@ -9,7 +9,7 @@ Linux-only.
 
 `src/editor.odin` owns one empty untitled `txn.Doc`, its view selection, typing
 undo-group state, saved revision, and close guard. Normalized Sokol text and X11
-IME commits now pass through `keybind.resolve_event` and `editing.perform`.
+IME commits now pass through `keybind.resolve_event` and the editing dispatcher.
 Movement, selection, deletion, indentation, undo, and redo use the existing core
 actions. Consecutive text and IME commits share one undo group; movement,
 deletion, indentation, undo, and redo break that run.

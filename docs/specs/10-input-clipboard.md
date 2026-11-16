@@ -139,7 +139,34 @@ Rules:
 This is baseline literal inheritance. Reindenting against surrounding
 bracket/brace structure is not part of this behavior.
 
-## 10.7 Clipboard service
+## 10.7 Autopair policy
+
+The compiled `autopair` boolean defaults to true. Set `autopair: false` to retain
+literal typing and ordinary Backspace behavior.
+
+When enabled:
+
+- `(`, `[`, and `{` insert their pair with the caret inside unless the proposed
+  opener can use an unmatched corresponding closer ahead. In that case only the
+  opening byte is inserted. This balancing follows byte order and works across
+  lines in a centered window of at most 1000 lines; quote pairs remain line-local.
+- Single/double quotes and backticks insert a matching quote with the caret inside.
+- An opening delimiter around a nonempty selection always wraps the selected text
+  in one transaction and preserves selection direction inside the delimiters.
+- At a collapsed caret, typing a closing delimiter or quote already present at
+  the caret moves over it without inserting a duplicate or creating a transaction.
+- Backspace between an empty recognized pair deletes both bytes in one transaction.
+- Other closing delimiters, multi-scalar IME commits, and non-delimiter text retain
+  their ordinary editing behavior. Single-scalar commits use the same pair policy
+  because X11 delivers ordinary printable keys through the commit path.
+
+Selection wrapping uses two insertions against the original snapshot; it does not
+copy or flatten the selected text. Multiline matching walks bounded rope spans
+rather than flattening the document. The bracket balancing follows the default
+`ultimate-autopair.nvim` start-pair policy, without its syntax-tree filters. No
+language-specific quote context or bracket reindentation is implied.
+
+## 10.8 Clipboard service
 
 Use a platform service:
 

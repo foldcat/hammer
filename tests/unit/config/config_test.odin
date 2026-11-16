@@ -106,6 +106,29 @@ ligatures: true
 }
 
 @(test)
+test_autopair_resolution_and_generation :: proc(t: ^testing.T) {
+	builtin, builtin_err := config.builtin()
+	defer config.resolved_destroy(&builtin)
+	testing.expect(t, errs.ok(builtin_err))
+	testing.expect(t, builtin.Autopair)
+
+	disabled, disabled_err := config.resolve_from_yaml("autopair: false\n")
+	defer config.resolved_destroy(&disabled)
+	testing.expect(t, errs.ok(disabled_err))
+	testing.expect(t, !disabled.Autopair)
+	src := config.generate_source(disabled)
+	defer delete(src)
+	testing.expect(t, strings.contains(src, "Autopair              = false"))
+
+	enabled, enabled_err := config.resolve_from_yaml("autopair: true\n")
+	defer config.resolved_destroy(&enabled)
+	testing.expect(t, errs.ok(enabled_err))
+	testing.expect(t, enabled.Autopair)
+	expect_fail(t, "autopair: 1\n", "invalid input")
+	expect_fail(t, "autopair: \"false\"\n", "invalid input")
+}
+
+@(test)
 test_file_source_and_missing_theme_uses_defaults :: proc(t: ^testing.T) {
 	r, err := config.resolve_from_yaml("font_size_points: 18\n", .File)
 	defer config.resolved_destroy(&r)

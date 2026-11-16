@@ -23,6 +23,7 @@ DEFAULT_FONT_FAMILIES := []string {
 
 DEFAULT_FONT_SIZE_POINTS :: 12.0
 DEFAULT_LINE_HEIGHT :: 1.4
+DEFAULT_AUTOPAIR :: true
 
 // Oxocarbon palette from colorscheme.yaml (base00..base0F), as the
 // "#RRGGBB" strings the palette file uses.
@@ -71,6 +72,7 @@ defaults :: proc() -> Config {
 		Font_Size_Points = DEFAULT_FONT_SIZE_POINTS,
 		Line_Height = DEFAULT_LINE_HEIGHT,
 		Ligatures = false,
+		Autopair = DEFAULT_AUTOPAIR,
 		Theme = default_theme(),
 	}
 }

@@ -19,6 +19,7 @@
 //     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
 //     odin run make.odin -file -- typing-test      # M06.09–M06.12 X11 typing/mouse/clipboard
+//     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
@@ -109,6 +110,9 @@ CLIPBOARD_INTEROP_DRIVER :: OUT_DIR + "/clipboard_interop_driver"
 CLIPBOARD_INTEROP_HARNESS :: CLIPBOARD_TEST_DIR + "/interop_harness.py"
 IME_TEST_DIR :: #directory + "/tests/integration/ime"
 TYPING_TEST_HARNESS :: #directory + "/tests/integration/typing/x11_harness.py"
+AUTOPAIR_TEST_HARNESS :: #directory + "/tests/integration/autopair/x11_harness.py"
+AUTOPAIR_ENABLED_BINARY :: OUT_DIR + "/hammer-autopair-on"
+AUTOPAIR_DISABLED_BINARY :: OUT_DIR + "/hammer-autopair-off"
 LIGATURE_TEST_HARNESS :: #directory + "/tests/integration/ligature/x11_harness.py"
 LIGATURE_FIXTURE_FONT :: #directory + "/tests/integration/textdeps/fixtures/FixtureLigature.ttf"
 LIGATURE_ENABLED_BINARY :: OUT_DIR + "/hammer-ligatures-on"
@@ -400,6 +404,16 @@ main :: proc() {
 		return
 	}
 
+	if len(args) > 1 && args[1] == "autopair-test" {
+		when ODIN_OS == .Linux {
+			autopair_test_main()
+		} else {
+			fmt.eprintln("[Test] autopair-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
 	if len(args) > 1 && args[1] == "ligature-test" {
 		when ODIN_OS == .Linux {
 			ligature_test_main()
@@ -653,6 +667,48 @@ stage_config :: proc(args: []string) {
 	if werr := config.write_staged(r, GENERATED_CONFIG_PATH); !errs.ok(werr) {
 		config_fail(werr)
 	}
+}
+
+autopair_test_main :: proc() {
+	if !setup_sokol_linux() {
+		os.exit(1)
+	}
+	defer stage_config([]string{"--no-config"})
+	autopair_test_build(true, AUTOPAIR_ENABLED_BINARY)
+	autopair_test_build(false, AUTOPAIR_DISABLED_BINARY)
+	run_odin([]string{"odin", "build", SPIKE_CLIPBOARD_DIR, "-vet", "-out:" + CLIPBOARD_SPIKE_PATH})
+	run_odin([]string {
+		"xvfb-run",
+		"-a",
+		"python3",
+		AUTOPAIR_TEST_HARNESS,
+		"--enabled",
+		AUTOPAIR_ENABLED_BINARY,
+		"--disabled",
+		AUTOPAIR_DISABLED_BINARY,
+		"--clipboard-peer",
+		CLIPBOARD_SPIKE_PATH,
+	}, true)
+}
+
+autopair_test_build :: proc(enabled: bool, binary_path: string) {
+	mode := "on" if enabled else "off"
+	config_path := fmt.tprintf("%s/autopair-%s.yaml", OUT_DIR, mode)
+	source := fmt.tprintf("autopair: %v\n", enabled)
+	if err := os.write_entire_file(config_path, transmute([]byte)source); err != nil {
+		fmt.eprintf("[Test] cannot stage autopair config: %v\n", err)
+		os.exit(1)
+	}
+	stage_config([]string{fmt.tprintf("--config=%s", config_path)})
+	run_odin([]string {
+		"odin",
+		"build",
+		SRC_DIR,
+		SOKOL_COLLECTION,
+		"-vet",
+		fmt.tprintf("-out:%s", binary_path),
+		"-debug",
+	})
 }
 
 ligature_test_main :: proc() {

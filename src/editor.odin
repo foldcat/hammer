@@ -372,7 +372,12 @@ editor_cancel_mouse_selection :: proc() {
 }
 
 editor_perform :: proc(action: editing.Action) {
-	editor_report(editing.perform(&editor.doc, &editor.selection, action))
+	editor_report(editing.perform_with_options(
+		&editor.doc,
+		&editor.selection,
+		action,
+		{autopair = cfg.Autopair},
+	))
 }
 
 editor_begin_typing_group :: proc() {

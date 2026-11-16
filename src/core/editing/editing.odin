@@ -1,6 +1,6 @@
 // Package editing implements backend-free movement, selection, text-input,
-// delayed-paste, indentation, newline indentation inheritance, and IME commit
-// actions over transactional documents (M06.01–M06.12). Selections remain
+// delayed-paste, indentation, newline inheritance, autopair, and IME commit
+// actions over transactional documents (M06.01–M06.13). Selections remain
 // view-owned; text mutations go through the transaction engine.
 package editing
 
@@ -37,6 +37,10 @@ Move :: struct {
 
 Select_All :: struct {}
 
+Input_Options :: struct {
+	autopair: bool,
+}
+
 Action :: union {
 	Move,
 	Select_All,
@@ -47,12 +51,24 @@ Action :: union {
 	Delete_Forward,
 }
 
-// perform applies one semantic action to a document and view selection.
+// perform applies one semantic action with default literal input behavior.
 // Movement does not change text; insertion and deletion go through doc_apply.
 perform :: proc(
 	doc: ^txn.Doc,
 	selection: ^txn.Selection,
 	action: Action,
+	allocator := context.allocator,
+) -> errs.Error {
+	return perform_with_options(doc, selection, action, {}, allocator)
+}
+
+// perform_with_options applies optional product input policy without making the
+// backend-free editing core depend on the compiled configuration package.
+perform_with_options :: proc(
+	doc: ^txn.Doc,
+	selection: ^txn.Selection,
+	action: Action,
+	options: Input_Options,
 	allocator := context.allocator,
 ) -> errs.Error {
 	if selection == nil {
@@ -65,10 +81,31 @@ perform :: proc(
 		select_all(doc, selection)
 		return {}
 	case Insert_Text:
+		if options.autopair {
+			handled, err := autopair_insert(doc, selection, a.text, a.grouping_key, allocator)
+			if handled {
+				return err
+			}
+		}
 		return insert_text(doc, selection, a.text, a.grouping_key, allocator)
 	case Commit_Text:
+		if options.autopair {
+			r, width := utf8.decode_rune_in_string(a.text)
+			if width == len(a.text) && width > 0 {
+				handled, err := autopair_insert(doc, selection, r, a.grouping_key, allocator)
+				if handled {
+					return err
+				}
+			}
+		}
 		return insert_committed_text(doc, selection, a.text, a.grouping_key, allocator)
 	case Delete_Backward:
+		if options.autopair {
+			handled, err := autopair_delete_backward(doc, selection, allocator)
+			if handled {
+				return err
+			}
+		}
 		return delete_at_selection(doc, selection, .Left, allocator)
 	case Delete_Word_Backward:
 		return delete_word_backward(doc, selection, allocator)

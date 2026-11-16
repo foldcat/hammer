@@ -185,6 +185,17 @@ apply_text_operation :: proc(
 ) -> errs.Error {
 	after := txn.Selection{anchor = caret, active = caret, affinity = .Left}
 	ops := []txn.Operation{operation}
+	return apply_text_operations(doc, selection, ops, after, grouping_key, allocator)
+}
+
+apply_text_operations :: proc(
+	doc: ^txn.Doc,
+	selection: ^txn.Selection,
+	ops: []txn.Operation,
+	after: txn.Selection,
+	grouping_key: u64,
+	allocator := context.allocator,
+) -> errs.Error {
 	transaction := txn.Transaction {
 		source = .Typing,
 		base_revision = doc.revision,

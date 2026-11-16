@@ -39,9 +39,13 @@ Config :: struct {
     font_size_points: f32,
     line_height:      f32,
     ligatures:        bool,
+    autopair:         bool,
     theme:            Theme,
 }
 ```
+
+`autopair` defaults to true when omitted. An explicit `autopair: false` disables
+pair insertion, selection wrapping, close-skipping, and empty-pair Backspace.
 
 The actual configuration should also support:
 

@@ -97,6 +97,7 @@ resolved :: proc(c: Config, source: Source, allocator := context.allocator) -> (
 		Font_Size_Points = c.Font_Size_Points,
 		Line_Height = c.Line_Height,
 		Ligatures = c.Ligatures,
+		Autopair = c.Autopair.? or_else DEFAULT_AUTOPAIR,
 		Theme = c.Theme,
 		Source = source,
 	}
@@ -168,11 +169,12 @@ describe :: proc(r: Resolved, allocator := context.allocator) -> string {
 		families = "?"
 	}
 	return fmt.aprintf(
-		"config: source=%s, font_size=%.1fpt, line_height=%.2f, ligatures=%v, families=[%s], font_path=%q, body_bg=#%02x%02x%02x",
+		"config: source=%s, font_size=%.1fpt, line_height=%.2f, ligatures=%v, autopair=%v, families=[%s], font_path=%q, body_bg=#%02x%02x%02x",
 		source_name(r.Source),
 		r.Font_Size_Points,
 		r.Line_Height,
 		r.Ligatures,
+		r.Autopair,
 		families,
 		r.Font_Path,
 		u8(r.Theme.Body_Bg[0] * 255.0 + 0.5),
@@ -236,12 +238,17 @@ build_config :: proc(root: ^map_node, allocator := context.allocator) -> (Config
 				return cfg, errs.newf(.Invalid_Input, "config: line %d: invalid line_height", root.lines[key])
 			}
 			cfg.Line_Height = f32(value_parsed)
-		case "ligatures":
+		case "ligatures", "autopair":
 			scalar, is_scalar := node.(value)
 			if !is_scalar || scalar.kind != .Bool {
-				return cfg, errs.newf(.Invalid_Input, "config: line %d: ligatures must be true or false", root.lines[key])
+				return cfg, errs.newf(.Invalid_Input, "config: line %d: %s must be true or false", root.lines[key], key)
 			}
-			cfg.Ligatures = scalar.text == "true" || scalar.text == "True" || scalar.text == "TRUE"
+			enabled := scalar.text == "true" || scalar.text == "True" || scalar.text == "TRUE"
+			if key == "ligatures" {
+				cfg.Ligatures = enabled
+			} else {
+				cfg.Autopair = enabled
+			}
 		case "theme":
 			child, is_map := node.(^map_node)
 			if !is_map {

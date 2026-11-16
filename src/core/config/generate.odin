@@ -82,6 +82,7 @@ resolved :: config.Resolved {{
     Font_Size_Points      = %v,
     Line_Height           = %v,
     Ligatures             = %v,
+    Autopair              = %v,
     Theme            = config.Theme{{
         Body_Bg      = [4]f32 {{%v, %v, %v, %v}},
         Body_Fg      = [4]f32 {{%v, %v, %v, %v}},
@@ -107,6 +108,7 @@ resolved :: config.Resolved {{
 		r.Font_Size_Points,
 		r.Line_Height,
 		r.Ligatures,
+		r.Autopair,
 		t.Body_Bg[0], t.Body_Bg[1], t.Body_Bg[2], t.Body_Bg[3],
 		t.Body_Fg[0], t.Body_Fg[1], t.Body_Fg[2], t.Body_Fg[3],
 		t.Tag_Bg[0], t.Tag_Bg[1], t.Tag_Bg[2], t.Tag_Bg[3],

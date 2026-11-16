@@ -37,10 +37,10 @@ Theme :: struct {
 	Git_Deleted:  [4]f32,
 }
 
-// Config is the user-facing schema. Fields left zero are filled from
-// the defaults by `resolve_from_yaml`/`resolved`; there is deliberately
-// no way to spell "empty" for a color or a negative font size, so
-// zero-means-default is unambiguous.
+// Config is the user-facing schema. Scalar fields left zero are filled from
+// the defaults by `resolve_from_yaml`/`resolved`; optional booleans left nil
+// inherit their defaults. There is deliberately no way to spell "empty" for a
+// color or a negative font size, so zero-means-default is unambiguous.
 Config :: struct {
 	Font_Families:        []string,
 	Tag_Font_Families:    []string,
@@ -49,6 +49,7 @@ Config :: struct {
 	Font_Size_Points:     f32,
 	Line_Height:          f32,
 	Ligatures:            bool,
+	Autopair:             Maybe(bool),
 	Theme:                Theme,
 }
 
@@ -63,6 +64,7 @@ Resolved :: struct {
 	Font_Size_Points:      f32,
 	Line_Height:           f32,
 	Ligatures:             bool,
+	Autopair:              bool,
 	Theme:                 Theme,
 	Source:                Source, // where the config came from
 }
@@ -98,7 +100,7 @@ MAX_FONT_PATH_LEN :: 4096
 // SCHEMA_VERSION is bumped whenever the generated-package shape
 // changes. The generated file carries the version it was staged with
 // and fails to compile against a mismatching schema.
-SCHEMA_VERSION :: 2
+SCHEMA_VERSION :: 3
 
 // parse_hex_color converts "#RRGGBB" into a [4]f32 RGBA color (alpha
 // forced to 1). Returns `.Invalid_Input` on a malformed string.

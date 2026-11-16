@@ -45,6 +45,11 @@ line_height: 1.5
 # enabled. Default false.
 ligatures: false
 
+# Automatically close brackets and quotes, wrap selections, skip existing
+# closing delimiters, reuse unmatched bracket closers across up to 1000 lines,
+# and delete empty pairs with Backspace. Default true.
+autopair: true
+
 # The oxocarbon-derived theme (colorscheme.yaml). Either all ten colors
 # or none; partial themes are rejected. Colors are "#RRGGBB".
 theme:
