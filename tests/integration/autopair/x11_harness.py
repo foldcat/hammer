@@ -51,6 +51,7 @@ def run_case(
     sandbox: Path,
     timeout: float,
     empty_pair_result: bytes,
+    newline_result: bytes,
     selection_result: bytes,
 ) -> None:
     process: subprocess.Popen[bytes] | None = None
@@ -83,6 +84,17 @@ def run_case(
                     f"{label}: closing/Backspace policy produced {actual!r}, want {empty_pair_result!r}"
                 )
             print(f"PASS: {label} product closing-delimiter and empty-pair Backspace policy")
+
+            reset_document(x11, window, initial, label)
+            for keysym in (ord("["), 0xFF0D):
+                x11.tap(keysym)
+            time.sleep(0.3)
+            actual = copy_document(x11, peer, sandbox / f"{label}-newline.txt", timeout)
+            if actual != newline_result:
+                raise HarnessFailure(
+                    f"{label}: pair newline produced {actual!r}, want {newline_result!r}"
+                )
+            print(f"PASS: {label} product pair-newline indentation policy")
 
             reset_document(x11, window, initial, label)
             for keysym in (ord("a"), 0xFF0D, ord(")")):
@@ -152,8 +164,8 @@ def main() -> int:
     succeeded = False
     try:
         x11 = X11()
-        run_case(x11, enabled, peer, "enabled", sandbox, args.timeout, b"z", b"[x'']")
-        run_case(x11, disabled, peer, "disabled", sandbox, args.timeout, b"z)", b"[x''")
+        run_case(x11, enabled, peer, "enabled", sandbox, args.timeout, b"z", b"[\n\t\n]", b"[x'']")
+        run_case(x11, disabled, peer, "disabled", sandbox, args.timeout, b"z)", b"[\n", b"[x''")
         succeeded = True
         print("PASS: compiled autopair configuration controls real product editing")
         return 0

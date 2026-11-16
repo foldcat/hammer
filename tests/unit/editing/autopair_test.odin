@@ -7,9 +7,82 @@ import errs "hammer:core/errs"
 import txn "hammer:core/txn"
 
 perform_autopair_edit :: proc(t: ^testing.T, doc: ^txn.Doc, selection: ^txn.Selection, action: editing.Action) {
-	err := editing.perform_with_options(doc, selection, action, {autopair = true})
+	err := editing.perform_with_options(doc, selection, action, {autopair = true, indent = {style = .Tabs}})
 	defer errs.destroy(&err)
 	testing.expectf(t, errs.ok(err), "%v", errs.describe(err))
+}
+
+@(test)
+test_autopair_newline_expands_pair_in_one_undo_step :: proc(t: ^testing.T) {
+	cases := []struct {
+		original: string,
+		caret:    int,
+		want:     string,
+		after:    int,
+	} {
+		{original = "()", caret = 1, want = "(\n\t\n)", after = 3},
+		{original = "[]", caret = 1, want = "[\n\t\n]", after = 3},
+		{original = "{}", caret = 1, want = "{\n\t\n}", after = 3},
+		{original = " \t{}", caret = 3, want = " \t{\n \t\t\n \t}", after = 7},
+	}
+	for c in cases {
+		doc: txn.Doc
+		doc_with_text(t, &doc, c.original)
+		defer txn.doc_destroy(&doc)
+		selection := txn.Selection{anchor = c.caret, active = c.caret}
+		perform_autopair_edit(t, &doc, &selection, editing.Insert_Text{text = '\n', grouping_key = 7})
+		expect_content(t, &doc, c.want)
+		testing.expect(t, selection == txn.Selection{anchor = c.after, active = c.after, affinity = .Left})
+		testing.expect(t, txn.doc_log_len(&doc) == 1 && len(doc.log[0].ops) == 1)
+
+		restored, undo_err := txn.doc_undo(&doc)
+		defer errs.destroy(&undo_err)
+		testing.expect(t, errs.ok(undo_err))
+		selection = restored
+		expect_content(t, &doc, c.original)
+		redone, redo_err := txn.doc_redo(&doc)
+		defer errs.destroy(&redo_err)
+		testing.expect(t, errs.ok(redo_err))
+		testing.expect(t, redone == txn.Selection{anchor = c.after, active = c.after, affinity = .Left})
+		expect_content(t, &doc, c.want)
+	}
+}
+
+@(test)
+test_autopair_newline_uses_configurable_indent_width :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	doc_with_text(t, &doc, "[]")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{anchor = 1, active = 1}
+	err := editing.perform_with_options(
+		&doc,
+		&selection,
+		editing.Insert_Text{text = '\n'},
+		{autopair = true, indent = {style = .Spaces, width = 2}},
+	)
+	defer errs.destroy(&err)
+	testing.expectf(t, errs.ok(err), "%v", errs.describe(err))
+	expect_content(t, &doc, "[\n  \n]")
+	testing.expect(t, selection.anchor == 4 && selection.active == 4)
+}
+
+@(test)
+test_autopair_newline_does_not_indent_nonbracket_or_disabled_pairs :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	doc_with_text(t, &doc, "\"\"")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{anchor = 1, active = 1}
+	perform_autopair_edit(t, &doc, &selection, editing.Insert_Text{text = '\n'})
+	expect_content(t, &doc, "\"\n\"")
+	testing.expect(t, selection.anchor == 2 && selection.active == 2)
+
+	literal: txn.Doc
+	doc_with_text(t, &literal, "{}")
+	defer txn.doc_destroy(&literal)
+	selection = {anchor = 1, active = 1}
+	perform_edit(t, &literal, &selection, editing.Insert_Text{text = '\n'})
+	expect_content(t, &literal, "{\n}")
+	testing.expect(t, selection.anchor == 2 && selection.active == 2)
 }
 
 @(test)

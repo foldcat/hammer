@@ -39,6 +39,7 @@ Select_All :: struct {}
 
 Input_Options :: struct {
 	autopair: bool,
+	indent:   Indent_Settings,
 }
 
 Action :: union {
@@ -82,6 +83,9 @@ perform_with_options :: proc(
 		return {}
 	case Insert_Text:
 		if options.autopair {
+			if a.text == '\n' {
+				return insert_newline(doc, selection, a.grouping_key, options.indent, true, allocator)
+			}
 			handled, err := autopair_insert(doc, selection, a.text, a.grouping_key, allocator)
 			if handled {
 				return err

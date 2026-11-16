@@ -146,8 +146,9 @@ Rules:
   indentation from the line where the replacement begins.
 - The newline plus inherited indentation is one undo transaction.
 
-This is baseline literal inheritance. Reindenting against surrounding
-bracket/brace structure is not part of this behavior.
+This is baseline literal inheritance. General reindenting against surrounding
+bracket/brace structure is not part of this behavior; the adjacent-pair exception
+is defined below.
 
 ## 10.7 Autopair policy
 
@@ -166,6 +167,11 @@ When enabled:
 - At a collapsed caret, typing a closing delimiter or quote already present at
   the caret moves over it without inserting a duplicate or creating a transaction.
 - Backspace between an empty recognized pair deletes both bytes in one transaction.
+- Enter at a collapsed caret directly between matching `()`, `[]`, or `{}` opens
+  an indented caret line and moves the closing byte to a following line at the
+  original inherited indentation. The product currently uses a tab for the added
+  unit; the editing input options carry the effective style and width for future
+  EditorConfig integration.
 - Other closing delimiters, multi-scalar IME commits, and non-delimiter text retain
   their ordinary editing behavior. Single-scalar commits use the same pair policy
   because X11 delivers ordinary printable keys through the commit path.
@@ -174,7 +180,7 @@ Selection wrapping uses two insertions against the original snapshot; it does no
 copy or flatten the selected text. Multiline matching walks bounded rope spans
 rather than flattening the document. The bracket balancing follows the default
 `ultimate-autopair.nvim` start-pair policy, without its syntax-tree filters. No
-language-specific quote context or bracket reindentation is implied.
+language-specific quote context or general bracket reindentation is implied.
 
 ## 10.8 Clipboard service
 

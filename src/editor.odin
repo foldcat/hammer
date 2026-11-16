@@ -385,7 +385,7 @@ editor_perform :: proc(action: editing.Action) {
 		&editor.doc,
 		&editor.selection,
 		action,
-		{autopair = cfg.Autopair},
+		{autopair = cfg.Autopair, indent = {style = .Tabs}},
 	))
 }
 
