@@ -121,7 +121,7 @@ current_window :: proc() -> (layout.Window, coords.Physical_Size, bool) {
 		logical_size = coords.Logical_Size{phys.width, phys.height}
 	}
 
-	font_px := coords.points_to_logical_px(cfg.Font_Size_Points)
+	font_px := coords.points_to_logical_px(state.dpi.points)
 	pad := f32(2)
 	win, layout_err := layout.window(logical_size, font_px + 2 * pad, pad)
 	if !errs.ok(layout_err) {

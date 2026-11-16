@@ -1,6 +1,7 @@
 package platform
 
 import errs "../core/errs"
+import input "../core/input"
 
 IME_Event_Kind :: enum u8 {
 	Preedit,
@@ -12,12 +13,14 @@ IME_Event_Kind :: enum u8 {
 
 // IME_Event text and err are borrowed only during notify. Preedit caret is a
 // Unicode scalar index. Commit contains one complete, possibly multi-scalar,
-// UTF-8 commit; it must not also be emitted as ordinary character events.
+// UTF-8 commit plus the key-event modifiers; it must not also be emitted as
+// ordinary character events.
 IME_Event :: struct {
-	kind:   IME_Event_Kind,
-	text:   []byte,
-	caret:  int,
-	err:    errs.Error,
+	kind:      IME_Event_Kind,
+	text:      []byte,
+	caret:     int,
+	modifiers: input.Modifiers,
+	err:       errs.Error,
 }
 
 IME_Service :: struct {

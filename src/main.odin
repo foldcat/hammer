@@ -400,7 +400,7 @@ handle_product_ime :: proc(user: rawptr, event: platform.IME_Event) {
 		ime.done(&state.preedit)
 		log_input_event(input.Preedit{})
 	case .Commit:
-		editor_consume_input(input.Commit_Text{text = string(event.text)})
+		editor_consume_input(input.Commit_Text{text = string(event.text), modifiers = event.modifiers})
 	case .Error:
 	}
 }
@@ -418,18 +418,25 @@ sokol_dpi_scale :: proc(user: rawptr) -> f32 {
 }
 
 // window_metrics fetches physical metrics and refreshes the validated DPI
-// state. Invalid updates retain the last valid scale (initially 1.0).
+// state. Invalid updates retain the last valid scale (initially 1.0). A nonzero
+// zoom_points applies a requested runtime font size without changing the config.
 window_metrics :: proc(
 	what: string,
 	level := log.Level.Info,
 	log_always := true,
+	zoom_points := f32(0),
 ) -> (
 	physical: coords.Physical_Size,
 	logical: coords.Logical_Size,
 	scale: f32,
 ) {
 	previous_scale := state.dpi.scale
+	previous_points := state.dpi.points
 	previous_glyph_size := state.dpi.glyph_pixel_size
+	requested_points := previous_points
+	if zoom_points != 0 {
+		requested_points = zoom_points
+	}
 	width, height := services.window.framebuffer_size(services.user)
 	scale = services.window.dpi_scale(services.user)
 	physical = coords.Physical_Size{f32(width), f32(height)}
@@ -444,7 +451,7 @@ window_metrics :: proc(
 	} else {
 		logical = converted
 	}
-	_, dpi_err := dpi.update(&state.dpi, cfg.Font_Size_Points, scale)
+	_, dpi_err := dpi.update(&state.dpi, requested_points, scale)
 	if !errs.ok(dpi_err) {
 		if log_always {
 			log.errorf("dpi: %v (retaining the last valid state)", errs.describe(dpi_err))
@@ -461,9 +468,18 @@ window_metrics :: proc(
 			state.dpi.physical_pixel_size,
 			state.dpi.generation,
 		)
-		if state.dpi.glyph_pixel_size != previous_glyph_size {
-			invalidate_glyph_cache(scale)
-		}
+	}
+	if state.dpi.points != previous_points {
+		log.infof(
+			"zoom: font %.1fpt -> %.1fpt, glyph %d physical px, generation=%d",
+			previous_points,
+			state.dpi.points,
+			state.dpi.glyph_pixel_size,
+			state.dpi.generation,
+		)
+	}
+	if state.dpi.glyph_pixel_size != previous_glyph_size {
+		invalidate_glyph_cache(scale)
 	}
 	if log_always || scale != previous_scale {
 		log.logf(
@@ -479,6 +495,14 @@ window_metrics :: proc(
 		)
 	}
 	return
+}
+
+apply_text_zoom :: proc(action: dpi.Zoom_Action) {
+	next, changed := dpi.next_zoom_points(state.dpi.points, cfg.Font_Size_Points, action)
+	if !changed {
+		return
+	}
+	window_metrics("text zoom", log.Level.Info, true, next)
 }
 
 // ---- Input normalization (M01.04) --------------------------------------
@@ -736,7 +760,7 @@ normalize_sapp_event :: proc(ev: ^sapp.Event) -> (input.Event, bool) {
 		return input.Scroll {
 			pos = pos,
 			dx = ev.scroll_x,
-			dy = ev.scroll_y,
+			dy = -ev.scroll_y, // Sokol is up-positive; normalized Scroll is down-positive.
 			modifiers = sokol_modifiers(ev.modifiers),
 		}, true
 	}
@@ -849,8 +873,9 @@ main :: proc() {
 	state.test_panic = env_flag("HAMMER_TEST_PANIC")
 	state.probe_frame = probe_frame_from_env()
 	state.test_dpi_count = test_dpi_scales_from_env()
-	state.dpi.scale = 1.0 // replaced by window_metrics before any input event
 	cfg = generated.resolved
+	state.dpi.scale = 1.0 // replaced by window_metrics before any input event
+	state.dpi.points = cfg.Font_Size_Points
 
 	log.infof("hammer starting (pid=%d, os=%v, arch=%v)", os.get_pid(), ODIN_OS, ODIN_ARCH)
 

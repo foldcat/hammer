@@ -122,3 +122,43 @@ test_mixed_dpi_round_trip_and_invalid_monitor_data :: proc(t: ^testing.T) {
 	_, invalid := dpi.physical_dpi(1920, 0)
 	testing.expect(t, !invalid)
 }
+
+
+@(test)
+test_zoom_steps_reset_bounds_and_invalid_input :: proc(t: ^testing.T) {
+	next, changed := dpi.next_zoom_points(12, 12, .In)
+	testing.expect(t, changed)
+	expect_near(t, next, 13)
+	next, changed = dpi.next_zoom_points(next, 12, .Out)
+	testing.expect(t, changed)
+	expect_near(t, next, 12)
+	next, changed = dpi.next_zoom_points(18, 12, .Reset)
+	testing.expect(t, changed)
+	expect_near(t, next, 12)
+	_, changed = dpi.next_zoom_points(12, 12, .Reset)
+	testing.expect(t, !changed)
+
+	next, changed = dpi.next_zoom_points(dpi.MAX_ZOOM_POINTS, 12, .In)
+	testing.expect(t, !changed)
+	expect_near(t, next, dpi.MAX_ZOOM_POINTS)
+	next, changed = dpi.next_zoom_points(dpi.MIN_ZOOM_POINTS, 12, .Out)
+	testing.expect(t, !changed)
+	expect_near(t, next, dpi.MIN_ZOOM_POINTS)
+	next, changed = dpi.next_zoom_points(71.5, 12, .In)
+	testing.expect(t, changed)
+	expect_near(t, next, dpi.MAX_ZOOM_POINTS)
+	next, changed = dpi.next_zoom_points(4.5, 12, .Out)
+	testing.expect(t, changed)
+	expect_near(t, next, dpi.MIN_ZOOM_POINTS)
+
+	invalid := []f32{0, 3.9, 72.1, math.inf_f32(1), math.inf_f32(1) - math.inf_f32(1)}
+	for value in invalid {
+		next, changed = dpi.next_zoom_points(value, 12, .In)
+		testing.expect(t, !changed)
+		testing.expect(t, next == value || math.is_nan(next) && math.is_nan(value))
+		next, changed = dpi.next_zoom_points(12, value, .Reset)
+		testing.expect(t, !changed && next == 12)
+	}
+	next, changed = dpi.next_zoom_points(12, 12, dpi.Zoom_Action(99))
+	testing.expect(t, !changed && next == 12)
+}

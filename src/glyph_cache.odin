@@ -45,12 +45,12 @@ invalidate_glyph_cache :: proc(scale: f32) {
 		glyph_cache_destroy()
 		return
 	}
-	log.info("dpi: glyph cache invalidated and rebuilt")
+	log.info("font: glyph cache invalidated and rebuilt")
 	log_glyph_cache()
 }
 
 glyph_pixel_size :: proc(scale: f32) -> (u32, bool) {
-	pixel_size_f, size_err := coords.points_to_physical_px(cfg.Font_Size_Points, scale)
+	pixel_size_f, size_err := coords.points_to_physical_px(state.dpi.points, scale)
 	if !errs.ok(size_err) {
 		log.errorf("glyph-cache: %v", errs.describe(size_err))
 		errs.destroy(&size_err)

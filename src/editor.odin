@@ -108,6 +108,15 @@ editor_consume_input :: proc(event: input.Event) {
 	case keybind.Outdent:
 		editor.typing_group = 0
 		editor_report(editing.indent(&editor.doc, &editor.selection, .Outdent, {style = .Tabs}))
+	case keybind.Zoom_In:
+		editor.typing_group = 0
+		apply_text_zoom(.In)
+	case keybind.Zoom_Out:
+		editor.typing_group = 0
+		apply_text_zoom(.Out)
+	case keybind.Zoom_Reset:
+		editor.typing_group = 0
+		apply_text_zoom(.Reset)
 	case keybind.Undo:
 		editor.typing_group = 0
 		selection, err := txn.doc_undo(&editor.doc)

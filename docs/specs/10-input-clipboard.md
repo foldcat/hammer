@@ -94,8 +94,18 @@ Use keydown actions for shortcuts and text-input events for inserted text.
 | Shift+Home/End     | Extend to line boundary     |
 | Tab with selection | Indent selected lines       |
 | Shift+Tab          | Outdent                     |
+| Ctrl+= / Ctrl++    | Increase text zoom by 1 pt  |
+| Ctrl+-             | Decrease text zoom by 1 pt  |
+| Ctrl+0             | Reset configured text size  |
+| Ctrl+wheel up/down | Zoom in/out by 1 pt         |
 
 Handle AltGr correctly. A Ctrl+Alt key combination used to produce text must not trigger an unrelated command.
+Zoom also has keypad plus/minus/zero bindings. It is clamped to 4–72 pt and resets
+to `font_size_points`; it does not modify the compiled configuration or document.
+Only exact Ctrl+vertical-wheel events zoom, and normalized wheel deltas are
+positive down, so wheel-up zooms in. Plain or modified non-Ctrl wheel input is not
+a zoom action. Rendering, hit-testing, and the tag/body layout all use the same
+effective runtime point size.
 
 ## 10.5 Indentation behavior
 

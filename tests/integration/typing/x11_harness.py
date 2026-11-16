@@ -609,6 +609,104 @@ def main() -> int:
                 raise HarnessFailure("undoing the indentation source did not restore the initial pixels")
             print("PASS: one Ctrl+Z undoes the inherited newline as a single edit")
 
+            zoom_text = "abc\ndef"
+            for keysym in (ord("a"), ord("b"), ord("c"), 0xFF0D, ord("d"), ord("e"), ord("f")):
+                x11.tap(keysym)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("a"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            zoom_base = x11.pixels(window)
+            if x11.selection_pixels(window) < 20:
+                raise HarnessFailure("zoom setup did not select the source text")
+
+            x11.key(0xFFE3, True)
+            x11.tap(ord("="))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            zoomed_in = x11.pixels(window)
+            if zoomed_in == zoom_base:
+                raise HarnessFailure("Ctrl+= did not change text layout pixels")
+            zoom_selection_pixels = x11.selection_pixels(window)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("c"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            zoom_selection_path = sandbox / "zoom-selection.txt"
+            read_external_clipboard(clipboard_peer, zoom_selection_path, args.timeout)
+            if zoom_selection_path.read_bytes() != zoom_text.encode("utf-8"):
+                raise HarnessFailure("zoom changed the selected document bytes")
+            if zoom_selection_pixels < 20:
+                raise HarnessFailure(f"zoom retained selected bytes but only {zoom_selection_pixels} selection highlight pixels")
+
+            x11.key(0xFFE3, True)
+            x11.tap(ord("-"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            if x11.pixels(window) != zoom_base:
+                raise HarnessFailure("Ctrl+- did not reverse Ctrl+= zoom")
+            x11.key(0xFFE3, True)
+            x11.key(0xFFE1, True)
+            x11.tap(ord("="))
+            x11.key(0xFFE1, False)
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            if x11.pixels(window) != zoomed_in:
+                raise HarnessFailure("Ctrl+Shift+= did not zoom in like Ctrl++")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("0"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            if x11.pixels(window) != zoom_base:
+                raise HarnessFailure("Ctrl+0 did not restore the configured font size")
+
+            x11.button(4, True)
+            x11.button(4, False)
+            time.sleep(0.2)
+            if x11.pixels(window) != zoom_base:
+                raise HarnessFailure("unmodified mouse wheel changed zoom")
+            x11.key(0xFFE3, True)
+            x11.button(4, True)
+            x11.button(4, False)
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            if x11.pixels(window) != zoomed_in:
+                raise HarnessFailure("Ctrl+wheel up did not zoom in")
+            x11.key(0xFFE3, True)
+            x11.button(5, True)
+            x11.button(5, False)
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            if x11.pixels(window) != zoom_base:
+                raise HarnessFailure("Ctrl+wheel down did not zoom out")
+            print("PASS: zoom keybinds and Ctrl+wheel reflow text and preserve selection bytes")
+
+            x11.tap(0xFF53)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("="))
+            x11.key(0xFFE3, False)
+            x11.tap(ord("x"))
+            x11.key(0xFFE3, True)
+            x11.tap(ord("a"))
+            x11.tap(ord("c"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            zoom_caret_path = sandbox / "zoom-caret.txt"
+            read_external_clipboard(clipboard_peer, zoom_caret_path, args.timeout)
+            if zoom_caret_path.read_bytes() != b"abc\ndefx":
+                raise HarnessFailure("zoom did not preserve the collapsed caret position")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("0"))
+            x11.key(0xFFE3, False)
+            for _ in range(2):
+                x11.key(0xFFE3, True)
+                x11.tap(ord("z"))
+                x11.key(0xFFE3, False)
+                time.sleep(0.2)
+            if x11.pixels(window) != initial:
+                raise HarnessFailure("undoing zoom test text did not restore the initial document")
+            print("PASS: zoom preserves the collapsed caret and never edits buffer content")
+
             x11.tap(ord("x"))
             time.sleep(0.2)
             x11.tap(0xFF1B)
@@ -624,6 +722,19 @@ def main() -> int:
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)
             process = None
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        page_counts = [
+            int(line.split("glyph-cache: pages=", 1)[1].split(None, 1)[0])
+            for line in log_text.splitlines()
+            if "glyph-cache: pages=" in line
+        ]
+        zoom_page_counts = page_counts[1:]
+        if len(zoom_page_counts) < 8 or len(set(zoom_page_counts)) != 1:
+            raise HarnessFailure(f"zoom accumulated glyph atlas pages: {page_counts}")
+        rebuilds = log_text.count("font: glyph cache invalidated and rebuilt")
+        if rebuilds < 8:
+            raise HarnessFailure(f"expected at least 8 zoom cache rebuilds, got {rebuilds}")
+        print(f"PASS: {rebuilds} zoom rebuilds reused {zoom_page_counts[0]} glyph atlas page(s)")
         succeeded = True
         print("PASS: all X11 product typing checks")
         return 0

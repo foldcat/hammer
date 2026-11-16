@@ -131,3 +131,36 @@ select_monitor :: proc(window: Rect, monitors: []Monitor) -> int {
 	}
 	return best
 }
+
+
+MIN_ZOOM_POINTS :: f32(4)
+MAX_ZOOM_POINTS :: f32(72)
+ZOOM_STEP_POINTS :: f32(1)
+
+Zoom_Action :: enum u8 {
+	In,
+	Out,
+	Reset,
+}
+
+next_zoom_points :: proc(current, baseline: f32, action: Zoom_Action) -> (f32, bool) {
+	valid_points :: proc(points: f32) -> bool {
+		return points >= MIN_ZOOM_POINTS && points <= MAX_ZOOM_POINTS &&
+			!math.is_nan(points) && !math.is_inf(points)
+	}
+	if !valid_points(current) || !valid_points(baseline) {
+		return current, false
+	}
+	next := current
+	switch action {
+	case .In:
+		next = min(MAX_ZOOM_POINTS, current + ZOOM_STEP_POINTS)
+	case .Out:
+		next = max(MIN_ZOOM_POINTS, current - ZOOM_STEP_POINTS)
+	case .Reset:
+		next = baseline
+	case:
+		return current, false
+	}
+	return next, next != current
+}

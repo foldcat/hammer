@@ -1,5 +1,6 @@
 package keybind_test
 
+import "core:math"
 import "core:testing"
 
 import editing "hammer:core/editing"
@@ -92,4 +93,25 @@ test_non_input_events_are_ignored :: proc(t: ^testing.T) {
 	expect_event_unbound(t, input.Pointer_Down{button = .Left})
 	expect_event_unbound(t, input.Pointer_Move{})
 	expect_event_unbound(t, input.Scroll{dy = 1})
+}
+
+
+@(test)
+test_ctrl_scroll_zoom_requires_exact_modifiers_and_finite_delta :: proc(t: ^testing.T) {
+	expect_event_action(t, input.Scroll{dy = -1, modifiers = {.Ctrl}}, keybind.Zoom_In{})
+	expect_event_action(t, input.Scroll{dy = 1, modifiers = {.Ctrl}}, keybind.Zoom_Out{})
+	expect_event_action(t, input.Scroll{dy = -0.01, modifiers = {.Ctrl}}, keybind.Zoom_In{})
+	unbound := []input.Scroll {
+		{dy = -1},
+		{dy = 0, modifiers = {.Ctrl}},
+		{dx = 1, dy = 0, modifiers = {.Ctrl}},
+		{dy = -1, modifiers = {.Ctrl, .Shift}},
+		{dy = -1, modifiers = {.Ctrl, .Alt}},
+		{dy = -1, modifiers = {.Ctrl, .Super}},
+		{dy = math.inf_f32(1), modifiers = {.Ctrl}},
+		{dy = math.inf_f32(1) - math.inf_f32(1), modifiers = {.Ctrl}},
+	}
+	for event in unbound {
+		expect_event_unbound(t, event)
+	}
 }

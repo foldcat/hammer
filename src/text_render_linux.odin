@@ -166,7 +166,7 @@ text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads
 		return
 	}
 
-	font_logical := coords.points_to_logical_px(cfg.Font_Size_Points)
+	font_logical := coords.points_to_logical_px(state.dpi.points)
 	line_height := font_logical * cfg.Line_Height
 	if line_height <= 0 {
 		return

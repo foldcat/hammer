@@ -10,6 +10,7 @@ import "core:unicode/utf8"
 import xlib "vendor:x11/xlib"
 
 import errs "../../core/errs"
+import input "../../core/input"
 import platform "../../platform"
 
 DEFAULT_MAX_TEXT_BYTES :: 64 * 1024
@@ -281,6 +282,7 @@ filter_event :: proc(state: ^State, event: ^xlib.XEvent) -> i32 {
 }
 
 lookup_commit :: proc(state: ^State, event: ^xlib.XKeyEvent) {
+	modifiers := commit_modifiers(event)
 	buffer: [LOOKUP_STACK_BYTES]u8
 	keysym: xlib.KeySym
 	status: i32
@@ -298,16 +300,33 @@ lookup_commit :: proc(state: ^State, event: ^xlib.XKeyEvent) {
 		defer delete(owned, state.options.allocator)
 		n = mbLookupString(state.ic, event, &owned[0], i32(len(owned)), &keysym, &status)
 		if n > 0 && int(n) <= len(owned) {
-			emit_commit(state, owned[:int(n)])
+			emit_commit(state, owned[:int(n)], modifiers)
 		}
 		return
 	}
 	if n > 0 && int(n) <= len(buffer) {
-		emit_commit(state, buffer[:int(n)])
+		emit_commit(state, buffer[:int(n)], modifiers)
 	}
 }
 
-emit_commit :: proc(state: ^State, text: []byte) {
+commit_modifiers :: proc(event: ^xlib.XKeyEvent) -> input.Modifiers {
+	modifiers: input.Modifiers
+	if .ShiftMask in event.state {
+		modifiers += {.Shift}
+	}
+	if .ControlMask in event.state {
+		modifiers += {.Ctrl}
+	}
+	if .Mod1Mask in event.state {
+		modifiers += {.Alt}
+	}
+	if .Mod4Mask in event.state {
+		modifiers += {.Super}
+	}
+	return modifiers
+}
+
+emit_commit :: proc(state: ^State, text: []byte, modifiers: input.Modifiers) {
 	if len(text) > state.options.max_bytes {
 		report(state, errs.new(.Resource_Limit, "ime: X11 commit exceeds the text budget", allocator = state.options.allocator))
 		return
@@ -316,5 +335,5 @@ emit_commit :: proc(state: ^State, text: []byte) {
 		report(state, errs.new(.Invalid_Input, "ime: X11 commit is not valid UTF-8", allocator = state.options.allocator))
 		return
 	}
-	notify(state, {kind = .Commit, text = text})
+	notify(state, {kind = .Commit, text = text, modifiers = modifiers})
 }

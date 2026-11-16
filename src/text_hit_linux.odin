@@ -39,7 +39,7 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool) -> (Tex
 	if !size_ok || ft.FT_Set_Pixel_Sizes(ft.Face(selected.native), 0, pixel_size) != 0 {
 		return {}, false
 	}
-	line_height := coords.points_to_logical_px(cfg.Font_Size_Points) * cfg.Line_Height
+	line_height := coords.points_to_logical_px(state.dpi.points) * cfg.Line_Height
 	if line_height <= 0 {
 		return {}, false
 	}

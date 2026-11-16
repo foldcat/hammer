@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M06.14 Implement text zoom keybinds (control + plus/minus/zero; control + mouse wheel)
+## Current task: M06.15 Implement basic file open via `hammer filename` and save keybind (control + s)

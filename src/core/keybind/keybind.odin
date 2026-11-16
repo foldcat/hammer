@@ -1,6 +1,8 @@
 // Package keybind resolves normalized input facts into semantic editor actions
-// (M06.02–M06.07). It separates committed text from commands but does not execute actions.
+// (M06.02–M06.14). It separates committed text from commands but does not execute actions.
 package keybind
+
+import "core:math"
 
 import editing "../editing"
 import input "../input"
@@ -20,10 +22,13 @@ Indent :: struct {}
 Outdent :: struct {}
 Execute_Text :: struct {}
 Look_Text :: struct {}
+Zoom_In :: struct {}
+Zoom_Out :: struct {}
+Zoom_Reset :: struct {}
 
-// Action is the shared result of keyboard resolution. Movement/select-all
-// values can be passed directly to editing.perform; the remaining actions are
-// consumed by their owning subsystems.
+// Action is the shared result of keyboard and zoom-scroll resolution.
+// Movement/select-all values can be passed directly to editing.perform; the
+// remaining actions are consumed by their owning subsystems.
 Action :: union {
 	editing.Move,
 	editing.Select_All,
@@ -42,6 +47,9 @@ Action :: union {
 	Outdent,
 	Execute_Text,
 	Look_Text,
+	Zoom_In,
+	Zoom_Out,
+	Zoom_Reset,
 	editing.Insert_Text,
 	editing.Commit_Text,
 	editing.Delete_Backward,
@@ -73,6 +81,13 @@ DEFAULT_COMMAND_BINDINGS :: []Command_Binding {
 	{key = .Q, modifiers = {.Ctrl}, action = Request_Quit{}},
 	{key = .Enter, modifiers = {.Ctrl}, action = Execute_Text{}},
 	{key = .Enter, modifiers = {.Alt}, action = Look_Text{}},
+	{key = .Equal, modifiers = {.Ctrl}, action = Zoom_In{}},
+	{key = .Equal, modifiers = {.Ctrl, .Shift}, action = Zoom_In{}},
+	{key = .KP_Add, modifiers = {.Ctrl}, action = Zoom_In{}},
+	{key = .Minus, modifiers = {.Ctrl}, action = Zoom_Out{}},
+	{key = .KP_Subtract, modifiers = {.Ctrl}, action = Zoom_Out{}},
+	{key = .D0, modifiers = {.Ctrl}, action = Zoom_Reset{}},
+	{key = .KP_0, modifiers = {.Ctrl}, action = Zoom_Reset{}},
 }
 
 // resolve maps one normalized key-down event to an action. Tab always resolves
@@ -145,11 +160,10 @@ resolve_movement :: proc(key: input.Key, modifiers: input.Modifiers) -> (Action,
 }
 
 
-// resolve_event separates committed text from key commands. Printable Text and
-// IME commits are inserted only with no command modifiers or with Ctrl+Alt
-// (AltGr). Control scalars are handled as key-down edits instead, preventing
-// Enter or Tab from being applied once as a command and again as text. Other
-// event kinds are ignored.
+// resolve_event separates committed text from key commands and Ctrl+wheel zoom.
+// Printable Text and IME commits are inserted only with no command modifiers or
+// with Ctrl+Alt (AltGr). Control scalars are handled as key-down edits instead,
+// preventing Enter or Tab from being applied once as a command and again as text.
 resolve_event :: proc(event: input.Event) -> (Action, bool) {
 	#partial switch e in event {
 	case input.Key_Down:
@@ -174,6 +188,13 @@ resolve_event :: proc(event: input.Event) -> (Action, bool) {
 		case .Enter, .KP_Enter:
 			return editing.Insert_Text{text = '\n'}, true
 		case:
+		}
+	case input.Scroll:
+		if e.modifiers == {.Ctrl} && e.dy != 0 && !math.is_nan(e.dy) && !math.is_inf(e.dy) {
+			if e.dy < 0 {
+				return Zoom_In{}, true
+			}
+			return Zoom_Out{}, true
 		}
 	case input.Text:
 		if e.text < 0x20 || e.text >= 0x7f && e.text <= 0x9f {
