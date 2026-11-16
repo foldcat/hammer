@@ -137,7 +137,7 @@ test_unbound_and_exact_modifier_matching :: proc(t: ^testing.T) {
 		{key = .Enter, modifiers = {.Shift}},
 		{key = .A},
 		{key = .B, modifiers = {.Ctrl}},
-		{key = .C, modifiers = {.Ctrl, .Shift}},
+		{key = .X, modifiers = {.Ctrl, .Shift}},
 		{key = .C, modifiers = {.Alt}},
 		{key = .C, modifiers = {.Super}},
 		{key = .Left, modifiers = {.Alt}},

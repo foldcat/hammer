@@ -20,6 +20,7 @@ Editor :: struct {
 	next_group:             u64,
 	next_clipboard_request: u64,
 	delayed_paste:          editing.Delayed_Paste,
+	delayed_cut:            editing.Delayed_Cut,
 	mouse_selecting:        bool,
 	close_guard:            lifecycle.Close_Guard,
 }
@@ -39,6 +40,7 @@ editor_init :: proc() -> errs.Error {
 
 editor_destroy :: proc() {
 	editor_cancel_delayed_paste()
+	editor_cancel_delayed_cut()
 	lifecycle.close_guard_destroy(&editor.close_guard)
 	txn.doc_destroy(&editor.doc)
 	editor = {}
@@ -131,11 +133,13 @@ editor_consume_input :: proc(event: input.Event) {
 	case keybind.Copy:
 		editor.typing_group = 0
 		editor_copy_selection()
+	case keybind.Cut:
+		editor.typing_group = 0
+		editor_cut_selection()
 	case keybind.Paste:
 		editor.typing_group = 0
 		editor_begin_paste()
-	case keybind.Cut, keybind.Save, keybind.Save_As, keybind.Find, keybind.Open_Finder,
-		keybind.Execute_Text, keybind.Look_Text:
+	case keybind.Save, keybind.Save_As, keybind.Find, keybind.Open_Finder, keybind.Execute_Text, keybind.Look_Text:
 		log.debugf("edit: action %T is not connected in this milestone", action)
 	case keybind.Request_Quit, keybind.Close_Window:
 	}
@@ -151,24 +155,56 @@ editor_copy_selection :: proc() {
 		editor_report(errs.new(.Unsupported, "clipboard: native service is unavailable"))
 		return
 	}
-	if range.end - range.start > platform.DEFAULT_MAX_CLIPBOARD_BYTES {
-		editor_report(errs.new(.Resource_Limit, "clipboard: selection exceeds the transfer budget"))
+	request_id := editor_next_clipboard_request_id()
+	editor_report(editor_start_clipboard_write(range, request_id))
+}
+
+editor_cut_selection :: proc() {
+	editor_poll_clipboard()
+	range := editing.selection_range(editor.selection)
+	if range.start == range.end {
 		return
 	}
-	data, err := rope.tree_read_all(&editor.doc.tree, range, context.temp_allocator)
-	if !errs.ok(err) {
+	if !editor_clipboard_available() {
+		editor_report(errs.new(.Unsupported, "clipboard: native service is unavailable"))
+		return
+	}
+	request_id := editor_next_clipboard_request_id()
+	if err := editing.delayed_cut_begin(
+		&editor.delayed_cut,
+		&editor.doc,
+		&editor.selection,
+		1,
+		1,
+		u64(request_id),
+	); !errs.ok(err) {
 		editor_report(err)
 		return
 	}
-	defer delete(data, context.temp_allocator)
+	if err := editor_start_clipboard_write(range, request_id); !errs.ok(err) {
+		editor_cancel_delayed_cut()
+		editor_report(err)
+	}
+}
 
-	request_id := editor_next_clipboard_request_id()
-	editor_report(services.clipboard.start(services.user, {
+editor_start_clipboard_write :: proc(
+	range: rope.Byte_Range,
+	request_id: platform.Clipboard_Request_ID,
+) -> errs.Error {
+	if range.end - range.start > platform.DEFAULT_MAX_CLIPBOARD_BYTES {
+		return errs.new(.Resource_Limit, "clipboard: selection exceeds the transfer budget")
+	}
+	data, err := rope.tree_read_all(&editor.doc.tree, range, context.temp_allocator)
+	if !errs.ok(err) {
+		return err
+	}
+	defer delete(data, context.temp_allocator)
+	return services.clipboard.start(services.user, {
 		id = request_id,
 		selection = .Clipboard,
 		operation = .Write,
 		data = data,
-	}))
+	})
 }
 
 editor_begin_paste :: proc() {
@@ -228,6 +264,23 @@ editor_poll_clipboard :: proc() {
 				result.data,
 			))
 		}
+	} else if result.operation == .Write {
+		matches := editor.delayed_cut.pending && editor.delayed_cut.target.request_id == u64(result.id)
+		if !errs.ok(result.err) {
+			if matches {
+				editor_cancel_delayed_cut()
+			}
+		} else if matches {
+			editor.typing_group = 0
+			editor_report(editing.delayed_cut_apply(
+				&editor.delayed_cut,
+				&editor.doc,
+				&editor.selection,
+				1,
+				1,
+				u64(result.id),
+			))
+		}
 	}
 	if !errs.ok(result.err) {
 		err := result.err
@@ -245,6 +298,14 @@ editor_cancel_delayed_paste :: proc() {
 		services.clipboard.cancel(services.user, request_id)
 	}
 	editor_report(editing.delayed_paste_cancel(&editor.delayed_paste, u64(request_id)))
+}
+
+editor_cancel_delayed_cut :: proc() {
+	if !editor.delayed_cut.pending {
+		return
+	}
+	request_id := editor.delayed_cut.target.request_id
+	editor_report(editing.delayed_cut_cancel(&editor.delayed_cut, request_id))
 }
 
 editor_next_clipboard_request_id :: proc() -> platform.Clipboard_Request_ID {

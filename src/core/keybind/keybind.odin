@@ -57,8 +57,10 @@ Command_Binding :: struct {
 
 DEFAULT_COMMAND_BINDINGS :: []Command_Binding {
 	{key = .C, modifiers = {.Ctrl}, action = Copy{}},
+	{key = .C, modifiers = {.Ctrl, .Shift}, action = Copy{}},
 	{key = .X, modifiers = {.Ctrl}, action = Cut{}},
 	{key = .V, modifiers = {.Ctrl}, action = Paste{}},
+	{key = .V, modifiers = {.Ctrl, .Shift}, action = Paste{}},
 	{key = .Z, modifiers = {.Ctrl}, action = Undo{}},
 	{key = .Z, modifiers = {.Ctrl, .Shift}, action = Redo{}},
 	{key = .Y, modifiers = {.Ctrl}, action = Redo{}},

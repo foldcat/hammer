@@ -504,6 +504,76 @@ def main() -> int:
             if x11.pixels(window) != initial:
                 raise HarnessFailure("undoing the paste and copied source text did not restore the initial pixels")
 
+            cut_text = "cut-text"
+            for character in cut_text:
+                x11.tap(ord(character))
+            time.sleep(0.3)
+            cut_pixels = x11.pixels(window)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("a"))
+            x11.tap(ord("x"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.5)
+            cut_path = sandbox / "product-cut.txt"
+            read_external_clipboard(clipboard_peer, cut_path, args.timeout)
+            if cut_path.read_bytes() != cut_text.encode("utf-8"):
+                raise HarnessFailure(f"Ctrl+X published the wrong selection; log: {log_path}")
+            if x11.pixels(window) != initial:
+                raise HarnessFailure(f"Ctrl+X did not remove the selected text; log: {log_path}")
+            print("PASS: Ctrl+X publishes and removes the selection through one transaction")
+
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            if x11.pixels(window) != cut_pixels:
+                raise HarnessFailure("one undo did not restore the cut text")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("a"))
+            x11.tap(ord("x"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.5)
+            if x11.pixels(window) != initial:
+                raise HarnessFailure("the second Ctrl+X did not remove the restored selection")
+            print("PASS: one Ctrl+Z undoes cut and restores its complete source text")
+
+            x11.key(0xFFE3, True)
+            x11.key(0xFFE1, True)
+            x11.tap(ord("v"))
+            x11.key(0xFFE1, False)
+            x11.key(0xFFE3, False)
+            time.sleep(0.5)
+            if x11.pixels(window) != cut_pixels:
+                raise HarnessFailure(f"Ctrl+Shift+V did not paste the cut text; log: {log_path}")
+            print("PASS: Ctrl+Shift+V aliases native clipboard paste")
+
+            x11.key(0xFFE3, True)
+            x11.tap(ord("a"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.2)
+            alias_copy_pixels = x11.pixels(window)
+            x11.key(0xFFE3, True)
+            x11.key(0xFFE1, True)
+            x11.tap(ord("c"))
+            x11.key(0xFFE1, False)
+            x11.key(0xFFE3, False)
+            time.sleep(0.5)
+            if x11.pixels(window) != alias_copy_pixels:
+                raise HarnessFailure("Ctrl+Shift+C modified the document or selection")
+            alias_copy_path = sandbox / "product-shift-copy.txt"
+            read_external_clipboard(clipboard_peer, alias_copy_path, args.timeout)
+            if alias_copy_path.read_bytes() != cut_text.encode("utf-8"):
+                raise HarnessFailure(f"Ctrl+Shift+C published the wrong selection; log: {log_path}")
+            print("PASS: Ctrl+Shift+C aliases native clipboard copy without editing text")
+
+            for _ in range(3):
+                x11.key(0xFFE3, True)
+                x11.tap(ord("z"))
+                x11.key(0xFFE3, False)
+                time.sleep(0.2)
+            if x11.pixels(window) != initial:
+                raise HarnessFailure("undoing alias paste, cut, and source typing did not restore the initial pixels")
+
             x11.tap(ord("x"))
             time.sleep(0.2)
             x11.tap(0xFF1B)
