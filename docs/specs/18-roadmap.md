@@ -191,6 +191,8 @@ M04.08  Add kill-at-random-point recovery tests.
 - Glyph cache.
 - Visible-line rendering.
 - Correct hit testing.
+- Optional ligatures.
+- Color emoji sequences.
 
 ### Tasks
 
@@ -203,6 +205,8 @@ M05.05  Implement selection/caret hit testing from shaped runs.
 M05.06  Implement DPI change invalidation.
 M05.07  Implement huge-line bounded rendering.
 M05.08  Add mixed-script/DPI visual fixtures.
+M05.09  Implement native ligature coverage and configuration.
+M05.10  Implement color emoji and full emoji-sequence rendering.
 ```
 
 ### Acceptance
@@ -211,6 +215,8 @@ M05.08  Add mixed-script/DPI visual fixtures.
 - Selection geometry matches displayed text.
 - Mixed-DPI movement preserves logical layout.
 - Huge lines do not synchronously shape in full.
+- Ligatures render and measure as single visual units when enabled and fall back to component glyphs when disabled.
+- Color emoji render with correct metrics and grapheme boundaries.
 
 ---
 
@@ -227,6 +233,7 @@ M05.08  Add mixed-script/DPI visual fixtures.
 - Indent/outdent.
 - Newline indentation inheritance.
 - IME support.
+- Text zoom.
 
 ### Tasks
 
@@ -244,6 +251,7 @@ M06.10  Implement mouse selection of text.
 M06.11  Implement copy and paste keybind (control + c / control + v).
 M06.12  Implement newline indentation inheritance (tab level kept on Enter).
 M06.13  Implement parenthesis/bracket/quote autopair policy.
+M06.14  Implement text zoom keybinds (control + plus/minus/zero; control + mouse wheel).
 ```
 
 ### Acceptance
@@ -256,6 +264,7 @@ M06.13  Implement parenthesis/bracket/quote autopair policy.
 - Clipboard failure is visible, not replaced by stale content.
 - AltGr and IME do not trigger erroneous shortcuts.
 - Indentation is one undo step.
+- Zoom reflows layout and preserves caret/selection without leaking a new atlas per level.
 
 ---
 
