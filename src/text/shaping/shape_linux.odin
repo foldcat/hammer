@@ -11,7 +11,6 @@ import hb "../harfbuzz"
 import icu "../icu"
 
 MAX_SHAPE_BYTES :: 1 << 20
-MAX_FONTS :: 8
 
 Byte_Range :: struct {
 	start: int,
@@ -414,55 +413,81 @@ build_clusters :: proc(run: ^Run, segment: Segment, direction: Direction, graphe
 	if first == last {
 		return errs.new(.Internal, "shaping found no graphemes for a nonempty run", allocator = allocator)
 	}
-	run.clusters = make([dynamic]Cluster, 0, last - first, allocator)
-
-	step := 1
-	grapheme_index := first
-	if direction == .RTL {
-		step = -1
-		grapheme_index = last - 1
+	count := last - first
+	run.clusters = make([dynamic]Cluster, count, allocator)
+	for visual_index in 0 ..< count {
+		logical_index := first + visual_index
+		if direction == .RTL {
+			logical_index = last - 1 - visual_index
+		}
+		grapheme := graphemes[logical_index]
+		run.clusters[visual_index] = {source_start = grapheme.start, source_end = grapheme.end}
 	}
+
 	glyph_index := 0
+	minimum_group := 0
 	for glyph_index < len(run.glyphs) {
 		glyph_cluster := run.glyphs[glyph_index].cluster
-		group_x := run.glyphs[glyph_index].x - run.glyphs[glyph_index].x_offset
 		group_advance := i32(0)
 		for glyph_index < len(run.glyphs) && run.glyphs[glyph_index].cluster == glyph_cluster {
 			group_advance += run.glyphs[glyph_index].x_advance
 			glyph_index += 1
 		}
-		if grapheme_index < first || grapheme_index >= last || graphemes[grapheme_index].start != glyph_cluster {
-			return errs.new(.Internal, "HarfBuzz cluster does not match its grapheme", allocator = allocator)
+		if group_advance < 0 {
+			return errs.new(.Internal, "HarfBuzz returned a negative horizontal cluster advance", allocator = allocator)
 		}
-
-		group_grapheme := grapheme_index
-		grapheme_count := 0
-		for {
-			grapheme_count += 1
-			grapheme_index += step
-			if grapheme_index < first || grapheme_index >= last {
-				break
+		group_start, found := visual_grapheme_for_cluster(graphemes, first, last, direction, glyph_cluster)
+		if !found || group_start < minimum_group {
+			return errs.new(.Internal, "HarfBuzz cluster is outside or behind its grapheme sequence", allocator = allocator)
+		}
+		group_end := count - 1
+		if glyph_index < len(run.glyphs) {
+			next_group, next_found := visual_grapheme_for_cluster(graphemes, first, last, direction, run.glyphs[glyph_index].cluster)
+			if !next_found || next_group < group_start {
+				return errs.new(.Internal, "HarfBuzz returned non-monotonic grapheme clusters", allocator = allocator)
 			}
-			if glyph_index < len(run.glyphs) && graphemes[grapheme_index].start == run.glyphs[glyph_index].cluster {
-				break
+			group_end = next_group
+			if next_group > group_start {
+				group_end = next_group - 1
 			}
 		}
-		for local_index in 0 ..< grapheme_count {
-			grapheme := graphemes[group_grapheme + local_index * step]
-			x := group_x + i32(i64(group_advance) * i64(local_index) / i64(grapheme_count))
-			next_x := group_x + i32(i64(group_advance) * i64(local_index + 1) / i64(grapheme_count))
-			append(&run.clusters, Cluster{
-				source_start = grapheme.start,
-				source_end = grapheme.end,
-				x = x,
-				advance = next_x - x,
-			})
+		group_count := group_end - group_start + 1
+		for local_index in 0 ..< group_count {
+			start_share := i64(group_advance) * i64(local_index) / i64(group_count)
+			end_share := i64(group_advance) * i64(local_index + 1) / i64(group_count)
+			run.clusters[group_start + local_index].advance += i32(end_share - start_share)
 		}
+		minimum_group = group_start
 	}
-	if grapheme_index >= first && grapheme_index < last {
-		return errs.new(.Internal, "HarfBuzz omitted a grapheme cluster", allocator = allocator)
+
+	pen_x := run.glyphs[0].x - run.glyphs[0].x_offset
+	for index in 0 ..< count {
+		run.clusters[index].x = pen_x
+		pen_x += run.clusters[index].advance
+	}
+	if pen_x != run.glyphs[0].x - run.glyphs[0].x_offset + run.advance {
+		return errs.new(.Internal, "HarfBuzz grapheme advances do not match the shaped run", allocator = allocator)
 	}
 	return {}
+}
+
+visual_grapheme_for_cluster :: proc(graphemes: []Byte_Range, first, last: int, direction: Direction, cluster: int) -> (int, bool) {
+	low, high := first, last
+	for low < high {
+		middle := low + (high - low) / 2
+		grapheme := graphemes[middle]
+		if cluster < grapheme.start {
+			high = middle
+		} else if cluster >= grapheme.end {
+			low = middle + 1
+		} else {
+			if direction == .RTL {
+				return last - 1 - middle, true
+			}
+			return middle - first, true
+		}
+	}
+	return 0, false
 }
 
 diagnose_zero_glyph :: proc(result: ^Text, font_id: u64, cluster: int) {

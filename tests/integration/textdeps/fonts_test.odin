@@ -164,3 +164,51 @@ test_font_explicit_path_failure_is_not_substituted :: proc(t: ^testing.T) {
 	testing.expect(t, fonts.face(&set, .Body) == nil)
 	fonts.destroy(&set)
 }
+
+@(test)
+test_codepoint_font_fallback_and_misses_are_cached :: proc(t: ^testing.T) {
+	sandbox, sandbox_err := os.make_directory_temp("", "hammer-font-fallback-*", context.temp_allocator)
+	if !testing.expect(t, sandbox_err == nil) {
+		return
+	}
+	defer os.remove_all(sandbox)
+	config_path := write_fontconfig(t, sandbox)
+	if config_path == "" {
+		return
+	}
+	options := font_options(config_path)
+	options.roles[int(fonts.Role.Tag)] = {path = FIXTURE_HEBREW_FONT}
+	set: fonts.Set
+	if !expect_font_ok(t, fonts.init(&set, options)) {
+		return
+	}
+	defer fonts.destroy(&set)
+
+	hebrew, err := fonts.ensure_fallback(&set, 0x05d0)
+	if !expect_font_ok(t, err) || !testing.expect(t, hebrew != nil) {
+		return
+	}
+	testing.expect(t, hebrew.path == FIXTURE_HEBREW_FONT && hebrew.cache_id > fonts.ROLE_COUNT)
+	testing.expect(t, hebrew != fonts.face(&set, .Tag))
+	arabic, arabic_err := fonts.ensure_fallback(&set, 0x0645)
+	if !expect_font_ok(t, arabic_err) || !testing.expect(t, arabic != nil) {
+		return
+	}
+	testing.expect(t, arabic.path == FIXTURE_ARABIC_FONT && arabic.cache_id != hebrew.cache_id)
+	testing.expect(t, set.fallback_count == 2)
+
+	again, again_err := fonts.ensure_fallback(&set, 0x05d0)
+	expect_font_ok(t, again_err)
+	testing.expect(t, again == hebrew && set.fallback_count == 2)
+
+	missing, missing_err := fonts.ensure_fallback(&set, 0x0378)
+	expect_font_ok(t, missing_err)
+	testing.expect(t, missing == nil && set.miss_count == 1)
+	missing_again, missing_again_err := fonts.ensure_fallback(&set, 0x0378)
+	expect_font_ok(t, missing_again_err)
+	testing.expect(t, missing_again == nil && set.miss_count == 1)
+
+	invalid, invalid_err := fonts.ensure_fallback(&set, 0xd800)
+	expect_font_kind(t, invalid_err, .Invalid_Input)
+	testing.expect(t, invalid == nil)
+}

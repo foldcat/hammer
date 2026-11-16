@@ -40,25 +40,37 @@ init_fonts :: proc() {
 	}
 }
 
-product_shaping_fonts :: proc(storage: ^[2]shaping.Font) -> []shaping.Font {
+product_shaping_fonts :: proc(storage: ^[shaping.MAX_FONTS]shaping.Font) -> []shaping.Font {
 	body := fonts.face(&font_set, .Body)
 	if body == nil {
 		return nil
 	}
 	storage[0] = {
-		font_id = u64(fonts.Role.Body) + 1,
+		font_id = body.cache_id,
 		face_index = body.face_index,
 		native = body.native,
 	}
 	count := 1
 	emoji := fonts.face(&font_set, .Emoji)
 	if emoji != nil && emoji.native != body.native {
-		storage[1] = {
-			font_id = u64(fonts.Role.Emoji) + 1,
+		storage[count] = {
+			font_id = emoji.cache_id,
 			face_index = emoji.face_index,
 			native = emoji.native,
 		}
-		count = 2
+		count += 1
+	}
+	for index in 0 ..< font_set.fallback_count {
+		if count >= len(storage) {
+			break
+		}
+		fallback := &font_set.fallbacks[index]
+		storage[count] = {
+			font_id = fallback.cache_id,
+			face_index = fallback.face_index,
+			native = fallback.native,
+		}
+		count += 1
 	}
 	return storage[:count]
 }

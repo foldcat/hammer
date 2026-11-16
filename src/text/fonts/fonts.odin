@@ -1,5 +1,6 @@
 // Font discovery and role selection. A Set owns one native face per role,
-// each face's path/family strings, and the platform discovery resources.
+// bounded codepoint fallback faces, all face path/family strings, and the
+// platform discovery resources.
 // Required roles are initialized all-or-nothing; the optional Emoji role may be
 // absent. On error, partial resources are released. destroy is safe on zero,
 // partially initialized, and fully initialized sets.
@@ -14,6 +15,8 @@ Role :: enum int {
 	Emoji   = 3,
 }
 ROLE_COUNT :: 4
+MAX_FALLBACK_FACES :: 14
+MAX_FALLBACK_MISSES :: 64
 
 Role_Options :: struct {
 	// path selects face index zero directly and takes precedence over families.
@@ -30,6 +33,7 @@ Options :: struct {
 
 Face :: struct {
 	role:       Role,
+	cache_id:   u64,
 	path:       string,
 	family:     string,
 	face_index: int,
@@ -38,9 +42,13 @@ Face :: struct {
 }
 
 Set :: struct {
-	allocator: runtime.Allocator,
-	faces:     [ROLE_COUNT]Face,
-	impl:      Impl,
+	allocator:      runtime.Allocator,
+	faces:          [ROLE_COUNT]Face,
+	fallbacks:      [MAX_FALLBACK_FACES]Face,
+	fallback_count: int,
+	misses:         [MAX_FALLBACK_MISSES]rune,
+	miss_count:     int,
+	impl:           Impl,
 }
 
 face :: proc(set: ^Set, role: Role) -> ^Face {

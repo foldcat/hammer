@@ -6,7 +6,7 @@ validated. The product does not draw the resulting runs yet.
 ## Shaping pipeline
 
 `src/text/shaping` accepts one valid UTF-8 line, a bounded ordered font list,
-and shaping options. Input is limited to 1 MiB and eight fonts per call; visible-
+and shaping options. Input is limited to 1 MiB and sixteen fonts per call; visible-
 range slicing for huge lines remains M05.07. Empty input succeeds with no runs;
 invalid UTF-8 and embedded line breaks fail without retaining partial output.
 

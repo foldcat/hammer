@@ -9,9 +9,10 @@ these APIs.
 Each shaping `Run` now owns a visual-order `clusters` array alongside its glyphs.
 Each `Cluster` records one extended grapheme's absolute source-byte range and its
 26.6 x/advance. HarfBuzz glyphs sharing a cluster are measured as one advance
-group. If a ligature subsumes multiple graphemes, its advance is subdivided
-proportionally with integer endpoints, preserving every grapheme boundary without
-splitting the glyph itself.
+group. Multiple groups inside one ICU grapheme accumulate their advances. If a
+ligature subsumes multiple graphemes, its advance is subdivided proportionally
+with integer endpoints, preserving every grapheme boundary without splitting
+the glyph itself.
 
 `Text.destroy` releases both glyph and cluster arrays for every run. Hit testing
 and caret positioning allocate nothing and borrow `Text` immutably. Selection

@@ -9,22 +9,36 @@ import shaping "hammer:text/shaping"
 Fixture_Fonts :: struct {
 	library:         ft.Library,
 	mono:            ft.Face,
+	latin:           ft.Face,
 	hebrew:          ft.Face,
 	arabic:          ft.Face,
+	devanagari:      ft.Face,
+	thai:            ft.Face,
+	khmer:           ft.Face,
+	tamil:           ft.Face,
 	cjk:             ft.Face,
 	emoji:           ft.Face,
 	ligature:        ft.Face,
 	coding_ligature: ft.Face,
 	color_emoji:     ft.Face,
+	math:            ft.Face,
+	symbols2:        ft.Face,
 }
 
+FIXTURE_LATIN_FONT :: FIXTURE_DIR + "/FixtureLatin.ttf"
 FIXTURE_HEBREW_FONT :: FIXTURE_DIR + "/FixtureHebrew.ttf"
 FIXTURE_ARABIC_FONT :: FIXTURE_DIR + "/FixtureArabic.ttf"
+FIXTURE_DEVANAGARI_FONT :: FIXTURE_DIR + "/FixtureDevanagari.ttf"
+FIXTURE_THAI_FONT :: FIXTURE_DIR + "/FixtureThai.ttf"
+FIXTURE_KHMER_FONT :: FIXTURE_DIR + "/FixtureKhmer.ttf"
+FIXTURE_TAMIL_FONT :: FIXTURE_DIR + "/FixtureTamil.ttf"
 FIXTURE_CJK_FONT :: FIXTURE_DIR + "/FixtureCJK.otf"
 FIXTURE_EMOJI_FONT :: FIXTURE_DIR + "/FixtureEmoji.ttf"
 FIXTURE_LIGATURE_FONT :: FIXTURE_DIR + "/FixtureLigature.ttf"
 FIXTURE_CODING_LIGATURE_FONT :: FIXTURE_DIR + "/FixtureCodingLigature.ttf"
 FIXTURE_COLOR_EMOJI_FONT :: FIXTURE_DIR + "/FixtureColorEmoji.ttf"
+FIXTURE_MATH_FONT :: FIXTURE_DIR + "/FixtureMath.ttf"
+FIXTURE_SYMBOLS2_FONT :: FIXTURE_DIR + "/FixtureSymbols2.ttf"
 
 fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	fixtures: Fixture_Fonts
@@ -34,10 +48,25 @@ fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_FONT, 0, &fixtures.mono) == 0) {
 		return fixtures
 	}
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_LATIN_FONT, 0, &fixtures.latin) == 0) {
+		return fixtures
+	}
 	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_HEBREW_FONT, 0, &fixtures.hebrew) == 0) {
 		return fixtures
 	}
 	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_ARABIC_FONT, 0, &fixtures.arabic) == 0) {
+		return fixtures
+	}
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_DEVANAGARI_FONT, 0, &fixtures.devanagari) == 0) {
+		return fixtures
+	}
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_THAI_FONT, 0, &fixtures.thai) == 0) {
+		return fixtures
+	}
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_KHMER_FONT, 0, &fixtures.khmer) == 0) {
+		return fixtures
+	}
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_TAMIL_FONT, 0, &fixtures.tamil) == 0) {
 		return fixtures
 	}
 	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_CJK_FONT, 0, &fixtures.cjk) == 0) {
@@ -52,11 +81,23 @@ fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_CODING_LIGATURE_FONT, 0, &fixtures.coding_ligature) == 0) {
 		return fixtures
 	}
-	testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_COLOR_EMOJI_FONT, 0, &fixtures.color_emoji) == 0)
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_COLOR_EMOJI_FONT, 0, &fixtures.color_emoji) == 0) {
+		return fixtures
+	}
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_MATH_FONT, 0, &fixtures.math) == 0) {
+		return fixtures
+	}
+	testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_SYMBOLS2_FONT, 0, &fixtures.symbols2) == 0)
 	return fixtures
 }
 
 fixture_fonts_destroy :: proc(fixtures: ^Fixture_Fonts) {
+	if fixtures.symbols2 != nil {
+		ft.FT_Done_Face(fixtures.symbols2)
+	}
+	if fixtures.math != nil {
+		ft.FT_Done_Face(fixtures.math)
+	}
 	if fixtures.color_emoji != nil {
 		ft.FT_Done_Face(fixtures.color_emoji)
 	}
@@ -72,11 +113,26 @@ fixture_fonts_destroy :: proc(fixtures: ^Fixture_Fonts) {
 	if fixtures.cjk != nil {
 		ft.FT_Done_Face(fixtures.cjk)
 	}
+	if fixtures.tamil != nil {
+		ft.FT_Done_Face(fixtures.tamil)
+	}
+	if fixtures.khmer != nil {
+		ft.FT_Done_Face(fixtures.khmer)
+	}
+	if fixtures.thai != nil {
+		ft.FT_Done_Face(fixtures.thai)
+	}
+	if fixtures.devanagari != nil {
+		ft.FT_Done_Face(fixtures.devanagari)
+	}
 	if fixtures.arabic != nil {
 		ft.FT_Done_Face(fixtures.arabic)
 	}
 	if fixtures.hebrew != nil {
 		ft.FT_Done_Face(fixtures.hebrew)
+	}
+	if fixtures.latin != nil {
+		ft.FT_Done_Face(fixtures.latin)
 	}
 	if fixtures.mono != nil {
 		ft.FT_Done_Face(fixtures.mono)

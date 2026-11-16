@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M06-Detour-1 Fix rendering of special characters
+## Current task: M06-Detour-2 Implement cut (control + x) and allow control + shift + c and control + shift + v to copy and paste just like control + c and control + v

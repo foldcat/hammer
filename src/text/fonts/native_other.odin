@@ -13,3 +13,7 @@ init :: proc(set: ^Set, options: Options, allocator := context.allocator) -> err
 destroy :: proc(set: ^Set) {
 	set^ = Set{}
 }
+
+ensure_fallback :: proc(set: ^Set, codepoint: rune) -> (^Face, errs.Error) {
+	return nil, errs.new(.Unsupported, "font fallback is currently implemented only on Linux", allocator = context.allocator)
+}

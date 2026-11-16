@@ -23,7 +23,7 @@ contain many UTF-8 codepoints.
 The product adds an optional `fonts.Role.Emoji`, discovered as `Noto Color Emoji`
 then generic `emoji`, independently of an explicit body `font_path`. Missing emoji
 faces leave ordinary text available. Rendering and hit testing share one bounded
-body-plus-emoji font list; stable role IDs continue to key the glyph cache.
+body/emoji/dynamic-fallback font list; stable face IDs key the glyph cache.
 
 ## Native color rasterization
 

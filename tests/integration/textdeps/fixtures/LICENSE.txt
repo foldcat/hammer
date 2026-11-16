@@ -1,5 +1,11 @@
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
 
+FixtureLatin, FixtureDevanagari, FixtureTamil, FixtureThai, FixtureKhmer,
+FixtureMath, and FixtureSymbols2 are subsets of Noto Sans, Noto Sans
+Devanagari, Noto Sans Tamil, Noto Sans Thai, Noto Sans Khmer, Noto Sans Math,
+and Noto Sans Symbols 2 respectively. They retain the layout and naming tables
+needed by the tests and are distributed under the same license below.
+
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
 https://scripts.sil.org/OFL

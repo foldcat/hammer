@@ -119,16 +119,10 @@ init :: proc(set: ^Set, options: Options, allocator := context.allocator) -> err
 
 destroy :: proc(set: ^Set) {
 	for i in 0 ..< ROLE_COUNT {
-		face := &set.faces[i]
-		if face.native != nil && set.impl.library != nil {
-			ft.FT_Done_Face(ft.Face(face.native))
-		}
-		if face.path != "" {
-			delete(face.path, set.allocator)
-		}
-		if face.family != "" {
-			delete(face.family, set.allocator)
-		}
+		face_destroy(set, &set.faces[i])
+	}
+	for i in 0 ..< set.fallback_count {
+		face_destroy(set, &set.fallbacks[i])
 	}
 	if set.impl.library != nil {
 		ft.FT_Done_FreeType(set.impl.library)
@@ -237,32 +231,150 @@ discover_family :: proc(config: fc.Config, family: string, allocator := context.
 }
 
 load_face :: proc(set: ^Set, role: Role, location: Location) -> errs.Error {
+	loaded, err := open_face(set, role, location, u64(role) + 1)
+	if !errs.ok(err) {
+		return err
+	}
+	set.faces[int(role)] = loaded
+	return {}
+}
+
+open_face :: proc(set: ^Set, role: Role, location: Location, cache_id: u64) -> (Face, errs.Error) {
 	path_c, alloc_err := strings.clone_to_cstring(location.path, set.allocator)
 	if alloc_err != nil {
-		return errs.new(.Resource_Limit, "cannot allocate a font path", allocator = set.allocator)
+		return {}, errs.new(.Resource_Limit, "cannot allocate a font path", allocator = set.allocator)
 	}
 	defer delete(path_c, set.allocator)
 
 	ft_face: ft.Face
 	load_result := ft.FT_New_Face(set.impl.library, path_c, ft.Long(location.face_index), &ft_face)
 	if load_result != 0 {
-		return errs.newf(.IO, "cannot load %s font %s (FreeType error %d)", role_name(role), location.path, load_result, allocator = set.allocator)
+		return {}, errs.newf(.IO, "cannot load %s font %s (FreeType error %d)", role_name(role), location.path, load_result, allocator = set.allocator)
 	}
 	if ft_face == nil {
-		return errs.new(.Internal, "FreeType returned a nil face without an error", allocator = set.allocator)
+		return {}, errs.new(.Internal, "FreeType returned a nil face without an error", allocator = set.allocator)
 	}
 	family := ""
 	if ft_face.family_name != nil {
 		family = string(ft_face.family_name)
 	}
-	set.faces[int(role)] = Face{
+	return Face{
 		role = role,
+		cache_id = cache_id,
 		path = strings.clone(location.path, set.allocator),
 		family = strings.clone(family, set.allocator),
 		face_index = location.face_index,
 		native = rawptr(ft_face),
+	}, {}
+}
+
+face_destroy :: proc(set: ^Set, face: ^Face) {
+	if face.native != nil && set.impl.library != nil {
+		ft.FT_Done_Face(ft.Face(face.native))
 	}
-	return errs.Error{}
+	if face.path != "" {
+		delete(face.path, set.allocator)
+	}
+	if face.family != "" {
+		delete(face.family, set.allocator)
+	}
+	face^ = Face{}
+}
+
+// Returned faces are owned by set and remain valid until destroy. Unsupported
+// codepoints and a full fallback cache return nil without an error.
+ensure_fallback :: proc(set: ^Set, codepoint: rune) -> (^Face, errs.Error) {
+	if set == nil || set.impl.library == nil || set.impl.config == nil {
+		return nil, errs.new(.Invalid_Input, "font fallback requires an initialized font set", allocator = set.allocator if set != nil else context.allocator)
+	}
+	if codepoint < 0 || codepoint > 0x10ffff || codepoint >= 0xd800 && codepoint <= 0xdfff {
+		return nil, errs.new(.Invalid_Input, "font fallback requires a Unicode scalar value", allocator = set.allocator)
+	}
+	shaping_roles := [2]Role{.Body, .Emoji}
+	for role in shaping_roles {
+		face := &set.faces[int(role)]
+		if face.native != nil && ft.FT_Get_Char_Index(ft.Face(face.native), ft.ULong(codepoint)) != 0 {
+			return face, {}
+		}
+	}
+	for index in 0 ..< set.fallback_count {
+		face := &set.fallbacks[index]
+		if ft.FT_Get_Char_Index(ft.Face(face.native), ft.ULong(codepoint)) != 0 {
+			return face, {}
+		}
+	}
+	for missed in set.misses[:set.miss_count] {
+		if missed == codepoint {
+			return nil, {}
+		}
+	}
+	if set.fallback_count >= MAX_FALLBACK_FACES {
+		record_fallback_miss(set, codepoint)
+		return nil, {}
+	}
+
+	charset := fc.FcCharSetCreate()
+	if charset == nil {
+		return nil, errs.new(.Resource_Limit, "fontconfig could not allocate a fallback charset", allocator = set.allocator)
+	}
+	defer fc.FcCharSetDestroy(charset)
+	if fc.FcCharSetAddChar(charset, fc.Char32(codepoint)) == 0 {
+		return nil, errs.new(.Resource_Limit, "fontconfig could not populate a fallback charset", allocator = set.allocator)
+	}
+	pattern := fc.FcPatternCreate()
+	if pattern == nil {
+		return nil, errs.new(.Resource_Limit, "fontconfig could not allocate a fallback pattern", allocator = set.allocator)
+	}
+	defer fc.FcPatternDestroy(pattern)
+	if fc.FcPatternAddCharSet(pattern, fc.CHARSET, charset) == 0 {
+		return nil, errs.new(.Resource_Limit, "fontconfig could not constrain fallback coverage", allocator = set.allocator)
+	}
+	if fc.FcConfigSubstitute(set.impl.config, pattern, .Pattern) == 0 {
+		return nil, errs.new(.IO, "fontconfig fallback substitution failed", allocator = set.allocator)
+	}
+	fc.FcDefaultSubstitute(pattern)
+	result: fc.Result
+	match := fc.FcFontMatch(set.impl.config, pattern, &result)
+	if result == .Out_Of_Memory {
+		return nil, errs.new(.Resource_Limit, "fontconfig fallback match allocation failed", allocator = set.allocator)
+	}
+	if match == nil || result != .Match {
+		record_fallback_miss(set, codepoint)
+		return nil, {}
+	}
+	defer fc.FcPatternDestroy(match)
+
+	path_c: cstring
+	if fc.FcPatternGetString(match, fc.FILE, 0, &path_c) != .Match || path_c == nil {
+		return nil, errs.new(.IO, "fallback font has no file path", allocator = set.allocator)
+	}
+	face_index: i32
+	index_result := fc.FcPatternGetInteger(match, fc.INDEX, 0, &face_index)
+	if (index_result != .Match && index_result != .No_Id) || face_index < 0 {
+		return nil, errs.new(.IO, "fallback font has an invalid face index", allocator = set.allocator)
+	}
+	location := Location{path = strings.clone(string(path_c), set.allocator), face_index = int(face_index)}
+	defer location_destroy(&location, set.allocator)
+
+	loaded, load_err := open_face(set, .Body, location, u64(ROLE_COUNT + set.fallback_count + 1))
+	if !errs.ok(load_err) {
+		return nil, load_err
+	}
+	if ft.FT_Get_Char_Index(ft.Face(loaded.native), ft.ULong(codepoint)) == 0 {
+		face_destroy(set, &loaded)
+		record_fallback_miss(set, codepoint)
+		return nil, {}
+	}
+	set.fallbacks[set.fallback_count] = loaded
+	set.fallback_count += 1
+	return &set.fallbacks[set.fallback_count - 1], {}
+}
+
+record_fallback_miss :: proc(set: ^Set, codepoint: rune) {
+	if set.miss_count < MAX_FALLBACK_MISSES {
+		set.misses[set.miss_count] = codepoint
+		set.miss_count += 1
+	}
 }
 
 location_destroy :: proc(location: ^Location, allocator := context.allocator) {

@@ -166,8 +166,6 @@ text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads
 		return
 	}
 
-	font_storage: [2]shaping.Font
-	font_list := product_shaping_fonts(&font_storage)
 	font_logical := coords.points_to_logical_px(cfg.Font_Size_Points)
 	line_height := font_logical * cfg.Line_Height
 	if line_height <= 0 {
@@ -192,7 +190,6 @@ text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads
 			rope.Line_Index(line_index),
 			caret_line,
 			preedit,
-			font_list[:],
 			pixel_size,
 			win.body,
 			line_top,
@@ -251,7 +248,6 @@ text_render_line :: proc(
 	line_index: rope.Line_Index,
 	caret_line: rope.Line_Index,
 	preedit: ime.Snapshot,
-	font_list: []shaping.Font,
 	pixel_size: u32,
 	body: layout.Rect,
 	line_top: f32,
@@ -309,14 +305,7 @@ text_render_line :: proc(
 	context.allocator = context.temp_allocator
 	defer context.allocator = previous_allocator
 	measurement: shaping.Measurement
-	visible, shape_err := shaping.visible_next(
-		display,
-		&measurement,
-		font_list,
-		{pixel_size = pixel_size, ligatures = cfg.Ligatures},
-		shaping.DEFAULT_VISIBLE_BYTES,
-		context.temp_allocator,
-	)
+	visible, shape_err := product_shape_visible(display, &measurement, pixel_size)
 	if !errs.ok(shape_err) {
 		text_render_error(shape_err)
 		return
@@ -326,6 +315,8 @@ text_render_line :: proc(
 	if !composing {
 		text_render_selection(visible.text, expansion, start, end, body, line_top, line_height, fb, quads)
 	}
+	font_storage: [shaping.MAX_FONTS]shaping.Font
+	font_list := product_shaping_fonts(&font_storage)
 	text_collect_glyphs(visible.text, font_list, body.x * state.dpi.scale, baseline, fb)
 
 	if composing && preedit_start < preedit_end && preedit_start <= visible.end {

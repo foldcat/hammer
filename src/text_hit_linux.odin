@@ -39,8 +39,6 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool) -> (Tex
 	if !size_ok || ft.FT_Set_Pixel_Sizes(ft.Face(selected.native), 0, pixel_size) != 0 {
 		return {}, false
 	}
-	font_storage: [2]shaping.Font
-	font_list := product_shaping_fonts(&font_storage)
 	line_height := coords.points_to_logical_px(cfg.Font_Size_Points) * cfg.Line_Height
 	if line_height <= 0 {
 		return {}, false
@@ -87,14 +85,7 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool) -> (Tex
 	context.allocator = context.temp_allocator
 	defer context.allocator = previous_allocator
 	measurement: shaping.Measurement
-	visible, shape_err := shaping.visible_next(
-		string(expansion.text[:]),
-		&measurement,
-		font_list[:],
-		{pixel_size = pixel_size, ligatures = cfg.Ligatures},
-		shaping.DEFAULT_VISIBLE_BYTES,
-		context.temp_allocator,
-	)
+	visible, shape_err := product_shape_visible(string(expansion.text[:]), &measurement, pixel_size)
 	if !errs.ok(shape_err) {
 		text_render_error(shape_err)
 		return {}, false

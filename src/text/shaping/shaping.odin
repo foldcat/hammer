@@ -5,6 +5,8 @@ package shaping
 
 import glyphcache "../glyphcache"
 
+MAX_FONTS :: 16
+
 Font :: struct {
 	font_id:    u64,
 	face_index: int,
@@ -35,8 +37,8 @@ Glyph :: struct {
 	y_offset:  i32,
 }
 
-// Cluster is one grapheme in visual order. Ligature advances are subdivided
-// across their graphemes so every source grapheme boundary remains usable.
+// Cluster is one grapheme in visual order. Advances from split HarfBuzz groups
+// accumulate per grapheme; ligature advances are subdivided across graphemes.
 Cluster :: struct {
 	source_start: int,
 	source_end:   int,

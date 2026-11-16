@@ -15,6 +15,7 @@
 //     odin run make.odin -file -- text-test        # M05.01–M05.10 native text dependencies
 //     odin run make.odin -file -- ligature-test    # M05.09 X11 product ligature configuration
 //     odin run make.odin -file -- emoji-test       # M05.10 X11 product color emoji
+//     odin run make.odin -file -- unicode-test     # M06 special-character X11 product checks
 //     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
 //     odin run make.odin -file -- typing-test      # M06.09–M06.11 X11 typing/mouse/clipboard
@@ -109,6 +110,7 @@ LIGATURE_FIXTURE_FONT :: #directory + "/tests/integration/textdeps/fixtures/Fixt
 LIGATURE_ENABLED_BINARY :: OUT_DIR + "/hammer-ligatures-on"
 LIGATURE_DISABLED_BINARY :: OUT_DIR + "/hammer-ligatures-off"
 EMOJI_TEST_HARNESS :: #directory + "/tests/integration/emoji/x11_harness.py"
+UNICODE_TEST_HARNESS :: #directory + "/tests/integration/unicode/x11_harness.py"
 CLIPBOARD_WINDOWS_TEST_DIR :: #directory + "/tests/integration/clipboard_windows"
 CLIPBOARD_WINDOWS_TEST_BINARY :: OUT_DIR + "/clipboard_windows_test.exe"
 CLIPBOARD_WINDOWS_INTEROP_HARNESS :: CLIPBOARD_WINDOWS_TEST_DIR + "/interop_harness.py"
@@ -432,6 +434,39 @@ main :: proc() {
 			}, true)
 		} else {
 			fmt.eprintln("[Test] emoji-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "unicode-test" {
+		when ODIN_OS == .Linux {
+			stage_config([]string{"--no-config"})
+			if !setup_sokol_linux() {
+				os.exit(1)
+			}
+			run_odin([]string {
+				"odin",
+				"build",
+				SRC_DIR,
+				SOKOL_COLLECTION,
+				"-vet",
+				"-out:" + BINARY_PATH,
+				"-debug",
+			})
+			run_odin([]string{"odin", "build", SPIKE_CLIPBOARD_DIR, "-vet", "-out:" + CLIPBOARD_SPIKE_PATH})
+			run_odin([]string {
+				"xvfb-run",
+				"-a",
+				"python3",
+				UNICODE_TEST_HARNESS,
+				"--binary",
+				BINARY_PATH,
+				"--clipboard-peer",
+				CLIPBOARD_SPIKE_PATH,
+			}, true)
+		} else {
+			fmt.eprintln("[Test] unicode-test currently requires Linux/X11")
 			os.exit(1)
 		}
 		return
