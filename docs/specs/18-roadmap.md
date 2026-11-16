@@ -234,6 +234,7 @@ M05.10  Implement color emoji and full emoji-sequence rendering.
 - Newline indentation inheritance.
 - IME support.
 - Text zoom.
+- Save / Save As keybind.
 
 ### Tasks
 
@@ -252,6 +253,7 @@ M06.11  Implement copy and paste keybind (control + c / control + v).
 M06.12  Implement newline indentation inheritance (tab level kept on Enter).
 M06.13  Implement parenthesis/bracket/quote autopair policy.
 M06.14  Implement text zoom keybinds (control + plus/minus/zero; control + mouse wheel).
+M06.15  Implement save keybind (control + s) and save as (control + shift + s).
 ```
 
 ### Acceptance
@@ -265,6 +267,7 @@ M06.14  Implement text zoom keybinds (control + plus/minus/zero; control + mouse
 - AltGr and IME do not trigger erroneous shortcuts.
 - Indentation is one undo step.
 - Zoom reflows layout and preserves caret/selection without leaking a new atlas per level.
+- Ctrl+S saves the current buffer; a failed save keeps the buffer dirty and blocks lossy close.
 
 ---
 
@@ -280,6 +283,7 @@ M06.14  Implement text zoom keybinds (control + plus/minus/zero; control + mouse
 - Mouse state machine.
 - Touchpad alternatives.
 - Directory/lookup behavior.
+- Configurable wrapping, scrolling/scrollbar, and line numbers.
 
 ### Tasks
 
@@ -292,6 +296,9 @@ M07.05  Implement modifier-assisted gestures.
 M07.06  Implement Look token expansion and file opening.
 M07.07  Implement directory windows and error windows.
 M07.08  Add compatibility scenarios for window behavior.
+M07.09  Implement configurable line wrapping (soft wrap vs truncate + horizontal scroll).
+M07.10  Implement viewport scrolling and scrollbar rendering/interaction.
+M07.11  Implement line-number gutter display.
 ```
 
 ### Acceptance
@@ -300,6 +307,7 @@ M07.08  Add compatibility scenarios for window behavior.
 - Middle/right actions match the compatibility specification.
 - Touchpad users can execute/look without physical three-button hardware.
 - Closing one view does not destroy a shared dirty buffer.
+- Wrap mode, scrolling/scrollbar, and line numbers are per-view and stay correct across resize/DPI changes.
 
 ---
 
