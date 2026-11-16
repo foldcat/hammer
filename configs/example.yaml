@@ -40,7 +40,9 @@ font_size_points: 13
 # Line height multiplier (0.5..3.0). Default 1.4.
 line_height: 1.5
 
-# Render ligatures where the font provides them. Default false.
+# Render optional standard and contextual ligatures where the font provides
+# them. When false, component glyphs are used; required script shaping stays
+# enabled. Default false.
 ligatures: false
 
 # The oxocarbon-derived theme (colorscheme.yaml). Either all ten colors

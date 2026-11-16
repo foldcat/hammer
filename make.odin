@@ -12,7 +12,8 @@
 //     odin run make.odin -file -- windows          # M00.03 Windows cross-build
 //     odin run make.odin -file -- windows --release
 //     odin run make.odin -file -- test             # core unit tests
-//     odin run make.odin -file -- text-test        # M05.01 native text dependencies
+//     odin run make.odin -file -- text-test        # M05.01–M05.09 native text dependencies
+//     odin run make.odin -file -- ligature-test    # M05.09 X11 product ligature configuration
 //     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
 //     odin run make.odin -file -- typing-test      # M06.09–M06.11 X11 typing/mouse/clipboard
@@ -102,6 +103,10 @@ CLIPBOARD_INTEROP_DRIVER :: OUT_DIR + "/clipboard_interop_driver"
 CLIPBOARD_INTEROP_HARNESS :: CLIPBOARD_TEST_DIR + "/interop_harness.py"
 IME_TEST_DIR :: #directory + "/tests/integration/ime"
 TYPING_TEST_HARNESS :: #directory + "/tests/integration/typing/x11_harness.py"
+LIGATURE_TEST_HARNESS :: #directory + "/tests/integration/ligature/x11_harness.py"
+LIGATURE_FIXTURE_FONT :: #directory + "/tests/integration/textdeps/fixtures/FixtureLigature.ttf"
+LIGATURE_ENABLED_BINARY :: OUT_DIR + "/hammer-ligatures-on"
+LIGATURE_DISABLED_BINARY :: OUT_DIR + "/hammer-ligatures-off"
 CLIPBOARD_WINDOWS_TEST_DIR :: #directory + "/tests/integration/clipboard_windows"
 CLIPBOARD_WINDOWS_TEST_BINARY :: OUT_DIR + "/clipboard_windows_test.exe"
 CLIPBOARD_WINDOWS_INTEROP_HARNESS :: CLIPBOARD_WINDOWS_TEST_DIR + "/interop_harness.py"
@@ -387,6 +392,16 @@ main :: proc() {
 		return
 	}
 
+	if len(args) > 1 && args[1] == "ligature-test" {
+		when ODIN_OS == .Linux {
+			ligature_test_main()
+		} else {
+			fmt.eprintln("[Test] ligature-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
 	if len(args) > 1 && args[1] == "clipboard-windows-test" {
 		when ODIN_OS == .Linux {
 			clipboard_windows_main()
@@ -561,6 +576,45 @@ stage_config :: proc(args: []string) {
 	if werr := config.write_staged(r, GENERATED_CONFIG_PATH); !errs.ok(werr) {
 		config_fail(werr)
 	}
+}
+
+ligature_test_main :: proc() {
+	if !setup_sokol_linux() {
+		os.exit(1)
+	}
+	defer stage_config([]string{"--no-config"})
+	ligature_test_build(true, LIGATURE_ENABLED_BINARY)
+	ligature_test_build(false, LIGATURE_DISABLED_BINARY)
+	run_odin([]string {
+		"xvfb-run",
+		"-a",
+		"python3",
+		LIGATURE_TEST_HARNESS,
+		"--enabled",
+		LIGATURE_ENABLED_BINARY,
+		"--disabled",
+		LIGATURE_DISABLED_BINARY,
+	}, true)
+}
+
+ligature_test_build :: proc(enabled: bool, binary_path: string) {
+	mode := "on" if enabled else "off"
+	config_path := fmt.tprintf("%s/ligatures-%s.yaml", OUT_DIR, mode)
+	source := fmt.tprintf("font_path: %q\nligatures: %v\n", LIGATURE_FIXTURE_FONT, enabled)
+	if err := os.write_entire_file(config_path, transmute([]byte)source); err != nil {
+		fmt.eprintf("[Test] cannot stage ligature config: %v\n", err)
+		os.exit(1)
+	}
+	stage_config([]string{fmt.tprintf("--config=%s", config_path)})
+	run_odin([]string {
+		"odin",
+		"build",
+		SRC_DIR,
+		SOKOL_COLLECTION,
+		"-vet",
+		fmt.tprintf("-out:%s", binary_path),
+		"-debug",
+	})
 }
 
 // config_fail reports a configuration error and exits. The described

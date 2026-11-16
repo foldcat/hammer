@@ -7,18 +7,22 @@ import ft "hammer:text/freetype"
 import shaping "hammer:text/shaping"
 
 Fixture_Fonts :: struct {
-	library: ft.Library,
-	mono:    ft.Face,
-	hebrew:  ft.Face,
-	arabic:  ft.Face,
-	cjk:     ft.Face,
-	emoji:   ft.Face,
+	library:         ft.Library,
+	mono:            ft.Face,
+	hebrew:          ft.Face,
+	arabic:          ft.Face,
+	cjk:             ft.Face,
+	emoji:           ft.Face,
+	ligature:        ft.Face,
+	coding_ligature: ft.Face,
 }
 
 FIXTURE_HEBREW_FONT :: FIXTURE_DIR + "/FixtureHebrew.ttf"
 FIXTURE_ARABIC_FONT :: FIXTURE_DIR + "/FixtureArabic.ttf"
 FIXTURE_CJK_FONT :: FIXTURE_DIR + "/FixtureCJK.otf"
 FIXTURE_EMOJI_FONT :: FIXTURE_DIR + "/FixtureEmoji.ttf"
+FIXTURE_LIGATURE_FONT :: FIXTURE_DIR + "/FixtureLigature.ttf"
+FIXTURE_CODING_LIGATURE_FONT :: FIXTURE_DIR + "/FixtureCodingLigature.ttf"
 
 fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	fixtures: Fixture_Fonts
@@ -37,11 +41,23 @@ fixture_fonts_open :: proc(t: ^testing.T) -> Fixture_Fonts {
 	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_CJK_FONT, 0, &fixtures.cjk) == 0) {
 		return fixtures
 	}
-	testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_EMOJI_FONT, 0, &fixtures.emoji) == 0)
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_EMOJI_FONT, 0, &fixtures.emoji) == 0) {
+		return fixtures
+	}
+	if !testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_LIGATURE_FONT, 0, &fixtures.ligature) == 0) {
+		return fixtures
+	}
+	testing.expect(t, ft.FT_New_Face(fixtures.library, FIXTURE_CODING_LIGATURE_FONT, 0, &fixtures.coding_ligature) == 0)
 	return fixtures
 }
 
 fixture_fonts_destroy :: proc(fixtures: ^Fixture_Fonts) {
+	if fixtures.coding_ligature != nil {
+		ft.FT_Done_Face(fixtures.coding_ligature)
+	}
+	if fixtures.ligature != nil {
+		ft.FT_Done_Face(fixtures.ligature)
+	}
 	if fixtures.emoji != nil {
 		ft.FT_Done_Face(fixtures.emoji)
 	}

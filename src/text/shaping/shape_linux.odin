@@ -297,12 +297,15 @@ shape_segment :: proc(result: ^Text, text: string, segment: Segment, direction: 
 	hb.hb_buffer_set_direction(buffer, hb_direction)
 	hb.hb_buffer_add_utf8(buffer, raw_data(text), i32(len(text)), u32(segment.range.start), i32(segment.range.end - segment.range.start))
 	hb.hb_buffer_guess_segment_properties(buffer)
-	features: [2]hb.Feature
+	features: [5]hb.Feature
 	feature_count := 0
 	if !options.ligatures {
 		features[0] = {tag = hb.hb_tag_from_string("liga", -1), start = 0, end = max(u32)}
 		features[1] = {tag = hb.hb_tag_from_string("clig", -1), start = 0, end = max(u32)}
-		feature_count = 2
+		features[2] = {tag = hb.hb_tag_from_string("dlig", -1), start = 0, end = max(u32)}
+		features[3] = {tag = hb.hb_tag_from_string("hlig", -1), start = 0, end = max(u32)}
+		features[4] = {tag = hb.hb_tag_from_string("calt", -1), start = 0, end = max(u32)}
+		feature_count = 5
 	}
 	hb.hb_shape(hb_font, buffer, raw_data(features[:]), u32(feature_count))
 	info_count, position_count: u32
