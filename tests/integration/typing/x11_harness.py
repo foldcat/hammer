@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X11 typing, mouse selection, rendering, undo, and dirty-close smoke test."""
+"""Real X11 typing, mouse, clipboard, rendering, undo, and dirty-close smoke test."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import ctypes.util
 import hashlib
 import os
 from pathlib import Path
+import selectors
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,74 @@ import time
 
 class HarnessFailure(RuntimeError):
     pass
+
+
+class ClipboardOwner:
+    def __init__(self, peer: Path, payload: Path, sandbox: Path, timeout: float) -> None:
+        self.log_path = sandbox / "clipboard-owner.log"
+        self.log = self.log_path.open("wb")
+        try:
+            self.process = subprocess.Popen(
+                [str(peer), "serve", "CLIPBOARD", str(payload)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=self.log,
+            )
+        except OSError:
+            self.log.close()
+            raise
+        assert self.process.stdout is not None
+        deadline = time.monotonic() + timeout
+        selector = selectors.DefaultSelector()
+        selector.register(self.process.stdout, selectors.EVENT_READ)
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise HarnessFailure("external clipboard owner did not become ready")
+                if not selector.select(remaining):
+                    continue
+                line = self.process.stdout.readline()
+                if not line:
+                    raise HarnessFailure(
+                        f"external clipboard owner exited {self.process.poll()}; log: {self.log_path}"
+                    )
+                if line.startswith(b"ready CLIPBOARD "):
+                    return
+        except BaseException:
+            self.stop()
+            raise
+        finally:
+            selector.close()
+
+    def stop(self) -> None:
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=2)
+        if self.process.stdout is not None:
+            self.process.stdout.close()
+        self.log.close()
+
+
+def read_external_clipboard(peer: Path, output: Path, timeout: float) -> None:
+    try:
+        result = subprocess.run(
+            [str(peer), "get", "CLIPBOARD", "-o", str(output), "--timeout-ms", "5000"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise HarnessFailure("external clipboard read timed out") from error
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise HarnessFailure(f"external clipboard read failed: {detail or result.stdout!r}")
 
 
 class X11:
@@ -193,16 +262,19 @@ def wait_for_exit(process: subprocess.Popen[bytes], timeout: float, log_path: Pa
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--clipboard-peer", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=15.0)
     args = parser.parse_args()
     if not 1.0 <= args.timeout <= 60.0:
         parser.error("--timeout must be between 1 and 60 seconds")
     binary = args.binary.resolve()
-    if not binary.is_file():
-        parser.error("--binary must name the Hammer executable")
+    clipboard_peer = args.clipboard_peer.resolve()
+    if not binary.is_file() or not clipboard_peer.is_file():
+        parser.error("--binary and --clipboard-peer must name executables")
 
-    sandbox = Path(tempfile.mkdtemp(prefix="hammer-m06-09-typing-"))
+    sandbox = Path(tempfile.mkdtemp(prefix="hammer-m06-11-typing-"))
     process: subprocess.Popen[bytes] | None = None
+    clipboard_owner: ClipboardOwner | None = None
     x11: X11 | None = None
     succeeded = False
     log_path = sandbox / "hammer.log"
@@ -325,6 +397,63 @@ def main() -> int:
             if x11.pixels(window) != initial:
                 raise HarnessFailure("undo after mouse selection did not restore the initial pixels")
 
+            x11.key(0xFFE3, True)
+            x11.tap(ord("v"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            if x11.pixels(window) != initial:
+                raise HarnessFailure("paste with no clipboard owner changed the document")
+            print("PASS: a native clipboard read error cancels the pending paste for later operations")
+
+            copy_text = "product-copy"
+            for character in copy_text:
+                x11.tap(ord(character))
+            time.sleep(0.3)
+            copy_pixels = x11.pixels(window)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("a"))
+            x11.tap(ord("c"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            copied_path = sandbox / "product-copy.txt"
+            read_external_clipboard(clipboard_peer, copied_path, args.timeout)
+            if copied_path.read_bytes() != copy_text.encode("utf-8"):
+                raise HarnessFailure(f"Ctrl+C published the wrong selection; log: {log_path}")
+            print("PASS: Ctrl+C publishes the current selection to an external X11 reader")
+
+            pasted_text = "external paste: é Ελληνικά 漢字 A\u0301 🙂\n"
+            pasted_path = sandbox / "external-paste.txt"
+            pasted_path.write_bytes(pasted_text.encode("utf-8"))
+            clipboard_owner = ClipboardOwner(clipboard_peer, pasted_path, sandbox, args.timeout)
+            time.sleep(0.2)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("v"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.5)
+            pasted_pixels = x11.pixels(window)
+            if pasted_pixels == copy_pixels or pasted_pixels == initial:
+                raise HarnessFailure(f"Ctrl+V did not render external clipboard text; log: {log_path}")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("a"))
+            x11.tap(ord("c"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.3)
+            clipboard_owner.stop()
+            clipboard_owner = None
+            roundtrip_path = sandbox / "pasted-roundtrip.txt"
+            read_external_clipboard(clipboard_peer, roundtrip_path, args.timeout)
+            if roundtrip_path.read_bytes() != pasted_text.encode("utf-8"):
+                raise HarnessFailure(f"Ctrl+V pasted the wrong external payload; log: {log_path}")
+            print("PASS: Ctrl+V pastes Unicode from an external X11 owner through one transaction")
+
+            for _ in range(2):
+                x11.key(0xFFE3, True)
+                x11.tap(ord("z"))
+                x11.key(0xFFE3, False)
+                time.sleep(0.2)
+            if x11.pixels(window) != initial:
+                raise HarnessFailure("undoing the paste and copied source text did not restore the initial pixels")
+
             x11.tap(ord("x"))
             time.sleep(0.2)
             x11.tap(0xFF1B)
@@ -347,6 +476,8 @@ def main() -> int:
         print(f"FAIL: {error}; preserved sandbox: {sandbox}", file=sys.stderr)
         return 1
     finally:
+        if clipboard_owner is not None:
+            clipboard_owner.stop()
         if process is not None and process.poll() is None:
             process.terminate()
             try:

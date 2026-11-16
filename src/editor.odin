@@ -8,16 +8,20 @@ import errs "core/errs"
 import input "core/input"
 import keybind "core/keybind"
 import lifecycle "core/lifecycle"
+import platform "platform"
+import rope "core/rope"
 import txn "core/txn"
 
 Editor :: struct {
-	doc:             txn.Doc,
-	selection:       txn.Selection,
-	saved_revision:  u64,
-	typing_group:    u64,
-	next_group:      u64,
-	mouse_selecting: bool,
-	close_guard:     lifecycle.Close_Guard,
+	doc:                    txn.Doc,
+	selection:              txn.Selection,
+	saved_revision:         u64,
+	typing_group:           u64,
+	next_group:             u64,
+	next_clipboard_request: u64,
+	delayed_paste:          editing.Delayed_Paste,
+	mouse_selecting:        bool,
+	close_guard:            lifecycle.Close_Guard,
 }
 
 editor: Editor
@@ -34,6 +38,7 @@ editor_init :: proc() -> errs.Error {
 }
 
 editor_destroy :: proc() {
+	editor_cancel_delayed_paste()
 	lifecycle.close_guard_destroy(&editor.close_guard)
 	txn.doc_destroy(&editor.doc)
 	editor = {}
@@ -120,11 +125,135 @@ editor_consume_input :: proc(event: input.Event) {
 			}
 			errs.destroy(&err)
 		}
-	case keybind.Copy, keybind.Cut, keybind.Paste, keybind.Save, keybind.Save_As,
-		keybind.Find, keybind.Open_Finder, keybind.Execute_Text, keybind.Look_Text:
+	case keybind.Copy:
+		editor.typing_group = 0
+		editor_copy_selection()
+	case keybind.Paste:
+		editor.typing_group = 0
+		editor_begin_paste()
+	case keybind.Cut, keybind.Save, keybind.Save_As, keybind.Find, keybind.Open_Finder,
+		keybind.Execute_Text, keybind.Look_Text:
 		log.debugf("edit: action %T is not connected in this milestone", action)
 	case keybind.Request_Quit, keybind.Close_Window:
 	}
+}
+
+editor_copy_selection :: proc() {
+	editor_poll_clipboard()
+	range := editing.selection_range(editor.selection)
+	if range.start == range.end {
+		return
+	}
+	if !editor_clipboard_available() {
+		editor_report(errs.new(.Unsupported, "clipboard: native service is unavailable"))
+		return
+	}
+	if range.end - range.start > platform.DEFAULT_MAX_CLIPBOARD_BYTES {
+		editor_report(errs.new(.Resource_Limit, "clipboard: selection exceeds the transfer budget"))
+		return
+	}
+	data, err := rope.tree_read_all(&editor.doc.tree, range, context.temp_allocator)
+	if !errs.ok(err) {
+		editor_report(err)
+		return
+	}
+	defer delete(data, context.temp_allocator)
+
+	request_id := editor_next_clipboard_request_id()
+	editor_report(services.clipboard.start(services.user, {
+		id = request_id,
+		selection = .Clipboard,
+		operation = .Write,
+		data = data,
+	}))
+}
+
+editor_begin_paste :: proc() {
+	editor_poll_clipboard()
+	if !editor_clipboard_available() {
+		editor_report(errs.new(.Unsupported, "clipboard: native service is unavailable"))
+		return
+	}
+	request_id := editor_next_clipboard_request_id()
+	if err := editing.delayed_paste_begin(
+		&editor.delayed_paste,
+		&editor.doc,
+		&editor.selection,
+		1,
+		1,
+		u64(request_id),
+	); !errs.ok(err) {
+		editor_report(err)
+		return
+	}
+	if err := services.clipboard.start(services.user, {
+		id = request_id,
+		selection = .Clipboard,
+		operation = .Read,
+	}); !errs.ok(err) {
+		editor_cancel_delayed_paste()
+		editor_report(err)
+	}
+}
+
+editor_poll_clipboard :: proc() {
+	if services.clipboard.poll == nil {
+		return
+	}
+	result, ok := services.clipboard.poll(services.user, permanent())
+	if !ok {
+		return
+	}
+	defer platform.result_destroy(&result)
+
+	if result.operation == .Read {
+		matches := editor.delayed_paste.pending &&
+			editor.delayed_paste.target.request_id == u64(result.id)
+		if !errs.ok(result.err) {
+			if matches {
+				editor_cancel_delayed_paste()
+			}
+		} else if matches {
+			editor.typing_group = 0
+			editor_report(editing.delayed_paste_apply(
+				&editor.delayed_paste,
+				&editor.doc,
+				&editor.selection,
+				1,
+				1,
+				u64(result.id),
+				result.data,
+			))
+		}
+	}
+	if !errs.ok(result.err) {
+		err := result.err
+		result.err = {}
+		editor_report(err)
+	}
+}
+
+editor_cancel_delayed_paste :: proc() {
+	if !editor.delayed_paste.pending {
+		return
+	}
+	request_id := platform.Clipboard_Request_ID(editor.delayed_paste.target.request_id)
+	if services.clipboard.cancel != nil {
+		services.clipboard.cancel(services.user, request_id)
+	}
+	editor_report(editing.delayed_paste_cancel(&editor.delayed_paste, u64(request_id)))
+}
+
+editor_next_clipboard_request_id :: proc() -> platform.Clipboard_Request_ID {
+	editor.next_clipboard_request += 1
+	if editor.next_clipboard_request == 0 {
+		editor.next_clipboard_request = 1
+	}
+	return platform.Clipboard_Request_ID(editor.next_clipboard_request)
+}
+
+editor_clipboard_available :: proc() -> bool {
+	return services.clipboard.start != nil && services.clipboard.poll != nil && services.clipboard.cancel != nil
 }
 
 editor_pointer_down :: proc(event: input.Pointer_Down) {

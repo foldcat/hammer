@@ -162,6 +162,7 @@ init :: proc "c" () {
 		request_quit(.Init_Failed, "editor-init", err)
 		return
 	}
+	init_product_clipboard()
 
 	// M01.06: the basic column/tag/body rectangle renderer.
 	render_setup()
@@ -209,6 +210,7 @@ frame :: proc "c" () {
 
 	state.frame_count += 1
 	sync_dpi_changes()
+	editor_poll_clipboard()
 
 	if app.phase == .Initializing {
 		lifecycle.app_enter_running(&app)
@@ -272,6 +274,7 @@ cleanup :: proc "c" () {
 	glyph_cache_destroy()
 	fonts.destroy(&font_set)
 	editor_destroy()
+	cleanup_product_clipboard()
 	sg.shutdown()
 	lifecycle.app_enter_shutdown(&app)
 	log.infof(

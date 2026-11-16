@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M06.11 — Implement copy and paste keybind (control + c / control + v)
+## Current task: M05.09 — Implement native ligature coverage and configuration

@@ -15,7 +15,7 @@
 //     odin run make.odin -file -- text-test        # M05.01 native text dependencies
 //     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
-//     odin run make.odin -file -- typing-test      # M06.09/M06.10 X11 typing/rendering/mouse
+//     odin run make.odin -file -- typing-test      # M06.09–M06.11 X11 typing/mouse/clipboard
 //     odin run make.odin -file -- clipboard-windows-test  # M06.04/M06.08 Windows/Wine clipboard
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
@@ -369,7 +369,17 @@ main :: proc() {
 				"-out:" + BINARY_PATH,
 				"-debug",
 			})
-			run_odin([]string{"xvfb-run", "-a", "python3", TYPING_TEST_HARNESS, "--binary", BINARY_PATH}, true)
+			run_odin([]string{"odin", "build", SPIKE_CLIPBOARD_DIR, "-vet", "-out:" + CLIPBOARD_SPIKE_PATH})
+			run_odin([]string {
+				"xvfb-run",
+				"-a",
+				"python3",
+				TYPING_TEST_HARNESS,
+				"--binary",
+				BINARY_PATH,
+				"--clipboard-peer",
+				CLIPBOARD_SPIKE_PATH,
+			}, true)
 		} else {
 			fmt.eprintln("[Test] typing-test currently requires Linux/X11")
 			os.exit(1)
