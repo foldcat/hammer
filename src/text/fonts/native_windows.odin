@@ -482,6 +482,22 @@ native_ascender :: proc(native: rawptr, pixel_size: u32) -> i64 {
 	return i64(metrics.ascent) * i64(pixel_size) * 64 / i64(metrics.design_units_per_em)
 }
 
+// native_descender returns the positive distance from the baseline to the
+// bottom of the descender line, in 26.6 format. DirectWrite's descent is
+// already positive.
+native_descender :: proc(native: rawptr, pixel_size: u32) -> i64 {
+	if native == nil || pixel_size == 0 {
+		return 0
+	}
+	face := cast(^dw.Native_Face)native
+	metrics: dw.Font_Metrics
+	face.face.vtable.get_metrics(face.face, &metrics)
+	if metrics.design_units_per_em == 0 {
+		return 0
+	}
+	return i64(metrics.descent) * i64(pixel_size) * 64 / i64(metrics.design_units_per_em)
+}
+
 hresult_error :: proc(kind: errs.Kind, message: string, status: windows.HRESULT, allocator := context.allocator) -> errs.Error {
 	return errs.newf(kind, "%s (HRESULT %d)", message, i32(status), allocator = allocator)
 }

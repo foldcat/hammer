@@ -401,3 +401,14 @@ native_ascender :: proc(native: rawptr, pixel_size: u32) -> i64 {
 	}
 	return i64(face.size.metrics.ascender)
 }
+
+// native_descender returns the positive distance from the baseline to the
+// bottom of the descender line, in 26.6 format. FreeType stores the descender
+// as a negative value, so it is negated here.
+native_descender :: proc(native: rawptr, pixel_size: u32) -> i64 {
+	face := ft.Face(native)
+	if face == nil || face.size == nil || pixel_size == 0 {
+		return 0
+	}
+	return -i64(face.size.metrics.descender)
+}

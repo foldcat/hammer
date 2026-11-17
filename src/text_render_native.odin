@@ -184,6 +184,7 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 		return
 	}
 	ascent := f32(fonts.native_ascender(selected.native, pixel_size)) / 64
+	descent := f32(fonts.native_descender(selected.native, pixel_size)) / 64
 	caret_line, line_err := rope.tree_byte_to_line(&doc.tree, selection.active)
 	if !errs.ok(line_err) {
 		text_render_error(line_err)
@@ -202,10 +203,19 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 	for visible_index in 0 ..< line_count {
 		line_index := int(first_line) + visible_index
 		line_top := win.body.y + TEXT_PADDING + f32(visible_index) * line_height
+		baseline_padding := TEXT_PADDING
 		if line_height_override > 0 {
+			// A tag is a single line in a fixed-height strip. Center its
+			// baseline vertically using the font's real ascender/descender so
+			// neither the ascender nor the descender is clipped at the strip's
+			// edge. Clamp to zero: if the font is taller than the strip, the
+			// descender still overflows rather than pushing the cap height off
+			// the top.
 			line_top = win.body.y + f32(visible_index) * line_height
+			text_height := (ascent + descent) / state.dpi.scale
+			baseline_padding = max(0, (line_height - text_height) / 2)
 		}
-		baseline := (line_top + TEXT_PADDING) * state.dpi.scale + ascent
+		baseline := (line_top + baseline_padding) * state.dpi.scale + ascent
 		text_render_line(
 			doc,
 			rope.Line_Index(line_index),

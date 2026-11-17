@@ -101,17 +101,30 @@ def main() -> int:
                 raise HarnessFailure("typing in the column tag did not change its text")
             print("PASS: column tag has independent editable text")
 
-            global_initial = x11.pixels(window, 2, 790, 2, 18)
+            global_initial = x11.pixels(window, 2, 790, 2, 22)
             x11.move(window, 100, 10)
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("G"))
             time.sleep(0.3)
-            if x11.pixels(window, 2, 790, 2, 18) == global_initial:
+            if x11.pixels(window, 2, 790, 2, 22) == global_initial:
                 raise HarnessFailure("typing in the global tag did not change its text")
             if x11.pixels(window, 2, 390, 66, 320) != body_inactive:
                 raise HarnessFailure("tag editing changed the clean body")
             print("PASS: global tag has independent editable text")
+
+            # The global tag strip is the full tag height (20 logical px,
+            # y in [2, 22)). A regression inset its height by 2*pad, which
+            # clipped the bottom of the tag text at y=18. Verify the strip
+            # still paints tag background at its bottom edge (away from text).
+            image = x11.image(window)
+            strip_bottom = x11.lib.XGetPixel(image, 300, 21) & 0xFFFFFF
+            x11.lib.XDestroyImage(image)
+            if strip_bottom != 0x262626:
+                raise HarnessFailure(
+                    f"global tag strip is clipped: bottom pixel #{strip_bottom:06x}, expected tag background 262626"
+                )
+            print("PASS: global tag strip is full height (text not clipped)")
 
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)

@@ -105,7 +105,9 @@ render_frame :: proc() {
 	global_tag.x += pad
 	global_tag.y += pad
 	global_tag.width = max(0, global_tag.width - 2 * pad)
-	global_tag.height = max(0, global_tag.height - 2 * pad)
+	// Keep the full tag height (matching column and window tags). Reducing it
+	// by 2*pad here made the global tag strip shorter than the other tags and
+	// clipped its text at the bottom.
 	render_append_quad(&verts, global_tag, cfg.Theme.Tag_Bg, phys)
 	text_render_begin()
 	text_render_tag(global_tag, &editor.global_tag.doc, editor.global_tag.selection, editor.active_text_kind == .Global_Tag, phys, &verts)
@@ -212,7 +214,6 @@ editor_active_text_rect :: proc(geometry: ^layout.Geometry) -> (layout.Rect, boo
 		rect.x += pad
 		rect.y += pad
 		rect.width = max(0, rect.width - 2 * pad)
-		rect.height = max(0, rect.height - 2 * pad)
 		return rect, true
 	case .Column_Tag:
 		index, ok := layout.find_column(&editor.workspace, editor.active_column)
