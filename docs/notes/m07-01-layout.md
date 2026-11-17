@@ -36,8 +36,10 @@ is a click and does not mutate layout.
 - Vertical movement can reorder windows or resize an adjacent pair. An
   in-place drag on the first window resizes it against its successor;
   otherwise it resizes the dragged window and its predecessor.
-- Horizontal movement has the equivalent column behavior: the first column
+- Horizontal movement of a column control always resizes: the first column
   resizes against its successor, and later columns against their predecessor.
+  Crossing the original column boundary does not reorder columns or move
+  windows (M07.detour-1).
 - Pair resizing preserves combined weight and keeps each side at least 10%
   of that weight. A single window in a column has no vertical resize pair.
 
@@ -50,8 +52,8 @@ Existing text editing and transactions are unchanged.
 `tests/unit/layout/workspace_test.odin` adds 9 tests for IDs/capacity,
 geometry partitioning and hit targets, degenerate/invalid input, window
 moves/reordering/resizing (including first-window/single-window cases),
-column reordering/resizing, click/cancel/outside cancellation, and invalid
-weights.
+column resizing without reordering, click/cancel/outside cancellation, and
+invalid weights.
 
 `tests/integration/layout/x11_harness.py` drives real X11 pointer events
 through first-window resizing, cross-column moves, same-column reordering,

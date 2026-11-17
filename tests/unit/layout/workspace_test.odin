@@ -231,23 +231,34 @@ test_window_drag_down_past_box_swaps :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_column_drag_reorders_and_resizes :: proc(t: ^testing.T) {
+test_column_drag_resizes_without_reordering :: proc(t: ^testing.T) {
 	workspace := make_workspace(t)
 	geometry := arrange_test_workspace(t, &workspace.value)
 	origin := coords.Logical_Point{403, 25}
 	hit := layout.hit_test(&geometry, origin)
 	testing.expect(t, layout.begin_drag(&workspace.value, hit, origin))
 	testing.expect(t, layout.drag_end(&workspace.value, &geometry, {10, 25}, 5))
-	testing.expect(t, workspace.value.columns[0].id == workspace.right)
-	testing.expect(t, workspace.value.columns[1].id == workspace.left)
+	testing.expect(t, workspace.value.columns[0].id == workspace.left)
+	testing.expect(t, workspace.value.columns[1].id == workspace.right)
+	testing.expect(t, workspace.value.columns[0].weight < 1)
+	testing.expect(t, workspace.value.columns[1].weight > 1)
+	testing.expect(t, abs(workspace.value.columns[0].weight + workspace.value.columns[1].weight - 2) < 0.0001)
+	column, _, ok := layout.find_window(&workspace.value, workspace.first)
+	testing.expect(t, ok && column == 0)
+	column, _, ok = layout.find_window(&workspace.value, workspace.third)
+	testing.expect(t, ok && column == 1)
 
+	previous_left := workspace.value.columns[0].weight
 	geometry = arrange_test_workspace(t, &workspace.value)
-	origin = {403, 25}
+	origin = {geometry.columns[1].control.x + 1, 25}
 	hit = layout.hit_test(&geometry, origin)
+	testing.expect(t, hit.kind == .Column_Control && hit.column_id == workspace.right)
 	testing.expect(t, layout.begin_drag(&workspace.value, hit, origin))
-	testing.expect(t, layout.drag_end(&workspace.value, &geometry, {453, 25}, 5))
-	testing.expect(t, workspace.value.columns[0].weight > 1)
-	testing.expect(t, workspace.value.columns[1].weight < 1)
+	testing.expect(t, layout.drag_end(&workspace.value, &geometry, {origin.x + 50, 25}, 5))
+	testing.expect(t, workspace.value.columns[0].id == workspace.left)
+	testing.expect(t, workspace.value.columns[1].id == workspace.right)
+	testing.expect(t, workspace.value.columns[0].weight > previous_left)
+	testing.expect(t, workspace.value.columns[1].weight < 1.8)
 	testing.expect(t, abs(workspace.value.columns[0].weight + workspace.value.columns[1].weight - 2) < 0.0001)
 }
 

@@ -102,16 +102,23 @@ def main() -> int:
             print("PASS: vertical drag resizes the adjacent window pair")
 
             x11.drag(window, (403, 25), (10, 25))
-            wait_for_layout_line(log_path, r"layout: column 2 index 0 weight 1\.0000", args.timeout)
-            print("PASS: horizontal drag reorders columns")
-
-            x11.drag(window, (403, 25), (453, 25))
-            column_resize = wait_for_layout_line(
+            crossing_resize = wait_for_layout_line(
                 log_path,
-                r"layout: column 1 index 1 weight ([0-9.]+)",
+                r"layout: column 2 index 1 weight ([0-9.]+)",
                 args.timeout,
             )
-            if float(column_resize.group(1)) >= 1.0:
+            crossing_weight = float(crossing_resize.group(1))
+            if crossing_weight <= 1.0:
+                raise HarnessFailure("crossing a column boundary did not grow the dragged right column")
+            print("PASS: crossing a column boundary resizes without reordering")
+
+            x11.drag(window, (85, 25), (135, 25))
+            column_resize = wait_for_layout_line(
+                log_path,
+                r"layout: column 2 index 1 weight (1\.[0-6][0-9]*)",
+                args.timeout,
+            )
+            if float(column_resize.group(1)) >= crossing_weight:
                 raise HarnessFailure("horizontal pair drag did not shrink the dragged right column")
             print("PASS: horizontal drag resizes the adjacent column pair")
 

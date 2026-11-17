@@ -451,18 +451,6 @@ end_column_drag :: proc(workspace: ^Workspace, geometry: ^Geometry, drag: Drag_S
 	if !ok {
 		return false
 	}
-	target_index := column_at(geometry, point)
-	if target_index >= 0 && target_index != source_index {
-		target_column := geometry.columns[target_index]
-		insertion := target_index
-		if point.x >= target_column.frame.x + target_column.frame.width / 2 {
-			insertion += 1
-		}
-		return move_column(workspace, source_index, insertion)
-	}
-	if !contains(geometry.columns[source_index].frame, point) {
-		return false
-	}
 	delta := point.x - drag.origin.x
 	if source_index == 0 {
 		if workspace.column_count < 2 {
