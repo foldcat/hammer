@@ -1,4 +1,4 @@
-// Rendering (M01.06, M05.06, M06.09–M06.10, M07.01): workspace rectangles and document text.
+// Rendering (M01.06, M05.06, M06.09–M06.10, M07.01–M07.02): workspace rectangles and per-view document text.
 //
 // This is the application-layer renderer (package main): it draws the
 // logical window geometry from `core/layout` with sokol_gfx,
@@ -20,6 +20,7 @@ import sg "sokol:gfx"
 import "core/errs"
 import coords "core/coords"
 import layout "core/layout"
+import view "core/view"
 
 // VS_SOURCE / FS_SOURCE: colored-quad shader (position in clip
 // coordinates + per-vertex RGBA).
@@ -105,7 +106,7 @@ render_frame :: proc() {
 	global_tag.width = max(0, global_tag.width - 2 * pad)
 	global_tag.height = max(0, global_tag.height - 2 * pad)
 	render_append_quad(&verts, global_tag, cfg.Theme.Tag_Bg, phys)
-	active_body := layout.Rect{}
+	text_render_begin()
 	for column_index in 0 ..< geometry.column_count {
 		column := &geometry.columns[column_index]
 		render_append_quad(&verts, column.tag, cfg.Theme.Tag_Bg, phys)
@@ -117,14 +118,16 @@ render_frame :: proc() {
 			control_color := cfg.Theme.Tag_Fg
 			if placed.id == editor.active_window {
 				control_color = cfg.Theme.Caret
-				active_body = placed.window.body
-				text_render_document(placed.window, phys, &verts)
 			}
 			render_append_quad(&verts, placed.control, control_color, phys)
+			item, found := view.find(&editor.views, placed.id)
+			if found {
+				text_render_document(placed.window, item.selection, item.first_line, placed.id == editor.active_window, phys, &verts)
+			}
 		}
 	}
 	draw_quads(verts[:])
-	text_render_draw(active_body, phys)
+	text_render_draw(phys)
 
 	when ODIN_OS == .Linux {
 		if win, found := window_for_id(&geometry, editor.active_window); found {

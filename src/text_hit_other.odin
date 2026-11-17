@@ -5,6 +5,7 @@ package main
 
 import coords "core/coords"
 import layout "core/layout"
+import rope "core/rope"
 import txn "core/txn"
 
 Text_Hit :: struct {
@@ -12,6 +13,6 @@ Text_Hit :: struct {
 	affinity: txn.Affinity,
 }
 
-text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: layout.Window) -> (Text_Hit, bool) {
+text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: layout.Window, first_line: rope.Line_Index) -> (Text_Hit, bool) {
 	return {}, false
 }

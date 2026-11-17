@@ -621,3 +621,20 @@ resize_weights :: proc(previous, current: ^f32, delta, available: f32) -> bool {
 	current^ = total - next
 	return true
 }
+
+remove_window :: proc(workspace: ^Workspace, id: Window_ID) -> bool {
+	column_index, window_index, ok := find_window(workspace, id)
+	if !ok {
+		return false
+	}
+	column := &workspace.columns[column_index]
+	for index := window_index; index + 1 < column.window_count; index += 1 {
+		column.windows[index] = column.windows[index + 1]
+	}
+	column.window_count -= 1
+	column.windows[column.window_count] = {}
+	if workspace.drag.window_id == id {
+		drag_cancel(workspace)
+	}
+	return true
+}

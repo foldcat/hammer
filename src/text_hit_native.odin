@@ -18,11 +18,11 @@ Text_Hit :: struct {
 	affinity: txn.Affinity,
 }
 
-text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: layout.Window) -> (Text_Hit, bool) {
+text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: layout.Window, first_line: rope.Line_Index) -> (Text_Hit, bool) {
 	if math.is_nan(pos.x) || math.is_inf(pos.x) || math.is_nan(pos.y) || math.is_inf(pos.y) {
 		return {}, false
 	}
-	if win.body.width <= 0 || win.body.height <= 0 {
+	if win.body.width <= 0 || win.body.height <= 0 || first_line < 0 {
 		return {}, false
 	}
 	body := win.body
@@ -48,7 +48,7 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: la
 		return {}, false
 	}
 	line_count := min(
-		rope.tree_line_count(&editor.doc.tree),
+		max(0, rope.tree_line_count(&editor.buffer.doc.tree) - int(first_line)),
 		MAX_VISIBLE_TEXT_LINES,
 		int(body.height / line_height) + 1,
 	)
@@ -57,11 +57,11 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: la
 	}
 
 	line_position := (pos.y - body.y - TEXT_PADDING) / line_height
-	line_index := 0
+	line_index := int(first_line)
 	if line_position >= f32(line_count - 1) {
-		line_index = line_count - 1
+		line_index += line_count - 1
 	} else if line_position > 0 {
-		line_index = int(math.floor(line_position))
+		line_index += int(math.floor(line_position))
 	}
 	start, end, range_err := text_line_range(rope.Line_Index(line_index))
 	if !errs.ok(range_err) {
@@ -70,7 +70,7 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: la
 	}
 	read_length := min(end - start, shaping.DEFAULT_VISIBLE_BYTES + shaping.VISIBLE_LOOKAHEAD_BYTES)
 	line_bytes, read_err := rope.tree_read_all(
-		&editor.doc.tree,
+		&editor.buffer.doc.tree,
 		{start, start + read_length},
 		context.temp_allocator,
 	)

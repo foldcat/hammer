@@ -11,6 +11,7 @@ import errs "core/errs"
 import "core/ime"
 import layout "core/layout"
 import rope "core/rope"
+import txn "core/txn"
 import fonts "text/fonts"
 import glyphcache "text/glyphcache"
 import shaping "text/shaping"
@@ -59,6 +60,7 @@ Glyph_Draw :: struct {
 	page:  int,
 	start: int,
 	count: int,
+	body:  layout.Rect,
 }
 
 MAX_TEXT_GLYPHS_PER_FRAME :: 2048
@@ -72,6 +74,7 @@ text_vertex_buffer: sg.Buffer
 text_sampler: sg.Sampler
 text_vertices: [dynamic]Glyph_Vertex
 text_draws: [dynamic]Glyph_Draw
+text_draw_body: layout.Rect
 text_render_error_logged := false
 
 text_render_setup :: proc() {
@@ -150,10 +153,13 @@ text_render_destroy :: proc() {
 	text_sampler = {}
 }
 
-text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+text_render_begin :: proc() {
 	text_vertices = make([dynamic]Glyph_Vertex, context.temp_allocator)
 	text_draws = make([dynamic]Glyph_Draw, context.temp_allocator)
-	if text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 {
+}
+
+text_render_document :: proc(win: layout.Window, selection: txn.Selection, first_line: rope.Line_Index, active: bool, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+	if text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 {
 		return
 	}
 	selected := fonts.face(&font_set, .Body)
@@ -175,23 +181,30 @@ text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads
 		return
 	}
 	ascent := f32(fonts.native_ascender(selected.native, pixel_size)) / 64
-	caret_line, line_err := rope.tree_byte_to_line(&editor.doc.tree, editor.selection.active)
+	caret_line, line_err := rope.tree_byte_to_line(&editor.buffer.doc.tree, selection.active)
 	if !errs.ok(line_err) {
 		text_render_error(line_err)
 		return
 	}
-	preedit := ime.snapshot(&state.preedit)
+	preedit := ime.Snapshot{}
+	if active {
+		preedit = ime.snapshot(&state.preedit)
+	}
 	line_count := min(
-		rope.tree_line_count(&editor.doc.tree),
+		max(0, rope.tree_line_count(&editor.buffer.doc.tree) - int(first_line)),
 		MAX_VISIBLE_TEXT_LINES,
 		int(win.body.height / line_height) + 1,
 	)
-	for line_index in 0 ..< line_count {
-		line_top := win.body.y + TEXT_PADDING + f32(line_index) * line_height
+	text_draw_body = win.body
+	for visible_index in 0 ..< line_count {
+		line_index := int(first_line) + visible_index
+		line_top := win.body.y + TEXT_PADDING + f32(visible_index) * line_height
 		baseline := (line_top + TEXT_PADDING) * state.dpi.scale + ascent
 		text_render_line(
 			rope.Line_Index(line_index),
 			caret_line,
+			selection,
+			active,
 			preedit,
 			pixel_size,
 			win.body,
@@ -204,7 +217,7 @@ text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads
 	}
 }
 
-text_render_draw :: proc(body: layout.Rect, fb: coords.Physical_Size) {
+text_render_draw :: proc(fb: coords.Physical_Size) {
 	if len(text_vertices) == 0 {
 		return
 	}
@@ -217,19 +230,19 @@ text_render_draw :: proc(body: layout.Rect, fb: coords.Physical_Size) {
 		dst = {buffer = text_vertex_buffer},
 		size = len(text_vertices) * size_of(Glyph_Vertex),
 	})
-	sg.apply_scissor_rectf(
-		body.x * state.dpi.scale,
-		fb.height - (body.y + body.height) * state.dpi.scale,
-		body.width * state.dpi.scale,
-		body.height * state.dpi.scale,
-		false,
-	)
 	defer sg.apply_scissor_rectf(0, 0, fb.width, fb.height, false)
 	sg.apply_pipeline(text_pipeline)
 	for draw in text_draws {
 		if draw.page < 0 || draw.page >= len(glyph_atlas.views) || glyph_atlas.views[draw.page].id == 0 {
 			continue
 		}
+		sg.apply_scissor_rectf(
+			draw.body.x * state.dpi.scale,
+			fb.height - (draw.body.y + draw.body.height) * state.dpi.scale,
+			draw.body.width * state.dpi.scale,
+			draw.body.height * state.dpi.scale,
+			false,
+		)
 		sg.apply_bindings({
 			vertex_buffers = {0 = text_vertex_buffer},
 			views = {0 = glyph_atlas.views[draw.page]},
@@ -242,6 +255,8 @@ text_render_draw :: proc(body: layout.Rect, fb: coords.Physical_Size) {
 text_render_line :: proc(
 	line_index: rope.Line_Index,
 	caret_line: rope.Line_Index,
+	selection: txn.Selection,
+	active: bool,
 	preedit: ime.Snapshot,
 	pixel_size: u32,
 	body: layout.Rect,
@@ -258,7 +273,7 @@ text_render_line :: proc(
 	}
 	read_length := min(end - start, shaping.DEFAULT_VISIBLE_BYTES + shaping.VISIBLE_LOOKAHEAD_BYTES)
 	line_bytes, read_err := rope.tree_read_all(
-		&editor.doc.tree,
+		&editor.buffer.doc.tree,
 		{start, start + read_length},
 		context.temp_allocator,
 	)
@@ -272,12 +287,12 @@ text_render_line :: proc(
 		text_render_error(tab_err)
 		return
 	}
-	composing := preedit.active && caret_line == line_index &&
-		editor.selection.active >= start && editor.selection.active <= start + len(line_bytes)
+	composing := active && preedit.active && caret_line == line_index &&
+		selection.active >= start && selection.active <= start + len(line_bytes)
 	display := string(expansion.text[:])
 	caret_offset := 0
 	if caret_line == line_index {
-		mapped, mapped_ok := shaping.tab_display_offset(expansion, editor.selection.active - start)
+		mapped, mapped_ok := shaping.tab_display_offset(expansion, selection.active - start)
 		if !mapped_ok {
 			return
 		}
@@ -308,7 +323,7 @@ text_render_line :: proc(
 	defer shaping.destroy(&visible.text)
 
 	if !composing {
-		text_render_selection(visible.text, expansion, start, end, body, line_top, line_height, fb, quads)
+		text_render_selection(visible.text, expansion, selection, start, end, body, line_top, line_height, fb, quads)
 	}
 	font_storage: [shaping.MAX_FONTS]shaping.Font
 	font_list := product_shaping_fonts(&font_storage)
@@ -340,9 +355,9 @@ text_render_line :: proc(
 		}
 	}
 
-	if caret_line == line_index && caret_offset >= 0 && caret_offset <= visible.end {
+	if active && caret_line == line_index && caret_offset >= 0 && caret_offset <= visible.end {
 		edge := shaping.Edge.Leading
-		if editor.selection.affinity == .Right {
+		if selection.affinity == .Right {
 			edge = .Trailing
 		}
 		if caret_x, ok := shaping.caret_position(visible.text, caret_offset, edge, state.dpi.scale); ok {
@@ -372,18 +387,18 @@ text_render_line :: proc(
 }
 
 text_line_range :: proc(line_index: rope.Line_Index) -> (int, int, errs.Error) {
-	start, start_err := rope.tree_line_start(&editor.doc.tree, line_index)
+	start, start_err := rope.tree_line_start(&editor.buffer.doc.tree, line_index)
 	if !errs.ok(start_err) {
 		return 0, 0, start_err
 	}
-	end, end_err := rope.tree_line_end(&editor.doc.tree, line_index)
+	end, end_err := rope.tree_line_end(&editor.buffer.doc.tree, line_index)
 	if !errs.ok(end_err) {
 		return 0, 0, end_err
 	}
 	if end > start {
 		tail_start := max(start, end - 2)
 		tail: [2]u8
-		n, read_err := rope.tree_read(&editor.doc.tree, {tail_start, end}, tail[:end - tail_start])
+		n, read_err := rope.tree_read(&editor.buffer.doc.tree, {tail_start, end}, tail[:end - tail_start])
 		if !errs.ok(read_err) {
 			return 0, 0, read_err
 		}
@@ -416,14 +431,15 @@ preedit_caret_byte :: proc(text: string, scalar_caret: int) -> int {
 text_render_selection :: proc(
 	text: shaping.Text,
 	expansion: shaping.Tab_Expansion,
+	selection: txn.Selection,
 	line_start, line_end: int,
 	body: layout.Rect,
 	line_top, line_height: f32,
 	fb: coords.Physical_Size,
 	quads: ^[dynamic]Vertex,
 ) {
-	selection_start := min(editor.selection.anchor, editor.selection.active)
-	selection_end := max(editor.selection.anchor, editor.selection.active)
+	selection_start := min(selection.anchor, selection.active)
+	selection_end := max(selection.anchor, selection.active)
 	source_start := max(selection_start, line_start)
 	source_end := min(selection_end, line_end)
 	if source_start >= source_end {
@@ -496,8 +512,9 @@ text_collect_glyphs :: proc(
 			if x + f32(entry.rect.width) < 0 || y + f32(entry.rect.height) < 0 || x >= fb.width || y >= fb.height {
 				continue
 			}
-			if len(text_draws) == 0 || text_draws[len(text_draws) - 1].page != entry.page {
-				append(&text_draws, Glyph_Draw{page = entry.page, start = len(text_vertices)})
+			if len(text_draws) == 0 || text_draws[len(text_draws) - 1].page != entry.page ||
+				text_draws[len(text_draws) - 1].body != text_draw_body {
+				append(&text_draws, Glyph_Draw{page = entry.page, start = len(text_vertices), body = text_draw_body})
 			}
 			text_append_glyph(x, y, entry, fb)
 			text_draws[len(text_draws) - 1].count += 6

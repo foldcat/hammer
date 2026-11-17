@@ -237,11 +237,11 @@ class X11:
         finally:
             self.lib.XDestroyImage(image)
 
-    def selection_pixels(self, window: int) -> int:
+    def selection_pixels(self, window: int, y_start: int = 24, y_end: int = 130) -> int:
         image = self.image(window)
         try:
             count = 0
-            for y in range(24, 130):
+            for y in range(y_start, y_end):
                 for x in range(2, 220):
                     if self.lib.XGetPixel(image, x, y) & 0xFFFFFF == 0x33B1FF:
                         count += 1
