@@ -37,7 +37,7 @@ Face :: struct {
 	path:       string,
 	family:     string,
 	face_index: int,
-	// Owned native FreeType face; only the platform implementation dereferences it.
+	// Owned native face; only the platform implementation dereferences it.
 	native:     rawptr,
 }
 

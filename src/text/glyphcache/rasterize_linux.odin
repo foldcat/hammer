@@ -9,7 +9,8 @@ import ft "../freetype"
 
 MAX_NATIVE_BITMAP_SIDE :: 4096
 
-native_set_pixel_size :: proc(face: ft.Face, requested: u32, allocator := context.allocator) -> (u32, errs.Error) {
+native_set_pixel_size :: proc(native: rawptr, requested: u32, allocator := context.allocator) -> (u32, errs.Error) {
+	face := ft.Face(native)
 	if face == nil || requested == 0 {
 		return 0, errs.new(.Invalid_Input, "FreeType sizing requires a face and positive pixel size", allocator = allocator)
 	}

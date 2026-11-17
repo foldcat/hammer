@@ -1,4 +1,4 @@
-#+build linux
+#+build linux, windows
 
 package main
 
@@ -12,7 +12,6 @@ import "core/ime"
 import layout "core/layout"
 import rope "core/rope"
 import fonts "text/fonts"
-import ft "text/freetype"
 import glyphcache "text/glyphcache"
 import shaping "text/shaping"
 
@@ -162,7 +161,11 @@ text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads
 		return
 	}
 	pixel_size, size_ok := glyph_pixel_size(state.dpi.scale)
-	if !size_ok || ft.FT_Set_Pixel_Sizes(ft.Face(selected.native), 0, pixel_size) != 0 {
+	if !size_ok {
+		return
+	}
+	if _, size_err := glyphcache.native_set_pixel_size(selected.native, pixel_size); !errs.ok(size_err) {
+		text_render_error(size_err)
 		return
 	}
 
@@ -171,7 +174,7 @@ text_render_document :: proc(win: layout.Window, fb: coords.Physical_Size, quads
 	if line_height <= 0 {
 		return
 	}
-	ascent := f32(selected_native_ascender(selected.native)) / 64
+	ascent := f32(fonts.native_ascender(selected.native, pixel_size)) / 64
 	caret_line, line_err := rope.tree_byte_to_line(&editor.doc.tree, editor.selection.active)
 	if !errs.ok(line_err) {
 		text_render_error(line_err)
@@ -234,14 +237,6 @@ text_render_draw :: proc(body: layout.Rect, fb: coords.Physical_Size) {
 		})
 		sg.draw(draw.start, draw.count, 1)
 	}
-}
-
-selected_native_ascender :: proc(native: rawptr) -> i64 {
-	face := ft.Face(native)
-	if face.size == nil {
-		return 0
-	}
-	return i64(face.size.metrics.ascender)
 }
 
 text_render_line :: proc(

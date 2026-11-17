@@ -37,7 +37,7 @@ Glyph :: struct {
 	y_offset:  i32,
 }
 
-// Cluster is one grapheme in visual order. Advances from split HarfBuzz groups
+// Cluster is one grapheme in visual order. Advances from split shaping groups
 // accumulate per grapheme; ligature advances are subdivided across graphemes.
 Cluster :: struct {
 	source_start: int,

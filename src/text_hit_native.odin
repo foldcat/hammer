@@ -1,4 +1,4 @@
-#+build linux
+#+build linux, windows
 
 package main
 
@@ -9,7 +9,7 @@ import errs "core/errs"
 import rope "core/rope"
 import txn "core/txn"
 import fonts "text/fonts"
-import ft "text/freetype"
+import glyphcache "text/glyphcache"
 import shaping "text/shaping"
 
 Text_Hit :: struct {
@@ -36,7 +36,11 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool) -> (Tex
 		return {}, false
 	}
 	pixel_size, size_ok := glyph_pixel_size(state.dpi.scale)
-	if !size_ok || ft.FT_Set_Pixel_Sizes(ft.Face(selected.native), 0, pixel_size) != 0 {
+	if !size_ok {
+		return {}, false
+	}
+	if _, size_err := glyphcache.native_set_pixel_size(selected.native, pixel_size); !errs.ok(size_err) {
+		text_render_error(size_err)
 		return {}, false
 	}
 	line_height := coords.points_to_logical_px(state.dpi.points) * cfg.Line_Height

@@ -21,6 +21,7 @@
 //     odin run make.odin -file -- typing-test      # M06.09–M06.15 X11 typing/mouse/clipboard/zoom/file-save
 //     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
+//     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
@@ -104,6 +105,8 @@ RECOVERY_TEST_BINARY :: OUT_DIR + "/recovery_kill_test"
 RECOVERY_TEST_HARNESS :: RECOVERY_TEST_DIR + "/kill_harness.py"
 
 TEXT_TEST_DIR :: #directory + "/tests/integration/textdeps"
+TEXT_WINDOWS_TEST_DIR :: #directory + "/tests/integration/text_windows"
+TEXT_WINDOWS_PRODUCT_HARNESS :: TEXT_WINDOWS_TEST_DIR + "/product_harness.py"
 CLIPBOARD_TEST_DIR :: #directory + "/tests/integration/clipboard"
 CLIPBOARD_INTEROP_DRIVER_DIR :: CLIPBOARD_TEST_DIR + "/driver"
 CLIPBOARD_INTEROP_DRIVER :: OUT_DIR + "/clipboard_interop_driver"
@@ -327,6 +330,19 @@ main :: proc() {
 			run_odin([]string{"odin", "test", TEXT_TEST_DIR, "-vet", HAMMER_COLLECTION})
 		} else {
 			fmt.eprintln("[Test] text-test currently requires Linux")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "windows-text-test" {
+		when ODIN_OS == .Windows {
+			run_odin([]string{"odin", "test", TEXT_WINDOWS_TEST_DIR, "-vet", HAMMER_COLLECTION, "-define:ODIN_TEST_THREADS=1"})
+			stage_config([]string{"--no-config"})
+			windows_main([]string{"--no-config"})
+			run_odin([]string{"python", TEXT_WINDOWS_PRODUCT_HARNESS, "--binary", WINDOWS_BINARY_PATH}, true)
+		} else {
+			fmt.eprintln("[Test] windows-text-test requires native Windows")
 			os.exit(1)
 		}
 		return

@@ -1,5 +1,5 @@
-// ICU4C 78.3 common-library bindings for Linux. This pin uses an ICU build
-// with symbol renaming disabled (unadorned C symbols). Break iterators and
+// ICU common-library bindings for Linux and the Windows system ICU. The
+// pinned Linux build and Windows both use unadorned C symbols. Break iterators and
 // bidi objects are caller-owned and closed with their matching close call;
 // input UTF-16 and output maps are borrowed only for the documented call or
 // object lifetime. No ICU allocation is released through an Odin allocator.
@@ -7,11 +7,13 @@ package icu
 
 import "core:c"
 
-when ODIN_OS != .Linux {
-	#panic("hammer ICU bindings currently require Linux")
+when ODIN_OS == .Linux {
+	foreign import lib "system:icuuc"
+} else when ODIN_OS == .Windows {
+	foreign import lib "system:icu.lib"
+} else {
+	#panic("hammer ICU bindings currently require Linux or Windows")
 }
-
-foreign import lib "system:icuuc"
 
 EXPECTED_MAJOR :: 78
 EXPECTED_MINOR :: 3

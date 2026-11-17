@@ -392,3 +392,12 @@ is_generic_family :: proc(family: string) -> bool {
 	}
 	return false
 }
+
+
+native_ascender :: proc(native: rawptr, pixel_size: u32) -> i64 {
+	face := ft.Face(native)
+	if face == nil || face.size == nil || pixel_size == 0 {
+		return 0
+	}
+	return i64(face.size.metrics.ascender)
+}

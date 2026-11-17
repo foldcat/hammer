@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M06-Detour-3 Implement font discovery / rendering on Windows
+## Current task: M07.01 Implement columns/window layout and dragging
