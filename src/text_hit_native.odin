@@ -18,14 +18,13 @@ Text_Hit :: struct {
 	affinity: txn.Affinity,
 }
 
-text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: layout.Window, first_line: rope.Line_Index) -> (Text_Hit, bool) {
+text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: layout.Rect, first_line: rope.Line_Index, doc: ^txn.Doc) -> (Text_Hit, bool) {
 	if math.is_nan(pos.x) || math.is_inf(pos.x) || math.is_nan(pos.y) || math.is_inf(pos.y) {
 		return {}, false
 	}
-	if win.body.width <= 0 || win.body.height <= 0 || first_line < 0 {
+	if doc == nil || body.width <= 0 || body.height <= 0 || first_line < 0 {
 		return {}, false
 	}
-	body := win.body
 	if !clamp_to_visible &&
 		(pos.x < body.x || pos.x > body.x + body.width || pos.y < body.y || pos.y > body.y + body.height) {
 		return {}, false
@@ -48,7 +47,7 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: la
 		return {}, false
 	}
 	line_count := min(
-		max(0, rope.tree_line_count(&editor.buffer.doc.tree) - int(first_line)),
+		max(0, rope.tree_line_count(&doc.tree) - int(first_line)),
 		MAX_VISIBLE_TEXT_LINES,
 		int(body.height / line_height) + 1,
 	)
@@ -63,14 +62,14 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: la
 	} else if line_position > 0 {
 		line_index += int(math.floor(line_position))
 	}
-	start, end, range_err := text_line_range(rope.Line_Index(line_index))
+	start, end, range_err := text_line_range(doc, rope.Line_Index(line_index))
 	if !errs.ok(range_err) {
 		text_render_error(range_err)
 		return {}, false
 	}
 	read_length := min(end - start, shaping.DEFAULT_VISIBLE_BYTES + shaping.VISIBLE_LOOKAHEAD_BYTES)
 	line_bytes, read_err := rope.tree_read_all(
-		&editor.buffer.doc.tree,
+		&doc.tree,
 		{start, start + read_length},
 		context.temp_allocator,
 	)

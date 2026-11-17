@@ -4,6 +4,7 @@ import editing "../editing"
 import errs "../errs"
 import layout "../layout"
 import rope "../rope"
+import tagstate "../tag"
 import txn "../txn"
 
 Buffer_ID :: distinct u64
@@ -14,6 +15,7 @@ View :: struct {
 	buffer_id:     Buffer_ID,
 	selection:     txn.Selection,
 	first_line:    rope.Line_Index,
+	tag:           tagstate.State,
 	delayed_paste: editing.Delayed_Paste,
 	delayed_cut:   editing.Delayed_Cut,
 }
@@ -33,13 +35,18 @@ add :: proc(state: ^State, window_id: layout.Window_ID, buffer_id: Buffer_ID) ->
 	if _, found := find(state, window_id); found {
 		return errs.new(.Conflict, "view: window already has a view")
 	}
-	state.views[state.view_count] = {window_id = window_id, buffer_id = buffer_id}
-	state.view_count += 1
-	return {}
+	for index in 0 ..< MAX_VIEWS {
+		if state.views[index].window_id == 0 {
+			state.views[index] = {window_id = window_id, buffer_id = buffer_id}
+			state.view_count += 1
+			return {}
+		}
+	}
+	return errs.new(.Internal, "view: no stable slot is available")
 }
 
 find :: proc(state: ^State, window_id: layout.Window_ID) -> (^View, bool) {
-	for index in 0 ..< state.view_count {
+	for index in 0 ..< MAX_VIEWS {
 		if state.views[index].window_id == window_id {
 			return &state.views[index], true
 		}
@@ -47,16 +54,15 @@ find :: proc(state: ^State, window_id: layout.Window_ID) -> (^View, bool) {
 	return nil, false
 }
 
+// remove clears a stable slot without moving other views. The caller must
+// cancel pending requests and destroy the tag document before removal.
 remove :: proc(state: ^State, window_id: layout.Window_ID) -> bool {
-	for index in 0 ..< state.view_count {
+	for index in 0 ..< MAX_VIEWS {
 		if state.views[index].window_id != window_id {
 			continue
 		}
-		for next := index; next + 1 < state.view_count; next += 1 {
-			state.views[next] = state.views[next + 1]
-		}
+		state.views[index] = {}
 		state.view_count -= 1
-		state.views[state.view_count] = {}
 		return true
 	}
 	return false
@@ -64,8 +70,8 @@ remove :: proc(state: ^State, window_id: layout.Window_ID) -> bool {
 
 buffer_view_count :: proc(state: ^State, buffer_id: Buffer_ID) -> int {
 	count := 0
-	for item in state.views[:state.view_count] {
-		if item.buffer_id == buffer_id {
+	for item in state.views {
+		if item.window_id != 0 && item.buffer_id == buffer_id {
 			count += 1
 		}
 	}
@@ -73,9 +79,9 @@ buffer_view_count :: proc(state: ^State, buffer_id: Buffer_ID) -> int {
 }
 
 transform_after_edit :: proc(state: ^State, edited_window: layout.Window_ID, ops: []txn.Operation) {
-	for index in 0 ..< state.view_count {
+	for index in 0 ..< MAX_VIEWS {
 		item := &state.views[index]
-		if item.window_id == edited_window {
+		if item.window_id == 0 || item.window_id == edited_window {
 			continue
 		}
 		anchor := txn.Anchor{pos = item.selection.anchor, affinity = item.selection.affinity}
@@ -91,9 +97,9 @@ transform_after_edit :: proc(state: ^State, edited_window: layout.Window_ID, ops
 }
 
 clamp_after_history_jump :: proc(state: ^State, selected_window: layout.Window_ID, byte_count: int) {
-	for index in 0 ..< state.view_count {
+	for index in 0 ..< MAX_VIEWS {
 		item := &state.views[index]
-		if item.window_id == selected_window {
+		if item.window_id == 0 || item.window_id == selected_window {
 			continue
 		}
 		item.selection.anchor = clamp(item.selection.anchor, 0, byte_count)

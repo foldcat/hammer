@@ -15,11 +15,22 @@ import layout "core/layout"
 import lifecycle "core/lifecycle"
 import platform "platform"
 import rope "core/rope"
+import tagstate "core/tag"
 import txn "core/txn"
 import view "core/view"
 
 DEFAULT_BUFFER_ID :: view.Buffer_ID(1)
 DEFAULT_BUFFER_GENERATION :: u64(1)
+GLOBAL_TAG_BUFFER_ID :: u64(2)
+COLUMN_TAG_BUFFER_BASE :: u64(1000)
+WINDOW_TAG_BUFFER_BASE :: u64(2000)
+
+Text_Kind :: enum u8 {
+	Body,
+	Global_Tag,
+	Column_Tag,
+	Window_Tag,
+}
 
 Editor_Buffer :: struct {
 	id:             view.Buffer_ID,
@@ -34,6 +45,10 @@ Editor_Buffer :: struct {
 Editor :: struct {
 	buffer:                 Editor_Buffer,
 	views:                  view.State,
+	global_tag:             tagstate.State,
+	column_tags:            [layout.MAX_COLUMNS]tagstate.State,
+	active_text_kind:       Text_Kind,
+	active_column:          layout.Column_ID,
 	typing_group:           u64,
 	next_group:             u64,
 	next_clipboard_request: u64,
@@ -129,17 +144,36 @@ editor_workspace_init :: proc() -> errs.Error {
 			if add_err := view.add(&editor.views, placed.id, editor.buffer.id); !errs.ok(add_err) {
 				return add_err
 			}
+			item, _ := view.find(&editor.views, placed.id)
+			if tag_err := editor_init_window_tag(item); !errs.ok(tag_err) {
+				return tag_err
+			}
 		}
 	}
+	if tag_err := editor_init_global_and_column_tags(); !errs.ok(tag_err) {
+		return tag_err
+	}
 	editor.active_window = editor.workspace.columns[0].windows[0].id
+	editor.active_text_kind = .Body
 	return {}
 }
 
 editor_destroy :: proc() {
-	for index in 0 ..< editor.views.view_count {
+	for index in 0 ..< view.MAX_VIEWS {
 		item := &editor.views.views[index]
-		editor_cancel_delayed_paste(item)
-		editor_cancel_delayed_cut(item)
+		if item.window_id == 0 {
+			continue
+		}
+		editor_cancel_delayed_paste(&item.delayed_paste)
+		editor_cancel_delayed_cut(&item.delayed_cut)
+		editor_cancel_tag_requests(&item.tag)
+		tagstate.destroy(&item.tag)
+	}
+	editor_cancel_tag_requests(&editor.global_tag)
+	tagstate.destroy(&editor.global_tag)
+	for column_index in 0 ..< editor.workspace.column_count {
+		editor_cancel_tag_requests(&editor.column_tags[column_index])
+		tagstate.destroy(&editor.column_tags[column_index])
 	}
 	lifecycle.close_guard_destroy(&editor.close_guard)
 	txn.doc_destroy(&editor.buffer.doc)
@@ -205,12 +239,10 @@ editor_consume_input :: proc(event: input.Event) {
 		editor_perform(a)
 	case keybind.Indent:
 		editor.typing_group = 0
-		previous_revision := txn.doc_revision(&editor.buffer.doc)
-		editor_finish_edit(editor_active_view(), previous_revision, editing.indent(&editor.buffer.doc, editor_active_selection(), .Indent, {style = .Tabs}))
+		editor_indent_active(.Indent)
 	case keybind.Outdent:
 		editor.typing_group = 0
-		previous_revision := txn.doc_revision(&editor.buffer.doc)
-		editor_finish_edit(editor_active_view(), previous_revision, editing.indent(&editor.buffer.doc, editor_active_selection(), .Outdent, {style = .Tabs}))
+		editor_indent_active(.Outdent)
 	case keybind.Zoom_In:
 		editor.typing_group = 0
 		apply_text_zoom(.In)
@@ -222,10 +254,12 @@ editor_consume_input :: proc(event: input.Event) {
 		apply_text_zoom(.Reset)
 	case keybind.Undo:
 		editor.typing_group = 0
-		selection, err := txn.doc_undo(&editor.buffer.doc)
+		selection, err := txn.doc_undo(editor_active_doc())
 		if errs.ok(err) {
 			editor_active_selection()^ = selection
-			editor_finish_history_jump(editor_active_view())
+			if editor.active_text_kind == .Body {
+				editor_finish_history_jump(editor_active_view())
+			}
 		} else {
 			if err.kind != .NotFound {
 				log.warnf("edit: %v", errs.describe(err))
@@ -234,10 +268,12 @@ editor_consume_input :: proc(event: input.Event) {
 		}
 	case keybind.Redo:
 		editor.typing_group = 0
-		selection, err := txn.doc_redo(&editor.buffer.doc)
+		selection, err := txn.doc_redo(editor_active_doc())
 		if errs.ok(err) {
 			editor_active_selection()^ = selection
-			editor_finish_history_jump(editor_active_view())
+			if editor.active_text_kind == .Body {
+				editor_finish_history_jump(editor_active_view())
+			}
 		} else {
 			if err.kind != .NotFound {
 				log.warnf("edit: %v", errs.describe(err))
@@ -266,11 +302,11 @@ editor_consume_input :: proc(event: input.Event) {
 
 editor_copy_selection :: proc() {
 	editor_poll_clipboard()
-	item := editor_active_view()
-	if item == nil {
+	selection := editor_active_selection()
+	if selection == nil {
 		return
 	}
-	range := editing.selection_range(item.selection)
+	range := editing.selection_range(selection^)
 	if range.start == range.end {
 		return
 	}
@@ -284,11 +320,12 @@ editor_copy_selection :: proc() {
 
 editor_cut_selection :: proc() {
 	editor_poll_clipboard()
-	item := editor_active_view()
-	if item == nil {
+	selection := editor_active_selection()
+	cut := editor_active_delayed_cut()
+	if selection == nil || cut == nil {
 		return
 	}
-	range := editing.selection_range(item.selection)
+	range := editing.selection_range(selection^)
 	if range.start == range.end {
 		return
 	}
@@ -298,18 +335,18 @@ editor_cut_selection :: proc() {
 	}
 	request_id := editor_next_clipboard_request_id()
 	if err := editing.delayed_cut_begin(
-		&item.delayed_cut,
-		&editor.buffer.doc,
-		&item.selection,
-		u64(item.buffer_id),
-		editor.buffer.generation,
+		cut,
+		editor_active_doc(),
+		selection,
+		editor_active_buffer_id(),
+		DEFAULT_BUFFER_GENERATION,
 		u64(request_id),
 	); !errs.ok(err) {
 		editor_report(err)
 		return
 	}
 	if err := editor_start_clipboard_write(range, request_id); !errs.ok(err) {
-		editor_cancel_delayed_cut(item)
+		editor_cancel_delayed_cut(cut)
 		editor_report(err)
 	}
 }
@@ -321,7 +358,7 @@ editor_start_clipboard_write :: proc(
 	if range.end - range.start > platform.DEFAULT_MAX_CLIPBOARD_BYTES {
 		return errs.new(.Resource_Limit, "clipboard: selection exceeds the transfer budget")
 	}
-	data, err := rope.tree_read_all(&editor.buffer.doc.tree, range, context.temp_allocator)
+	data, err := rope.tree_read_all(&editor_active_doc().tree, range, context.temp_allocator)
 	if !errs.ok(err) {
 		return err
 	}
@@ -336,8 +373,9 @@ editor_start_clipboard_write :: proc(
 
 editor_begin_paste :: proc() {
 	editor_poll_clipboard()
-	item := editor_active_view()
-	if item == nil {
+	selection := editor_active_selection()
+	paste := editor_active_delayed_paste()
+	if selection == nil || paste == nil {
 		return
 	}
 	if !editor_clipboard_available() {
@@ -346,11 +384,11 @@ editor_begin_paste :: proc() {
 	}
 	request_id := editor_next_clipboard_request_id()
 	if err := editing.delayed_paste_begin(
-		&item.delayed_paste,
-		&editor.buffer.doc,
-		&item.selection,
-		u64(item.buffer_id),
-		editor.buffer.generation,
+		paste,
+		editor_active_doc(),
+		selection,
+		editor_active_buffer_id(),
+		DEFAULT_BUFFER_GENERATION,
 		u64(request_id),
 	); !errs.ok(err) {
 		editor_report(err)
@@ -361,7 +399,7 @@ editor_begin_paste :: proc() {
 		selection = .Clipboard,
 		operation = .Read,
 	}); !errs.ok(err) {
-		editor_cancel_delayed_paste(item)
+		editor_cancel_delayed_paste(paste)
 		editor_report(err)
 	}
 }
@@ -375,47 +413,7 @@ editor_poll_clipboard :: proc() {
 		return
 	}
 	defer platform.result_destroy(&result)
-
-	for index in 0 ..< editor.views.view_count {
-		item := &editor.views.views[index]
-		if result.operation == .Read && item.delayed_paste.pending &&
-			item.delayed_paste.target.request_id == u64(result.id) {
-			if !errs.ok(result.err) {
-				editor_cancel_delayed_paste(item)
-			} else {
-				editor.typing_group = 0
-				previous_revision := txn.doc_revision(&editor.buffer.doc)
-				editor_finish_edit(item, previous_revision, editing.delayed_paste_apply(
-					&item.delayed_paste,
-					&editor.buffer.doc,
-					&item.selection,
-					u64(item.buffer_id),
-					editor.buffer.generation,
-					u64(result.id),
-					result.data,
-				))
-			}
-			break
-		}
-		if result.operation == .Write && item.delayed_cut.pending &&
-			item.delayed_cut.target.request_id == u64(result.id) {
-			if !errs.ok(result.err) {
-				editor_cancel_delayed_cut(item)
-			} else {
-				editor.typing_group = 0
-				previous_revision := txn.doc_revision(&editor.buffer.doc)
-				editor_finish_edit(item, previous_revision, editing.delayed_cut_apply(
-					&item.delayed_cut,
-					&editor.buffer.doc,
-					&item.selection,
-					u64(item.buffer_id),
-					editor.buffer.generation,
-					u64(result.id),
-				))
-			}
-			break
-		}
-	}
+	editor_poll_view_clipboards(&result)
 	if !errs.ok(result.err) {
 		err := result.err
 		result.err = {}
@@ -423,23 +421,23 @@ editor_poll_clipboard :: proc() {
 	}
 }
 
-editor_cancel_delayed_paste :: proc(item: ^view.View) {
-	if item == nil || !item.delayed_paste.pending {
+editor_cancel_delayed_paste :: proc(paste: ^editing.Delayed_Paste) {
+	if paste == nil || !paste.pending {
 		return
 	}
-	request_id := platform.Clipboard_Request_ID(item.delayed_paste.target.request_id)
+	request_id := platform.Clipboard_Request_ID(paste.target.request_id)
 	if services.clipboard.cancel != nil {
 		services.clipboard.cancel(services.user, request_id)
 	}
-	editor_report(editing.delayed_paste_cancel(&item.delayed_paste, u64(request_id)))
+	editor_report(editing.delayed_paste_cancel(paste, u64(request_id)))
 }
 
-editor_cancel_delayed_cut :: proc(item: ^view.View) {
-	if item == nil || !item.delayed_cut.pending {
+editor_cancel_delayed_cut :: proc(cut: ^editing.Delayed_Cut) {
+	if cut == nil || !cut.pending {
 		return
 	}
-	request_id := item.delayed_cut.target.request_id
-	editor_report(editing.delayed_cut_cancel(&item.delayed_cut, request_id))
+	request_id := cut.target.request_id
+	editor_report(editing.delayed_cut_cancel(cut, request_id))
 }
 
 editor_next_clipboard_request_id :: proc() -> platform.Clipboard_Request_ID {
@@ -472,16 +470,29 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 		editor_cancel_close_review()
 		return
 	}
-	if area.kind != .Body {
+	#partial switch area.kind {
+	case .Global_Tag:
+		editor_activate_text(.Global_Tag)
+	case .Column_Tag:
+		editor_activate_text(.Column_Tag, area.column_id)
+	case .Window_Tag:
+		editor_activate_window(area.window_id)
+		editor_activate_text(.Window_Tag, area.column_id)
+	case .Body:
+		editor_activate_window(area.window_id)
+	case:
 		return
 	}
-	editor_activate_window(area.window_id)
-	item := editor_active_view()
-	win, ok := window_for_id(&geometry, area.window_id)
-	if !ok || item == nil {
+	rect, rect_ok := editor_active_text_rect(&geometry)
+	selection := editor_active_selection()
+	if !rect_ok || selection == nil {
 		return
 	}
-	hit, hit_ok := text_hit_test(event.pos, false, win, item.first_line)
+	first_line := rope.Line_Index(0)
+	if item := editor_active_view(); editor.active_text_kind == .Body && item != nil {
+		first_line = item.first_line
+	}
+	hit, hit_ok := text_hit_test(event.pos, false, rect, first_line, editor_active_doc())
 	if !hit_ok {
 		return
 	}
@@ -489,9 +500,9 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 	editor_cancel_close_review()
 	anchor := hit.offset
 	if .Shift in event.modifiers {
-		anchor = item.selection.anchor
+		anchor = selection.anchor
 	}
-	item.selection = txn.Selection{anchor = anchor, active = hit.offset, affinity = hit.affinity}
+	selection^ = txn.Selection{anchor = anchor, active = hit.offset, affinity = hit.affinity}
 	editor.mouse_selecting = true
 }
 
@@ -562,18 +573,26 @@ editor_log_layout_drag :: proc(kind: layout.Drag_Kind, column_id: layout.Column_
 }
 
 editor_update_mouse_selection :: proc(pos: coords.Logical_Point) {
-	item := editor_active_view()
-	win, _, ok := current_window()
-	if !ok || item == nil {
+	geometry, _, geometry_ok := current_layout()
+	selection := editor_active_selection()
+	if !geometry_ok || selection == nil {
 		return
 	}
-	hit, hit_ok := text_hit_test(pos, true, win, item.first_line)
+	rect, ok := editor_active_text_rect(&geometry)
+	if !ok {
+		return
+	}
+	first_line := rope.Line_Index(0)
+	if item := editor_active_view(); editor.active_text_kind == .Body && item != nil {
+		first_line = item.first_line
+	}
+	hit, hit_ok := text_hit_test(pos, true, rect, first_line, editor_active_doc())
 	if !hit_ok {
 		return
 	}
-	item.selection.active = hit.offset
-	item.selection.affinity = hit.affinity
-	item.selection.visual_column = 0
+	selection.active = hit.offset
+	selection.affinity = hit.affinity
+	selection.visual_column = 0
 }
 
 editor_cancel_mouse_selection :: proc() {
@@ -586,14 +605,25 @@ editor_cancel_pointer_gesture :: proc() {
 }
 
 editor_perform :: proc(action: editing.Action) {
-	item := editor_active_view()
-	previous_revision := txn.doc_revision(&editor.buffer.doc)
-	editor_finish_edit(item, previous_revision, editing.perform_with_options(
-		&editor.buffer.doc,
-		editor_active_selection(),
-		action,
-		{autopair = cfg.Autopair, indent = {style = .Tabs}},
-	))
+	doc := editor_active_doc()
+	previous_revision := txn.doc_revision(doc)
+	err := editing.perform_with_options(doc, editor_active_selection(), action, {autopair = cfg.Autopair, indent = {style = .Tabs}})
+	if editor.active_text_kind == .Body {
+		editor_finish_edit(editor_active_view(), previous_revision, err)
+	} else {
+		editor_report(err)
+	}
+}
+
+editor_indent_active :: proc(direction: editing.Indent_Direction) {
+	doc := editor_active_doc()
+	previous_revision := txn.doc_revision(doc)
+	err := editing.indent(doc, editor_active_selection(), direction, {style = .Tabs})
+	if editor.active_text_kind == .Body {
+		editor_finish_edit(editor_active_view(), previous_revision, err)
+	} else {
+		editor_report(err)
+	}
 }
 
 editor_begin_typing_group :: proc() {
@@ -650,6 +680,7 @@ editor_save :: proc() {
 	}
 	editor.buffer.saved_revision = result.revision
 	editor.buffer.capture = result.capture
+	editor_refresh_window_tags()
 	log.infof("file: saved %s (revision %d)", editor.buffer.path, result.revision)
 }
 
@@ -705,13 +736,17 @@ editor_close_active_view :: proc() {
 		return
 	}
 	window_id := item.window_id
-	editor_cancel_delayed_paste(item)
-	editor_cancel_delayed_cut(item)
+	editor_cancel_delayed_paste(&item.delayed_paste)
+	editor_cancel_delayed_cut(&item.delayed_cut)
+	editor_cancel_tag_requests(&item.tag)
+	tagstate.destroy(&item.tag)
 	view.remove(&editor.views, window_id)
 	layout.remove_window(&editor.workspace, window_id)
 	next := editor_active_view()
-	if next == nil && editor.views.view_count > 0 {
-		editor_activate_window(editor.views.views[0].window_id)
+	if next == nil {
+		if first := editor_first_view(); first != nil {
+			editor_activate_window(first.window_id)
+		}
 	}
 	editor_cancel_pointer_gesture()
 	lifecycle.close_guard_reset(&editor.close_guard)

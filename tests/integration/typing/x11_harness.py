@@ -225,12 +225,12 @@ class X11:
             raise HarnessFailure("XGetImage failed")
         return image
 
-    def pixels(self, window: int) -> bytes:
+    def pixels(self, window: int, x_start: int = 10, x_end: int = 220, y_start: int = 66, y_end: int = 130) -> bytes:
         image = self.image(window)
         try:
             digest = hashlib.sha256()
-            for y in range(24, 80):
-                for x in range(10, 220):
+            for y in range(y_start, y_end):
+                for x in range(x_start, x_end):
                     pixel = self.lib.XGetPixel(image, x, y)
                     digest.update(int(pixel).to_bytes(8, sys.byteorder))
             return digest.digest()
@@ -359,8 +359,9 @@ def main() -> int:
             x11.tap(ord("x"))
             x11.tap(0xFF08)
             time.sleep(0.3)
-            if x11.pixels(window) != initial:
-                raise HarnessFailure("Backspace did not remove the typed grapheme")
+            backspaced = x11.pixels(window)
+            if backspaced != initial:
+                raise HarnessFailure(f"Backspace did not restore initial pixels: {backspaced.hex()} != {initial.hex()}")
             print("PASS: Backspace consumes a real product key event")
             for _ in range(2):
                 x11.key(0xFFE3, True)

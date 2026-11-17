@@ -158,8 +158,8 @@ text_render_begin :: proc() {
 	text_draws = make([dynamic]Glyph_Draw, context.temp_allocator)
 }
 
-text_render_document :: proc(win: layout.Window, selection: txn.Selection, first_line: rope.Line_Index, active: bool, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
-	if text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 {
+text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, active: bool, line_height_override: f32, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+	if doc == nil || text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 {
 		return
 	}
 	selected := fonts.face(&font_set, .Body)
@@ -177,11 +177,14 @@ text_render_document :: proc(win: layout.Window, selection: txn.Selection, first
 
 	font_logical := coords.points_to_logical_px(state.dpi.points)
 	line_height := font_logical * cfg.Line_Height
+	if line_height_override > 0 {
+		line_height = line_height_override
+	}
 	if line_height <= 0 {
 		return
 	}
 	ascent := f32(fonts.native_ascender(selected.native, pixel_size)) / 64
-	caret_line, line_err := rope.tree_byte_to_line(&editor.buffer.doc.tree, selection.active)
+	caret_line, line_err := rope.tree_byte_to_line(&doc.tree, selection.active)
 	if !errs.ok(line_err) {
 		text_render_error(line_err)
 		return
@@ -191,7 +194,7 @@ text_render_document :: proc(win: layout.Window, selection: txn.Selection, first
 		preedit = ime.snapshot(&state.preedit)
 	}
 	line_count := min(
-		max(0, rope.tree_line_count(&editor.buffer.doc.tree) - int(first_line)),
+		max(0, rope.tree_line_count(&doc.tree) - int(first_line)),
 		MAX_VISIBLE_TEXT_LINES,
 		int(win.body.height / line_height) + 1,
 	)
@@ -199,8 +202,12 @@ text_render_document :: proc(win: layout.Window, selection: txn.Selection, first
 	for visible_index in 0 ..< line_count {
 		line_index := int(first_line) + visible_index
 		line_top := win.body.y + TEXT_PADDING + f32(visible_index) * line_height
+		if line_height_override > 0 {
+			line_top = win.body.y + f32(visible_index) * line_height
+		}
 		baseline := (line_top + TEXT_PADDING) * state.dpi.scale + ascent
 		text_render_line(
+			doc,
 			rope.Line_Index(line_index),
 			caret_line,
 			selection,
@@ -253,6 +260,7 @@ text_render_draw :: proc(fb: coords.Physical_Size) {
 }
 
 text_render_line :: proc(
+	doc: ^txn.Doc,
 	line_index: rope.Line_Index,
 	caret_line: rope.Line_Index,
 	selection: txn.Selection,
@@ -266,14 +274,14 @@ text_render_line :: proc(
 	fb: coords.Physical_Size,
 	quads: ^[dynamic]Vertex,
 ) {
-	start, end, range_err := text_line_range(line_index)
+	start, end, range_err := text_line_range(doc, line_index)
 	if !errs.ok(range_err) {
 		text_render_error(range_err)
 		return
 	}
 	read_length := min(end - start, shaping.DEFAULT_VISIBLE_BYTES + shaping.VISIBLE_LOOKAHEAD_BYTES)
 	line_bytes, read_err := rope.tree_read_all(
-		&editor.buffer.doc.tree,
+		&doc.tree,
 		{start, start + read_length},
 		context.temp_allocator,
 	)
@@ -386,19 +394,19 @@ text_render_line :: proc(
 	}
 }
 
-text_line_range :: proc(line_index: rope.Line_Index) -> (int, int, errs.Error) {
-	start, start_err := rope.tree_line_start(&editor.buffer.doc.tree, line_index)
+text_line_range :: proc(doc: ^txn.Doc, line_index: rope.Line_Index) -> (int, int, errs.Error) {
+	start, start_err := rope.tree_line_start(&doc.tree, line_index)
 	if !errs.ok(start_err) {
 		return 0, 0, start_err
 	}
-	end, end_err := rope.tree_line_end(&editor.buffer.doc.tree, line_index)
+	end, end_err := rope.tree_line_end(&doc.tree, line_index)
 	if !errs.ok(end_err) {
 		return 0, 0, end_err
 	}
 	if end > start {
 		tail_start := max(start, end - 2)
 		tail: [2]u8
-		n, read_err := rope.tree_read(&editor.buffer.doc.tree, {tail_start, end}, tail[:end - tail_start])
+		n, read_err := rope.tree_read(&doc.tree, {tail_start, end}, tail[:end - tail_start])
 		if !errs.ok(read_err) {
 			return 0, 0, read_err
 		}

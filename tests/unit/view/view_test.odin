@@ -4,6 +4,7 @@ import "core:testing"
 
 import errs "hammer:core/errs"
 import layout "hammer:core/layout"
+import tagstate "hammer:core/tag"
 import txn "hammer:core/txn"
 import view "hammer:core/view"
 
@@ -87,4 +88,36 @@ test_remove_view_preserves_buffer_and_other_views :: proc(t: ^testing.T) {
 	third, third_ok := view.find(&state, 3)
 	testing.expect(t, first_ok && third_ok)
 	testing.expect(t, first.buffer_id == 7 && third.buffer_id == 7)
+}
+
+@(test)
+test_remove_does_not_relocate_owned_tag_documents :: proc(t: ^testing.T) {
+	state := make_state(t)
+	for index in 0 ..< view.MAX_VIEWS {
+		item := &state.views[index]
+		if item.window_id == 0 {
+			continue
+		}
+		err := tagstate.init(&item.tag, "New | ", context.allocator)
+		testing.expect(t, errs.ok(err))
+		errs.destroy(&err)
+	}
+	first, _ := view.find(&state, 1)
+	second, _ := view.find(&state, 2)
+	third, _ := view.find(&state, 3)
+	second_address := &second.tag.doc
+	third_address := &third.tag.doc
+	tagstate.destroy(&first.tag)
+	testing.expect(t, view.remove(&state, 1))
+	second_after, _ := view.find(&state, 2)
+	third_after, _ := view.find(&state, 3)
+	testing.expect(t, &second_after.tag.doc == second_address)
+	testing.expect(t, &third_after.tag.doc == third_address)
+	text, err := tagstate.text(&second_after.tag, context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	testing.expect(t, text == "New | ")
+	delete(text, context.allocator)
+	tagstate.destroy(&second_after.tag)
+	tagstate.destroy(&third_after.tag)
 }

@@ -20,6 +20,7 @@ import sg "sokol:gfx"
 import "core/errs"
 import coords "core/coords"
 import layout "core/layout"
+import txn "core/txn"
 import view "core/view"
 
 // VS_SOURCE / FS_SOURCE: colored-quad shader (position in clip
@@ -107,10 +108,13 @@ render_frame :: proc() {
 	global_tag.height = max(0, global_tag.height - 2 * pad)
 	render_append_quad(&verts, global_tag, cfg.Theme.Tag_Bg, phys)
 	text_render_begin()
+	text_render_tag(global_tag, &editor.global_tag.doc, editor.global_tag.selection, editor.active_text_kind == .Global_Tag, phys, &verts)
 	for column_index in 0 ..< geometry.column_count {
 		column := &geometry.columns[column_index]
 		render_append_quad(&verts, column.tag, cfg.Theme.Tag_Bg, phys)
 		render_append_quad(&verts, column.control, cfg.Theme.Git_Modified, phys)
+		column_active := editor.active_text_kind == .Column_Tag && editor.active_column == column.id
+		text_render_tag(tag_content_rect(column.tag, column.control), &editor.column_tags[column_index].doc, editor.column_tags[column_index].selection, column_active, phys, &verts)
 		for window_index in 0 ..< column.window_count {
 			placed := column.windows[window_index]
 			render_append_quad(&verts, placed.window.tag, cfg.Theme.Tag_Bg, phys)
@@ -122,7 +126,10 @@ render_frame :: proc() {
 			render_append_quad(&verts, placed.control, control_color, phys)
 			item, found := view.find(&editor.views, placed.id)
 			if found {
-				text_render_document(placed.window, item.selection, item.first_line, placed.id == editor.active_window, phys, &verts)
+				window_tag_active := editor.active_text_kind == .Window_Tag && editor.active_window == placed.id
+				text_render_tag(tag_content_rect(placed.window.tag, placed.control), &item.tag.doc, item.tag.selection, window_tag_active, phys, &verts)
+				body_active := editor.active_text_kind == .Body && editor.active_window == placed.id
+				text_render_document(placed.window, &editor.buffer.doc, item.selection, item.first_line, body_active, 0, phys, &verts)
 			}
 		}
 	}
@@ -139,6 +146,18 @@ render_frame :: proc() {
 workspace_metrics :: proc() -> layout.Metrics {
 	font_px := coords.points_to_logical_px(state.dpi.points)
 	return layout.default_metrics(font_px + 4)
+}
+
+tag_content_rect :: proc(tag, control: layout.Rect) -> layout.Rect {
+	content := tag
+	content.x += control.width
+	content.width = max(0, content.width - control.width)
+	return content
+}
+
+text_render_tag :: proc(rect: layout.Rect, doc: ^txn.Doc, selection: txn.Selection, active: bool, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+	win := layout.Window{body = rect}
+	text_render_document(win, doc, selection, 0, active, rect.height, fb, quads)
 }
 
 current_layout :: proc() -> (layout.Geometry, coords.Physical_Size, bool) {
@@ -176,6 +195,39 @@ window_for_id :: proc(geometry: ^layout.Geometry, id: layout.Window_ID) -> (layo
 		for placed in column.windows[:column.window_count] {
 			if placed.id == id {
 				return placed.window, true
+			}
+		}
+	}
+	return {}, false
+}
+
+editor_active_text_rect :: proc(geometry: ^layout.Geometry) -> (layout.Rect, bool) {
+	switch editor.active_text_kind {
+	case .Body:
+		win, ok := window_for_id(geometry, editor.active_window)
+		return win.body, ok
+	case .Global_Tag:
+		rect := geometry.global_tag
+		pad := workspace_metrics().pad
+		rect.x += pad
+		rect.y += pad
+		rect.width = max(0, rect.width - 2 * pad)
+		rect.height = max(0, rect.height - 2 * pad)
+		return rect, true
+	case .Column_Tag:
+		index, ok := layout.find_column(&editor.workspace, editor.active_column)
+		if !ok || index >= geometry.column_count {
+			return {}, false
+		}
+		column := geometry.columns[index]
+		return tag_content_rect(column.tag, column.control), true
+	case .Window_Tag:
+		for column_index in 0 ..< geometry.column_count {
+			column := &geometry.columns[column_index]
+			for placed in column.windows[:column.window_count] {
+				if placed.id == editor.active_window {
+					return tag_content_rect(placed.window.tag, placed.control), true
+				}
 			}
 		}
 	}

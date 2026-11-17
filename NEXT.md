@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M07.03 Implement tag editing and generated command state
+## Current task: M07.04 Implement original mouse actions/chords
