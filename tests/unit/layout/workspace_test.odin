@@ -193,6 +193,44 @@ test_first_window_and_column_drag_resizes_next_pair :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_window_drag_up_into_neighbor_resizes :: proc(t: ^testing.T) {
+	workspace := make_workspace(t)
+	geometry := arrange_test_workspace(t, &workspace.value)
+	// Window 2's box is at y=325; drag it up into window 1's area while staying
+	// below window 1's box (y=46). This is a resize, not a swap, even though the
+	// release point leaves window 2's own frame.
+	origin := coords.Logical_Point{3, 335}
+	hit := layout.hit_test(&geometry, origin)
+	testing.expect(t, hit.window_id == workspace.second)
+	testing.expect(t, layout.begin_drag(&workspace.value, hit, origin))
+	testing.expect(t, layout.drag_end(&workspace.value, &geometry, {3, 200}, 5))
+	first := workspace.value.columns[0].windows[0].weight
+	second := workspace.value.columns[0].windows[1].weight
+	testing.expect(t, first < 1 && second > 1)
+	testing.expect(t, abs(first + second - 2) < 0.0001)
+	_, index, ok := layout.find_window(&workspace.value, workspace.second)
+	testing.expect(t, ok && index == 1)
+}
+
+@(test)
+test_window_drag_down_past_box_swaps :: proc(t: ^testing.T) {
+	workspace := make_workspace(t)
+	geometry := arrange_test_workspace(t, &workspace.value)
+	// Window 1's box is at y=46; window 2's box is at y=325. Dropping at y=400
+	// is below window 2's box (swap) but still above its frame midpoint, which
+	// the old midpoint-based logic treated as a resize.
+	origin := coords.Logical_Point{3, 50}
+	hit := layout.hit_test(&geometry, origin)
+	testing.expect(t, hit.window_id == workspace.first)
+	testing.expect(t, layout.begin_drag(&workspace.value, hit, origin))
+	testing.expect(t, layout.drag_end(&workspace.value, &geometry, {3, 400}, 5))
+	_, first_index, first_ok := layout.find_window(&workspace.value, workspace.first)
+	_, second_index, second_ok := layout.find_window(&workspace.value, workspace.second)
+	testing.expect(t, first_ok && first_index == 1)
+	testing.expect(t, second_ok && second_index == 0)
+}
+
+@(test)
 test_column_drag_reorders_and_resizes :: proc(t: ^testing.T) {
 	workspace := make_workspace(t)
 	geometry := arrange_test_workspace(t, &workspace.value)

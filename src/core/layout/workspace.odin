@@ -484,17 +484,22 @@ end_window_drag :: proc(workspace: ^Workspace, geometry: ^Geometry, drag: Drag_S
 	if target_column < 0 {
 		return false
 	}
-	insertion := window_insertion(geometry.columns[target_column], point.y)
 	if target_column != source_column {
+		// Dropped in another column: insert at the release position using the
+		// target window's frame midpoint (upper half inserts before, lower half
+		// after).
+		insertion := window_insertion(geometry.columns[target_column], point.y)
 		return move_window(workspace, source_column, source_window, target_column, insertion)
 	}
+	// Same column: a box dragged past another window's box swaps the two; any
+	// shorter drag resizes the dragged window against its neighbor. The release
+	// point can sit outside the dragged window's own frame (dragging the box up
+	// into the neighbor's area), so no containment check applies.
+	insertion := window_box_insertion(geometry.columns[source_column], point.y)
 	if insertion != source_window && insertion != source_window + 1 {
-		return move_window(workspace, source_column, source_window, target_column, insertion)
+		return move_window(workspace, source_column, source_window, source_column, insertion)
 	}
 	column := &workspace.columns[source_column]
-	if !contains(geometry.columns[source_column].windows[source_window].window.frame, point) {
-		return false
-	}
 	delta := point.y - drag.origin.y
 	if source_window == 0 {
 		if column.window_count < 2 {
@@ -519,10 +524,29 @@ column_at :: proc(geometry: ^Geometry, point: coords.Logical_Point) -> int {
 	return -1
 }
 
+// window_insertion returns the index at which a window dropped at vertical
+// position `y` would be inserted in a target column, using each window's frame
+// midpoint as the boundary (upper half inserts before, lower half after). Used
+// for cross-column moves.
 window_insertion :: proc(column: Column_Geometry, y: f32) -> int {
 	for index in 0 ..< column.window_count {
 		placed := column.windows[index]
 		if y < placed.window.frame.y + placed.window.frame.height / 2 {
+			return index
+		}
+	}
+	return column.window_count
+}
+
+// window_box_insertion returns the insertion index for a window dragged to
+// vertical position `y` within its own column, using each window's control box
+// (the tag handle) as the boundary. Acme swaps a window only when its box is
+// dragged past another window's box, so the box position — not the much lower
+// frame midpoint — is the swap threshold.
+window_box_insertion :: proc(column: Column_Geometry, y: f32) -> int {
+	for index in 0 ..< column.window_count {
+		placed := column.windows[index]
+		if y < placed.control.y {
 			return index
 		}
 	}
