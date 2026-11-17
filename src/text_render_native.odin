@@ -185,7 +185,11 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 	}
 	ascent := f32(fonts.native_ascender(selected.native, pixel_size)) / 64
 	descent := f32(fonts.native_descender(selected.native, pixel_size)) / 64
-	caret_line, line_err := rope.tree_byte_to_line(&doc.tree, selection.active)
+	byte_count := rope.tree_byte_count(&doc.tree)
+	bounded_selection := selection
+	bounded_selection.anchor = clamp(bounded_selection.anchor, 0, byte_count)
+	bounded_selection.active = clamp(bounded_selection.active, 0, byte_count)
+	caret_line, line_err := rope.tree_byte_to_line(&doc.tree, bounded_selection.active)
 	if !errs.ok(line_err) {
 		text_render_error(line_err)
 		return
@@ -220,7 +224,7 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 			doc,
 			rope.Line_Index(line_index),
 			caret_line,
-			selection,
+			bounded_selection,
 			active,
 			preedit,
 			pixel_size,

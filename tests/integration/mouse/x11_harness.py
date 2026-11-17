@@ -240,6 +240,31 @@ def main() -> int:
             x11.key(0xFFE3, False)
             print("PASS: window-tag hit testing uses the rendered text origin")
 
+            x11.move(window, 70, 76)
+            x11.button(1, True)
+            for x in (85, 105, 130, 155, 180):
+                x11.move(window, x, 76)
+                time.sleep(0.03)
+            x11.button(2, True)
+            x11.button(2, False)
+            x11.button(1, False)
+            wait_for_log(log_path, "mouse: chord Cut applied transaction=", args.timeout, occurrence=2)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("s"))
+            x11.key(0xFFE3, False)
+            wait_for_log(log_path, "file: saved ", args.timeout, occurrence=2)
+            remaining = source.read_bytes()
+            if not remaining.startswith(b"alpha b") or not remaining.endswith(b"\nLook\nPut\nx"):
+                raise HarnessFailure(f"drag-to-end cut removed unintended text: {remaining!r}")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.tap(ord("s"))
+            x11.key(0xFFE3, False)
+            wait_for_log(log_path, "file: saved ", args.timeout, occurrence=3)
+            if source.read_bytes() != b"alpha beta alpha\nLook\nPut\nx":
+                raise HarnessFailure("undo did not restore the exact drag-to-end source text")
+            print("PASS: drag-to-end 1-2 removes only the selected suffix")
+
             x11.move(window, 85, 52)
             x11.button(2, True)
             x11.button(2, False)
@@ -250,6 +275,66 @@ def main() -> int:
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)
             process = None
+
+            single = sandbox / "single.txt"
+            single.write_bytes(b"alpha beta alpha")
+            cut_log = sandbox / "drag-end.log"
+            clipboard_owner.stop()
+            clipboard_owner = None
+            with cut_log.open("wb") as log:
+                process = subprocess.Popen(
+                    [str(binary), str(single)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    env=environment,
+                )
+                window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, window)
+                x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                time.sleep(0.3)
+                x11.move(window, 23, 80)
+                x11.button(1, True)
+                x11.move(window, 176, 89)
+                x11.button(3, True)
+                x11.button(3, False)
+                x11.button(1, False)
+                wait_for_log(cut_log, "clipboard: selection has no owner or refused UTF-8 conversion", args.timeout)
+                x11.move(window, 121, 117)
+                x11.button(1, True)
+                x11.button(1, False)
+                for iteration in range(1, 11):
+                    x11.move(window, 70, 76)
+                    x11.button(1, True)
+                    for x in (85, 105, 130, 155, 180):
+                        x11.move(window, x, 76)
+                        time.sleep(0.03)
+                    x11.button(2, True)
+                    x11.button(2, False)
+                    x11.button(1, False)
+                    wait_for_log(cut_log, "mouse: chord Cut applied transaction=", args.timeout, occurrence=iteration)
+                    x11.key(0xFFE3, True)
+                    x11.tap(ord("s"))
+                    x11.key(0xFFE3, False)
+                    wait_for_log(cut_log, "file: saved ", args.timeout, occurrence=2 * iteration - 1)
+                    if single.read_bytes() != b"alpha b":
+                        raise HarnessFailure(
+                            f"document-end cut {iteration} removed unintended bytes: {single.read_bytes()!r}"
+                        )
+                    x11.key(0xFFE3, True)
+                    x11.tap(ord("z"))
+                    x11.tap(ord("s"))
+                    x11.key(0xFFE3, False)
+                    wait_for_log(cut_log, "file: saved ", args.timeout, occurrence=2 * iteration)
+                    if single.read_bytes() != b"alpha beta alpha":
+                        raise HarnessFailure(f"cut/undo cycle {iteration} did not restore the source")
+                if "render-text:" in cut_log.read_text(encoding="utf-8", errors="replace"):
+                    raise HarnessFailure(f"cut left a stale selection that aborted rendering; log: {cut_log}")
+                print("PASS: ten document-end cut/undo cycles preserve the unselected prefix")
+                x11.tap(0xFF1B)
+                wait_for_exit(process, args.timeout, cut_log)
+                process = None
             succeeded = True
             return 0
     finally:

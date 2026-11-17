@@ -52,10 +52,21 @@ test_other_view_selections_follow_edit_operations :: proc(t: ^testing.T) {
 		txn.Insert{pos = 2, data = []u8{'x', 'y'}},
 		txn.Delete{range = {start = 8, end = 10}},
 	}
-	view.transform_after_edit(&state, 1, ops)
+	view.transform_after_edit(&state, 1, ops, 10)
 	testing.expect(t, first.selection.anchor == 2 && first.selection.active == 2)
 	testing.expect(t, second.selection.anchor == 1 && second.selection.active == 6)
 	testing.expect(t, third.selection.anchor == 5 && third.selection.active == 10)
+}
+
+@(test)
+test_edit_clamps_stale_other_view_selection_to_document_end :: proc(t: ^testing.T) {
+	state := make_state(t)
+	second, _ := view.find(&state, 2)
+	second.selection = {anchor = 11, active = 11, visual_column = 8}
+	ops := []txn.Operation{txn.Delete{range = {start = 0, end = 7}}}
+	view.transform_after_edit(&state, 1, ops, 4)
+	testing.expect(t, second.selection.anchor == 4 && second.selection.active == 4)
+	testing.expect(t, second.selection.visual_column == 0)
 }
 
 @(test)

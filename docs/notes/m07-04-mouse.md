@@ -68,14 +68,16 @@ capture, Unicode/token bounds, bracket/line expansion, and wrapped search over
 small rope chunks.
 
 `tests/integration/mouse/x11_harness.py` uses real X11 events and an external
-clipboard owner in a unique sandbox. Its twelve scenarios cover button-3
+clipboard owner in a unique sandbox. Its fourteen scenarios cover button-3
 literal search, 2-1 `Look`, double-click plus 1-2-3 Snarf, collapsed-caret
 chord insertion and highlighting, ordinary Ctrl+V without highlighting,
 quick-release paste from Hammer's own clipboard, 1-3-2 paste reversal,
 button-2 `Put`, selected unknown text not creating a marker file, exact tag
-hit-testing, tag `Del` closing one view safely, and empty-clipboard recovery.
-`odin run make.odin -file -- mouse-test --no-config` builds and runs this
-harness.
+hit-testing, tag `Del` closing one view safely, empty-clipboard recovery, and
+line/document-end cuts. The final scenario performs ten cut/undo cycles after
+a failed paste and checks exact saved bytes and render health after every
+cycle. `odin run make.odin -file -- mouse-test --no-config` builds and runs
+this harness.
 
 A follow-up regression reproduced a two-glyph window-tag caret error: mouse
 hit-testing used the full tag rectangle while rendering used the inner content
@@ -86,21 +88,31 @@ and control offsets as rendering. The regression clicks before `Del`, inserts
 The empty-owner/UTF-8-refusal clipboard warning was also exercised directly.
 It leaves the document unchanged and later chords recover. Quick-release paste
 from Hammer's own Snarf-owned clipboard passed ten consecutive stress runs;
-pointer motion during the chord was included. An intermittent failure with a
-populated clipboard could not be reproduced, so no unrelated clipboard rewrite
-or private stale-buffer fallback was introduced.
+pointer motion during the chord was included.
+
+A user log subsequently isolated the drag-to-end symptom: one Cut transaction
+was followed by `rope: byte offset 11 outside [0, 4]` in the renderer, not by a
+second deletion. `view.transform_after_edit` now clamps every other view's
+selection to the new document length, including stale selections that predate
+the edit. The text renderer also bounds its local selection before computing
+the caret line, so a stale view cannot abort drawing of the remaining text. A
+view unit test covers the exact 11-to-4-byte case. Stress runs checked exact
+bytes after hundreds of document-end cut/undo transactions, including cycles
+preceded by a failed paste.
 
 Commands run successfully:
 
 ```text
 odin test tests/unit/mouse -vet -collection:hammer=src
     -> 9/9 passed, allocator tracking clean
+odin test tests/unit/view -vet -collection:hammer=src
+    -> 6/6 passed, allocator tracking clean
 odin check src -vet -collection:sokol=third_party/sokol/sokol
     -> passed
 odin run make.odin -file -- mouse-test --no-config
-    -> all twelve X11 mouse checks passed
+    -> all fourteen X11 mouse checks passed
 odin run make.odin -file -- test
-    -> all 350 core unit tests passed, allocator tracking clean
+    -> all 351 core unit tests passed, allocator tracking clean
 odin run make.odin -file -- typing-test --no-config
     -> all typing/mouse/clipboard/zoom/save/dirty-close checks passed
 odin run make.odin -file -- layout-test --no-config
@@ -116,10 +128,10 @@ odin check src -target:windows_amd64 -vet -collection:sokol=third_party/sokol/so
 ```
 
 The product regressions and mouse harness were rerun after the final
-collapsed-caret and paste-selection changes. No native Windows/Wine run or real-desktop visual review
-was performed. Completed chord reversal was exercised, but a forced
-still-pending clipboard reversal race was not deterministically injected.
-Windows pointer behavior is source-checked only.
+view-selection and renderer changes. No native Windows/Wine run or real-desktop
+visual review was performed. Completed chord reversal was exercised, but a
+forced still-pending clipboard reversal race was not deterministically
+injected. Windows pointer behavior is source-checked only.
 
 ## Next task
 

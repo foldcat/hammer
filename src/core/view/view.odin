@@ -78,7 +78,7 @@ buffer_view_count :: proc(state: ^State, buffer_id: Buffer_ID) -> int {
 	return count
 }
 
-transform_after_edit :: proc(state: ^State, edited_window: layout.Window_ID, ops: []txn.Operation) {
+transform_after_edit :: proc(state: ^State, edited_window: layout.Window_ID, ops: []txn.Operation, byte_count: int) {
 	for index in 0 ..< MAX_VIEWS {
 		item := &state.views[index]
 		if item.window_id == 0 || item.window_id == edited_window {
@@ -90,8 +90,8 @@ transform_after_edit :: proc(state: ^State, edited_window: layout.Window_ID, ops
 			txn.anchor_apply_op(&anchor, op)
 			txn.anchor_apply_op(&active, op)
 		}
-		item.selection.anchor = anchor.pos
-		item.selection.active = active.pos
+		item.selection.anchor = clamp(anchor.pos, 0, byte_count)
+		item.selection.active = clamp(active.pos, 0, byte_count)
 		item.selection.visual_column = 0
 	}
 }
