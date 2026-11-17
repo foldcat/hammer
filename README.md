@@ -41,6 +41,15 @@ odin run make.odin -file -- test            # core unit tests (headless)
 odin run make.odin -file -- text-test       # pinned native text bindings (Linux)
 ```
 
+Open an existing UTF-8 file and save edits with Ctrl+S:
+
+```bash
+./build/hammer filename
+```
+
+Save As (Ctrl+Shift+S) is deferred until tag commands can request a destination
+path. Invalid UTF-8 and unsupported encodings are not converted implicitly.
+
 The native text stack is pinned to FreeType 2.15.0, HarfBuzz 12.3.2, ICU4C
 78.3 (Unicode 17.0, with unversioned C symbols), fontconfig 2.18.3, and
 shaderc/glslc 2026.3. Linux product startup discovers and opens body/tag/

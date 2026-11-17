@@ -158,7 +158,15 @@ init :: proc "c" () {
 		clear_value = sg.Color{c[0], c[1], c[2], c[3]},
 	}
 
-	if err := editor_init(); !errs.ok(err) {
+	if len(os.args) > 2 {
+		request_quit(.Init_Failed, "command-line", errs.new(.Invalid_Input, "usage: hammer [filename]"))
+		return
+	}
+	startup_path := ""
+	if len(os.args) == 2 {
+		startup_path = os.args[1]
+	}
+	if err := editor_init(startup_path); !errs.ok(err) {
 		request_quit(.Init_Failed, "editor-init", err)
 		return
 	}

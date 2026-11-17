@@ -253,7 +253,7 @@ M06.11  Implement copy and paste keybind (control + c / control + v).
 M06.12  Implement newline indentation inheritance (tab level kept on Enter).
 M06.13  Implement parenthesis/bracket/quote autopair policy.
 M06.14  Implement text zoom keybinds (control + plus/minus/zero; control + mouse wheel).
-M06.15  Implement save keybind (control + s) and save as (control + shift + s).
+M06.15  Implement save keybind (control + s). Save As is deferred until tag commands can request a destination path.
 ```
 
 ### Acceptance

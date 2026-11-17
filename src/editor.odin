@@ -1,10 +1,14 @@
 package main
 
 import "core:log"
+import "core:strings"
 
 import coords "core/coords"
 import editing "core/editing"
 import errs "core/errs"
+import filecodec "core/filecodec"
+import fileload "core/fileload"
+import filesave "core/filesave"
 import input "core/input"
 import keybind "core/keybind"
 import lifecycle "core/lifecycle"
@@ -15,6 +19,9 @@ import txn "core/txn"
 Editor :: struct {
 	doc:                    txn.Doc,
 	selection:              txn.Selection,
+	path:                   string,
+	capture:                fileload.Capture,
+	metadata:               filecodec.Metadata,
 	saved_revision:         u64,
 	typing_group:           u64,
 	next_group:             u64,
@@ -27,10 +34,60 @@ Editor :: struct {
 
 editor: Editor
 
-editor_init :: proc() -> errs.Error {
-	if err := txn.doc_init(&editor.doc, {}, permanent()); !errs.ok(err) {
-		return err
+editor_init :: proc(path := "") -> errs.Error {
+	if path == "" {
+		if err := txn.doc_init(&editor.doc, {}, permanent()); !errs.ok(err) {
+			return err
+		}
+	} else {
+		loaded: fileload.Loaded
+		if err := fileload.load_file(&loaded, path, {}, context.temp_allocator); !errs.ok(err) {
+			owned := errs.new(err.kind, err.message, allocator = permanent())
+			errs.destroy(&err)
+			return owned
+		}
+		defer fileload.loaded_destroy(&loaded)
+
+		decoded := filecodec.decode_loaded(&loaded)
+		if !filecodec.can_edit(decoded) {
+			return errs.newf(
+				.Unsupported,
+				"file: %s is not valid editable UTF-8 (status %v)",
+				path,
+				decoded.status,
+				allocator = permanent(),
+			)
+		}
+		content, alloc_err := make([]byte, decoded.content.length, context.temp_allocator)
+		if alloc_err != .None {
+			return errs.newf(
+				.Resource_Limit,
+				"file: cannot allocate %d bytes for %s: %v",
+				decoded.content.length,
+				path,
+				alloc_err,
+				allocator = permanent(),
+			)
+		}
+		defer delete(content, context.temp_allocator)
+		it := filecodec.stream_iter_init(decoded.content)
+		position := 0
+		for {
+			span, ok := filecodec.stream_iter_next(&it)
+			if !ok {
+				break
+			}
+			copy(content[position:], span)
+			position += len(span)
+		}
+		if err := txn.doc_init_from_bytes(&editor.doc, content, {}, permanent()); !errs.ok(err) {
+			return err
+		}
+		editor.capture = loaded.capture
+		editor.metadata = decoded.metadata
+		log.infof("file: opened %s (%d bytes)", path, decoded.content.length)
 	}
+	editor.path = strings.clone(path, permanent())
 	if err := lifecycle.close_guard_init(&editor.close_guard, {}, permanent()); !errs.ok(err) {
 		txn.doc_destroy(&editor.doc)
 		return err
@@ -43,6 +100,7 @@ editor_destroy :: proc() {
 	editor_cancel_delayed_cut()
 	lifecycle.close_guard_destroy(&editor.close_guard)
 	txn.doc_destroy(&editor.doc)
+	delete(editor.path, permanent())
 	editor = {}
 }
 
@@ -148,7 +206,12 @@ editor_consume_input :: proc(event: input.Event) {
 	case keybind.Paste:
 		editor.typing_group = 0
 		editor_begin_paste()
-	case keybind.Save, keybind.Save_As, keybind.Find, keybind.Open_Finder, keybind.Execute_Text, keybind.Look_Text:
+	case keybind.Save:
+		editor.typing_group = 0
+		editor_save()
+	case keybind.Save_As:
+		log.debug("edit: Save As is deferred until tag commands can request a destination path")
+	case keybind.Find, keybind.Open_Finder, keybind.Execute_Text, keybind.Look_Text:
 		log.debugf("edit: action %T is not connected in this milestone", action)
 	case keybind.Request_Quit, keybind.Close_Window:
 	}
@@ -402,6 +465,48 @@ editor_begin_typing_group :: proc() {
 
 editor_dirty :: proc() -> bool {
 	return txn.doc_revision(&editor.doc) != editor.saved_revision
+}
+
+editor_save :: proc() {
+	if editor.path == "" {
+		editor_report(errs.new(
+			.Unsupported,
+			"save: no file path; Save As requires a destination from tag commands",
+			allocator = context.temp_allocator,
+		))
+		return
+	}
+	if !editor_dirty() {
+		log.debugf("file: %s is already saved", editor.path)
+		return
+	}
+
+	revision := txn.doc_revision(&editor.doc)
+	result, err := filesave.save_tree(
+		{tree = &editor.doc.tree, root = editor.doc.tree.root, revision = revision},
+		editor.path,
+		editor.metadata,
+		{disk_check = .Unchanged, expected = editor.capture},
+		context.temp_allocator,
+	)
+	if !errs.ok(err) {
+		if result.replaced {
+			log.error("file: save published the destination but did not complete; buffer remains dirty and must not be blindly retried")
+		}
+		editor_report(err)
+		return
+	}
+	if result.revision != txn.doc_revision(&editor.doc) {
+		editor_report(errs.new(
+			.Conflict,
+			"file: saved revision no longer matches the current buffer",
+			allocator = context.temp_allocator,
+		))
+		return
+	}
+	editor.saved_revision = result.revision
+	editor.capture = result.capture
+	log.infof("file: saved %s (revision %d)", editor.path, result.revision)
 }
 
 editor_cancel_close_review :: proc() {

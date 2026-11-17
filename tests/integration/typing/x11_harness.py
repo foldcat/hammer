@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X11 typing, mouse, clipboard, rendering, undo, and dirty-close smoke test."""
+"""Real X11 typing, mouse, clipboard, rendering, file save, undo, and dirty-close smoke test."""
 
 from __future__ import annotations
 
@@ -735,6 +735,87 @@ def main() -> int:
         if rebuilds < 8:
             raise HarnessFailure(f"expected at least 8 zoom cache rebuilds, got {rebuilds}")
         print(f"PASS: {rebuilds} zoom rebuilds reused {zoom_page_counts[0]} glyph atlas page(s)")
+
+        save_path = sandbox / "save file.txt"
+        original_bytes = b"\xef\xbb\xbfalpha\r\nbeta\r\n"
+        save_path.write_bytes(original_bytes)
+        save_log_path = sandbox / "file-save.log"
+        with save_log_path.open("wb") as log:
+            process = subprocess.Popen(
+                [str(binary), save_path.name],
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                cwd=sandbox,
+            )
+            window = x11.find_window(args.timeout)
+            x11.lib.XMapRaised(x11.display, window)
+            x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+            x11.lib.XSync(x11.display, 0)
+            time.sleep(0.3)
+            x11.key(0xFFE3, True)
+            x11.tap(0xFF57)
+            x11.key(0xFFE3, False)
+            x11.tap(ord("x"))
+            x11.key(0xFFE3, True)
+            x11.tap(ord("s"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.5)
+            if save_path.read_bytes() != original_bytes + b"x":
+                raise HarnessFailure("CLI open/Ctrl+S did not preserve the loaded bytes, BOM, and CRLF newlines")
+            x11.tap(0xFF1B)
+            wait_for_exit(process, args.timeout, save_log_path)
+            process = None
+        print("PASS: hammer filename loads a relative path and Ctrl+S saves BOM/newline-exact text")
+
+        reopen_log_path = sandbox / "file-reopen-conflict.log"
+        with reopen_log_path.open("wb") as log:
+            process = subprocess.Popen(
+                [str(binary), save_path.name],
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                cwd=sandbox,
+            )
+            window = x11.find_window(args.timeout)
+            x11.lib.XMapRaised(x11.display, window)
+            x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+            x11.lib.XSync(x11.display, 0)
+            time.sleep(0.3)
+            x11.key(0xFFE3, True)
+            x11.tap(0xFF57)
+            x11.key(0xFFE3, False)
+            x11.tap(ord("y"))
+            x11.key(0xFFE3, True)
+            x11.tap(ord("s"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.5)
+            if save_path.read_bytes() != original_bytes + b"xy":
+                raise HarnessFailure("reopening the saved file did not reload its exact saved bytes")
+
+            x11.tap(ord("z"))
+            save_path.write_bytes(b"external\r\n")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("s"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.5)
+            if save_path.read_bytes() != b"external\r\n":
+                raise HarnessFailure("Ctrl+S overwrote an external change instead of reporting a conflict")
+            x11.tap(0xFF1B)
+            time.sleep(0.3)
+            if process.poll() is not None:
+                raise HarnessFailure("a failed save cleared dirty state and allowed lossy close")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.key(0xFFE3, False)
+            time.sleep(0.2)
+            x11.tap(0xFF1B)
+            wait_for_exit(process, args.timeout, reopen_log_path)
+            process = None
+        print("PASS: reopen/save round-trip and external-change failure preserve dirty-close protection")
+
         succeeded = True
         print("PASS: all X11 product typing checks")
         return 0
