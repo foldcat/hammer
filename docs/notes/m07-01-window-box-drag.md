@@ -33,6 +33,16 @@ This matches Acme: dragging a window's box below another window's box swaps
 them; otherwise the pair is resized. The resize direction (first window against
 its successor, others against their predecessor) is unchanged.
 
+## Layout-test pixel check
+
+`tests/integration/layout/x11_harness.py` sampled the rendered pixels with the
+shared harness default of `x in [10, 220)`, which missed the active window's
+caret at the body's left edge (`x=2`). Since the buffer is empty, moving the
+active window to another column changes only the caret position, so the check
+"moving the active window did not change rendered pixels" falsely reported no
+change. The sample region now starts at `x=2` (both the baseline and the
+post-move comparison), so the caret leaving the column is captured.
+
 ## Regression coverage
 
 `tests/unit/layout/workspace_test.odin` adds two tests:
@@ -55,6 +65,8 @@ odin test tests/unit/layout -vet -collection:hammer=src
     -> 17/17 passed (15 existing + 2 new)
 odin run make.odin -file -- test
     -> all core unit tests passed
+odin run make.odin -file -- layout-test --no-config
+    -> all six drag checks passed (previously failed at the move-pixel check)
 odin run make.odin -file -- view-test --no-config
     -> all four independent-view checks passed
 odin run make.odin -file -- typing-test --no-config
@@ -65,12 +77,6 @@ A real X11 drag confirmed the product behavior: dragging the bottom window's box
 up grows it (weight 1.4874, logged) instead of no-op/swapping, and dragging the
 top window's box down past the other box swaps the two.
 
-## Not validated / pre-existing
+## Not validated
 
 Native Windows/Wine runtime (cross-build type-checks only).
-
-`odin run make.odin -file -- layout-test --no-config` still fails at
-"moving the active window did not change rendered pixels". This is the same
-pre-existing rendering-check failure documented in
-`docs/notes/m07-03-global-tag-clip.md`; the drag steps themselves (in-place
-resize and cross-column move) pass, so the box-drag fix does not affect it.
