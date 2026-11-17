@@ -3,7 +3,6 @@ package main
 import "core:log"
 import "core:strings"
 
-import coords "core/coords"
 import editing "core/editing"
 import errs "core/errs"
 import filecodec "core/filecodec"
@@ -13,6 +12,7 @@ import input "core/input"
 import keybind "core/keybind"
 import layout "core/layout"
 import lifecycle "core/lifecycle"
+import mouse "core/mouse"
 import platform "platform"
 import rope "core/rope"
 import tagstate "core/tag"
@@ -52,7 +52,12 @@ Editor :: struct {
 	typing_group:           u64,
 	next_group:             u64,
 	next_clipboard_request: u64,
-	mouse_selecting:        bool,
+	mouse_gesture:          mouse.State,
+	mouse_argument:         Mouse_Argument,
+	mouse_chord:            Mouse_Chord_Runtime,
+	mouse_expanded:         bool,
+	mouse_revision:         u64,
+	mouse_generation:       u64,
 	workspace:              layout.Workspace,
 	active_window:          layout.Window_ID,
 	close_guard:            lifecycle.Close_Guard,
@@ -159,6 +164,7 @@ editor_workspace_init :: proc() -> errs.Error {
 }
 
 editor_destroy :: proc() {
+	editor_cancel_pointer_gesture()
 	for index in 0 ..< view.MAX_VIEWS {
 		item := &editor.views.views[index]
 		if item.window_id == 0 {
@@ -301,64 +307,25 @@ editor_consume_input :: proc(event: input.Event) {
 }
 
 editor_copy_selection :: proc() {
-	editor_poll_clipboard()
-	selection := editor_active_selection()
-	if selection == nil {
-		return
-	}
-	range := editing.selection_range(selection^)
-	if range.start == range.end {
-		return
-	}
-	if !editor_clipboard_available() {
-		editor_report(errs.new(.Unsupported, "clipboard: native service is unavailable"))
-		return
-	}
-	request_id := editor_next_clipboard_request_id()
-	editor_report(editor_start_clipboard_write(range, request_id))
+	editor_copy_target(editor_active_text_target())
 }
 
 editor_cut_selection :: proc() {
-	editor_poll_clipboard()
-	selection := editor_active_selection()
-	cut := editor_active_delayed_cut()
-	if selection == nil || cut == nil {
-		return
-	}
-	range := editing.selection_range(selection^)
-	if range.start == range.end {
-		return
-	}
-	if !editor_clipboard_available() {
-		editor_report(errs.new(.Unsupported, "clipboard: native service is unavailable"))
-		return
-	}
-	request_id := editor_next_clipboard_request_id()
-	if err := editing.delayed_cut_begin(
-		cut,
-		editor_active_doc(),
-		selection,
-		editor_active_buffer_id(),
-		DEFAULT_BUFFER_GENERATION,
-		u64(request_id),
-	); !errs.ok(err) {
-		editor_report(err)
-		return
-	}
-	if err := editor_start_clipboard_write(range, request_id); !errs.ok(err) {
-		editor_cancel_delayed_cut(cut)
-		editor_report(err)
-	}
+	editor_cut_target(editor_active_text_target())
 }
 
 editor_start_clipboard_write :: proc(
+	doc: ^txn.Doc,
 	range: rope.Byte_Range,
 	request_id: platform.Clipboard_Request_ID,
 ) -> errs.Error {
+	if doc == nil {
+		return errs.new(.Invalid_Input, "clipboard: no source document")
+	}
 	if range.end - range.start > platform.DEFAULT_MAX_CLIPBOARD_BYTES {
 		return errs.new(.Resource_Limit, "clipboard: selection exceeds the transfer budget")
 	}
-	data, err := rope.tree_read_all(&editor_active_doc().tree, range, context.temp_allocator)
+	data, err := rope.tree_read_all(&doc.tree, range, context.temp_allocator)
 	if !errs.ok(err) {
 		return err
 	}
@@ -372,36 +339,7 @@ editor_start_clipboard_write :: proc(
 }
 
 editor_begin_paste :: proc() {
-	editor_poll_clipboard()
-	selection := editor_active_selection()
-	paste := editor_active_delayed_paste()
-	if selection == nil || paste == nil {
-		return
-	}
-	if !editor_clipboard_available() {
-		editor_report(errs.new(.Unsupported, "clipboard: native service is unavailable"))
-		return
-	}
-	request_id := editor_next_clipboard_request_id()
-	if err := editing.delayed_paste_begin(
-		paste,
-		editor_active_doc(),
-		selection,
-		editor_active_buffer_id(),
-		DEFAULT_BUFFER_GENERATION,
-		u64(request_id),
-	); !errs.ok(err) {
-		editor_report(err)
-		return
-	}
-	if err := services.clipboard.start(services.user, {
-		id = request_id,
-		selection = .Clipboard,
-		operation = .Read,
-	}); !errs.ok(err) {
-		editor_cancel_delayed_paste(paste)
-		editor_report(err)
-	}
+	editor_paste_target(editor_active_text_target())
 }
 
 editor_poll_clipboard :: proc() {
@@ -452,101 +390,6 @@ editor_clipboard_available :: proc() -> bool {
 	return services.clipboard.start != nil && services.clipboard.poll != nil && services.clipboard.cancel != nil
 }
 
-editor_pointer_down :: proc(event: input.Pointer_Down) {
-	editor_cancel_pointer_gesture()
-	if event.button != .Left || .Ctrl in event.modifiers || .Alt in event.modifiers || .Super in event.modifiers {
-		return
-	}
-	geometry, _, geometry_ok := current_layout()
-	if !geometry_ok {
-		return
-	}
-	area := layout.hit_test(&geometry, event.pos)
-	if area.kind == .Window_Control {
-		editor_activate_window(area.window_id)
-	}
-	if layout.begin_drag(&editor.workspace, area, event.pos) {
-		editor.typing_group = 0
-		editor_cancel_close_review()
-		return
-	}
-	#partial switch area.kind {
-	case .Global_Tag:
-		editor_activate_text(.Global_Tag)
-	case .Column_Tag:
-		editor_activate_text(.Column_Tag, area.column_id)
-	case .Window_Tag:
-		editor_activate_window(area.window_id)
-		editor_activate_text(.Window_Tag, area.column_id)
-	case .Body:
-		editor_activate_window(area.window_id)
-	case:
-		return
-	}
-	rect, rect_ok := editor_active_text_rect(&geometry)
-	selection := editor_active_selection()
-	if !rect_ok || selection == nil {
-		return
-	}
-	first_line := rope.Line_Index(0)
-	if item := editor_active_view(); editor.active_text_kind == .Body && item != nil {
-		first_line = item.first_line
-	}
-	hit, hit_ok := text_hit_test(event.pos, false, rect, first_line, editor_active_doc())
-	if !hit_ok {
-		return
-	}
-	editor.typing_group = 0
-	editor_cancel_close_review()
-	anchor := hit.offset
-	if .Shift in event.modifiers {
-		anchor = selection.anchor
-	}
-	selection^ = txn.Selection{anchor = anchor, active = hit.offset, affinity = hit.affinity}
-	editor.mouse_selecting = true
-}
-
-editor_pointer_move :: proc(event: input.Pointer_Move) {
-	if layout.dragging(&editor.workspace) {
-		if .Left not_in event.buttons {
-			layout.drag_cancel(&editor.workspace)
-			return
-		}
-		layout.drag_move(&editor.workspace, event.pos)
-		return
-	}
-	if !editor.mouse_selecting {
-		return
-	}
-	if .Left not_in event.buttons {
-		editor_cancel_mouse_selection()
-		return
-	}
-	editor_update_mouse_selection(event.pos)
-}
-
-editor_pointer_up :: proc(event: input.Pointer_Up) {
-	if event.button == .Left && layout.dragging(&editor.workspace) {
-		kind := editor.workspace.drag.kind
-		window_id := editor.workspace.drag.window_id
-		column_id := editor.workspace.drag.column_id
-		geometry, _, ok := current_layout()
-		if ok {
-			metrics := workspace_metrics()
-			if layout.drag_end(&editor.workspace, &geometry, event.pos, metrics.drag_threshold) {
-				editor_log_layout_drag(kind, column_id, window_id)
-			}
-		} else {
-			layout.drag_cancel(&editor.workspace)
-		}
-		return
-	}
-	if event.button == .Left && editor.mouse_selecting {
-		editor_update_mouse_selection(event.pos)
-	}
-	editor_cancel_mouse_selection()
-}
-
 editor_log_layout_drag :: proc(kind: layout.Drag_Kind, column_id: layout.Column_ID, window_id: layout.Window_ID) {
 	switch kind {
 	case .None:
@@ -570,38 +413,6 @@ editor_log_layout_drag :: proc(kind: layout.Drag_Kind, column_id: layout.Column_
 			)
 		}
 	}
-}
-
-editor_update_mouse_selection :: proc(pos: coords.Logical_Point) {
-	geometry, _, geometry_ok := current_layout()
-	selection := editor_active_selection()
-	if !geometry_ok || selection == nil {
-		return
-	}
-	rect, ok := editor_active_text_rect(&geometry)
-	if !ok {
-		return
-	}
-	first_line := rope.Line_Index(0)
-	if item := editor_active_view(); editor.active_text_kind == .Body && item != nil {
-		first_line = item.first_line
-	}
-	hit, hit_ok := text_hit_test(pos, true, rect, first_line, editor_active_doc())
-	if !hit_ok {
-		return
-	}
-	selection.active = hit.offset
-	selection.affinity = hit.affinity
-	selection.visual_column = 0
-}
-
-editor_cancel_mouse_selection :: proc() {
-	editor.mouse_selecting = false
-}
-
-editor_cancel_pointer_gesture :: proc() {
-	editor_cancel_mouse_selection()
-	layout.drag_cancel(&editor.workspace)
 }
 
 editor_perform :: proc(action: editing.Action) {
