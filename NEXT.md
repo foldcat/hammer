@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M07.05 Implement modifier-assisted gestures
+## Current task: M07.detour-1 Allow dragging of the column top resize box to resize the column horizontally
