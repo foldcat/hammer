@@ -6,6 +6,7 @@ import "core:math"
 
 import coords "core/coords"
 import errs "core/errs"
+import layout "core/layout"
 import rope "core/rope"
 import txn "core/txn"
 import fonts "text/fonts"
@@ -17,12 +18,11 @@ Text_Hit :: struct {
 	affinity: txn.Affinity,
 }
 
-text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool) -> (Text_Hit, bool) {
+text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, win: layout.Window) -> (Text_Hit, bool) {
 	if math.is_nan(pos.x) || math.is_inf(pos.x) || math.is_nan(pos.y) || math.is_inf(pos.y) {
 		return {}, false
 	}
-	win, _, ok := current_window()
-	if !ok || win.body.width <= 0 || win.body.height <= 0 {
+	if win.body.width <= 0 || win.body.height <= 0 {
 		return {}, false
 	}
 	body := win.body

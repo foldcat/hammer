@@ -11,6 +11,7 @@ import fileload "core/fileload"
 import filesave "core/filesave"
 import input "core/input"
 import keybind "core/keybind"
+import layout "core/layout"
 import lifecycle "core/lifecycle"
 import platform "platform"
 import rope "core/rope"
@@ -29,6 +30,8 @@ Editor :: struct {
 	delayed_paste:          editing.Delayed_Paste,
 	delayed_cut:            editing.Delayed_Cut,
 	mouse_selecting:        bool,
+	workspace:              layout.Workspace,
+	active_window:          layout.Window_ID,
 	close_guard:            lifecycle.Close_Guard,
 }
 
@@ -92,6 +95,25 @@ editor_init :: proc(path := "") -> errs.Error {
 		txn.doc_destroy(&editor.doc)
 		return err
 	}
+	return editor_workspace_init()
+}
+
+editor_workspace_init :: proc() -> errs.Error {
+	if err := layout.workspace_init(&editor.workspace); !errs.ok(err) {
+		return err
+	}
+	left := editor.workspace.columns[0].id
+	right, err := layout.add_column(&editor.workspace)
+	if !errs.ok(err) {
+		return err
+	}
+	if _, add_err := layout.add_window(&editor.workspace, left); !errs.ok(add_err) {
+		return add_err
+	}
+	if _, add_err := layout.add_window(&editor.workspace, right); !errs.ok(add_err) {
+		return add_err
+	}
+	editor.active_window = editor.workspace.columns[0].windows[0].id
 	return {}
 }
 
@@ -117,7 +139,7 @@ editor_consume_input :: proc(event: input.Event) {
 		editor_pointer_up(e)
 		return
 	}
-	editor_cancel_mouse_selection()
+	editor_cancel_pointer_gesture()
 
 	action, ok := keybind.resolve_event(event)
 	if !ok {
@@ -393,12 +415,33 @@ editor_clipboard_available :: proc() -> bool {
 }
 
 editor_pointer_down :: proc(event: input.Pointer_Down) {
-	editor_cancel_mouse_selection()
+	editor_cancel_pointer_gesture()
 	if event.button != .Left || .Ctrl in event.modifiers || .Alt in event.modifiers || .Super in event.modifiers {
 		return
 	}
-	hit, ok := text_hit_test(event.pos, false)
+	geometry, _, geometry_ok := current_layout()
+	if !geometry_ok {
+		return
+	}
+	area := layout.hit_test(&geometry, event.pos)
+	if area.kind == .Window_Control {
+		editor.active_window = area.window_id
+	}
+	if layout.begin_drag(&editor.workspace, area, event.pos) {
+		editor.typing_group = 0
+		editor_cancel_close_review()
+		return
+	}
+	if area.kind != .Body {
+		return
+	}
+	editor.active_window = area.window_id
+	win, ok := window_for_id(&geometry, area.window_id)
 	if !ok {
+		return
+	}
+	hit, hit_ok := text_hit_test(event.pos, false, win)
+	if !hit_ok {
 		return
 	}
 	editor.typing_group = 0
@@ -412,6 +455,14 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 }
 
 editor_pointer_move :: proc(event: input.Pointer_Move) {
+	if layout.dragging(&editor.workspace) {
+		if .Left not_in event.buttons {
+			layout.drag_cancel(&editor.workspace)
+			return
+		}
+		layout.drag_move(&editor.workspace, event.pos)
+		return
+	}
 	if !editor.mouse_selecting {
 		return
 	}
@@ -423,15 +474,59 @@ editor_pointer_move :: proc(event: input.Pointer_Move) {
 }
 
 editor_pointer_up :: proc(event: input.Pointer_Up) {
+	if event.button == .Left && layout.dragging(&editor.workspace) {
+		kind := editor.workspace.drag.kind
+		window_id := editor.workspace.drag.window_id
+		column_id := editor.workspace.drag.column_id
+		geometry, _, ok := current_layout()
+		if ok {
+			metrics := workspace_metrics()
+			if layout.drag_end(&editor.workspace, &geometry, event.pos, metrics.drag_threshold) {
+				editor_log_layout_drag(kind, column_id, window_id)
+			}
+		} else {
+			layout.drag_cancel(&editor.workspace)
+		}
+		return
+	}
 	if event.button == .Left && editor.mouse_selecting {
 		editor_update_mouse_selection(event.pos)
 	}
 	editor_cancel_mouse_selection()
 }
 
+editor_log_layout_drag :: proc(kind: layout.Drag_Kind, column_id: layout.Column_ID, window_id: layout.Window_ID) {
+	switch kind {
+	case .None:
+	case .Column:
+		index, ok := layout.find_column(&editor.workspace, column_id)
+		if ok {
+			column := editor.workspace.columns[index]
+			log.infof("layout: column %d index %d weight %.4f", u64(column_id), index, column.weight)
+		}
+	case .Window:
+		column_index, window_index, ok := layout.find_window(&editor.workspace, window_id)
+		if ok {
+			column := editor.workspace.columns[column_index]
+			entry := column.windows[window_index]
+			log.infof(
+				"layout: window %d column %d index %d weight %.4f",
+				u64(window_id),
+				u64(column.id),
+				window_index,
+				entry.weight,
+			)
+		}
+	}
+}
+
 editor_update_mouse_selection :: proc(pos: coords.Logical_Point) {
-	hit, ok := text_hit_test(pos, true)
+	win, _, ok := current_window()
 	if !ok {
+		return
+	}
+	hit, hit_ok := text_hit_test(pos, true, win)
+	if !hit_ok {
 		return
 	}
 	editor.selection.active = hit.offset
@@ -441,6 +536,11 @@ editor_update_mouse_selection :: proc(pos: coords.Logical_Point) {
 
 editor_cancel_mouse_selection :: proc() {
 	editor.mouse_selecting = false
+}
+
+editor_cancel_pointer_gesture :: proc() {
+	editor_cancel_mouse_selection()
+	layout.drag_cancel(&editor.workspace)
 }
 
 editor_perform :: proc(action: editing.Action) {

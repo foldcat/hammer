@@ -19,6 +19,7 @@
 //     odin run make.odin -file -- clipboard-test   # M06.04/M06.08 X11 clipboard
 //     odin run make.odin -file -- ime-test         # M06.07 X11 IME
 //     odin run make.odin -file -- typing-test      # M06.09–M06.15 X11 typing/mouse/clipboard/zoom/file-save
+//     odin run make.odin -file -- layout-test      # M07.01 X11 column/window dragging
 //     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering
@@ -113,6 +114,7 @@ CLIPBOARD_INTEROP_DRIVER :: OUT_DIR + "/clipboard_interop_driver"
 CLIPBOARD_INTEROP_HARNESS :: CLIPBOARD_TEST_DIR + "/interop_harness.py"
 IME_TEST_DIR :: #directory + "/tests/integration/ime"
 TYPING_TEST_HARNESS :: #directory + "/tests/integration/typing/x11_harness.py"
+LAYOUT_TEST_HARNESS :: #directory + "/tests/integration/layout/x11_harness.py"
 AUTOPAIR_TEST_HARNESS :: #directory + "/tests/integration/autopair/x11_harness.py"
 AUTOPAIR_ENABLED_BINARY :: OUT_DIR + "/hammer-autopair-on"
 AUTOPAIR_DISABLED_BINARY :: OUT_DIR + "/hammer-autopair-off"
@@ -415,6 +417,36 @@ main :: proc() {
 			}, true)
 		} else {
 			fmt.eprintln("[Test] typing-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "layout-test" {
+		when ODIN_OS == .Linux {
+			stage_config(args[2:])
+			if !setup_sokol_linux() {
+				os.exit(1)
+			}
+			run_odin([]string {
+				"odin",
+				"build",
+				SRC_DIR,
+				SOKOL_COLLECTION,
+				"-vet",
+				"-out:" + BINARY_PATH,
+				"-debug",
+			})
+			run_odin([]string {
+				"xvfb-run",
+				"-a",
+				"python3",
+				LAYOUT_TEST_HARNESS,
+				"--binary",
+				BINARY_PATH,
+			}, true)
+		} else {
+			fmt.eprintln("[Test] layout-test currently requires Linux/X11")
 			os.exit(1)
 		}
 		return

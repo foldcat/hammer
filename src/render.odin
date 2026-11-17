@@ -1,4 +1,4 @@
-// Rendering (M01.06, M05.06, M06.09–M06.10): window rectangles and document text.
+// Rendering (M01.06, M05.06, M06.09–M06.10, M07.01): workspace rectangles and document text.
 //
 // This is the application-layer renderer (package main): it draws the
 // logical window geometry from `core/layout` with sokol_gfx,
@@ -92,24 +92,53 @@ render_setup :: proc() {
 }
 
 render_frame :: proc() {
-	win, phys, ok := current_window()
+	geometry, phys, ok := current_layout()
 	if !ok {
 		return
 	}
 
-	verts := make([dynamic]Vertex, QUAD_VERTEX_COUNT, context.temp_allocator)
-	quad_vertices(verts[0:6], win.tag, cfg.Theme.Tag_Bg, phys)
-	quad_vertices(verts[6:12], win.body, cfg.Theme.Body_Bg, phys)
-	text_render_document(win, phys, &verts)
+	verts := make([dynamic]Vertex, 0, context.temp_allocator)
+	pad := workspace_metrics().pad
+	global_tag := geometry.global_tag
+	global_tag.x += pad
+	global_tag.y += pad
+	global_tag.width = max(0, global_tag.width - 2 * pad)
+	global_tag.height = max(0, global_tag.height - 2 * pad)
+	render_append_quad(&verts, global_tag, cfg.Theme.Tag_Bg, phys)
+	active_body := layout.Rect{}
+	for column_index in 0 ..< geometry.column_count {
+		column := &geometry.columns[column_index]
+		render_append_quad(&verts, column.tag, cfg.Theme.Tag_Bg, phys)
+		render_append_quad(&verts, column.control, cfg.Theme.Git_Modified, phys)
+		for window_index in 0 ..< column.window_count {
+			placed := column.windows[window_index]
+			render_append_quad(&verts, placed.window.tag, cfg.Theme.Tag_Bg, phys)
+			render_append_quad(&verts, placed.window.body, cfg.Theme.Body_Bg, phys)
+			control_color := cfg.Theme.Tag_Fg
+			if placed.id == editor.active_window {
+				control_color = cfg.Theme.Caret
+				active_body = placed.window.body
+				text_render_document(placed.window, phys, &verts)
+			}
+			render_append_quad(&verts, placed.control, control_color, phys)
+		}
+	}
 	draw_quads(verts[:])
-	text_render_draw(win.body, phys)
+	text_render_draw(active_body, phys)
 
 	when ODIN_OS == .Linux {
-		render_probe_maybe(win, phys)
+		if win, found := window_for_id(&geometry, editor.active_window); found {
+			render_probe_maybe(win, phys)
+		}
 	}
 }
 
-current_window :: proc() -> (layout.Window, coords.Physical_Size, bool) {
+workspace_metrics :: proc() -> layout.Metrics {
+	font_px := coords.points_to_logical_px(state.dpi.points)
+	return layout.default_metrics(font_px + 4)
+}
+
+current_layout :: proc() -> (layout.Geometry, coords.Physical_Size, bool) {
 	width, height := services.window.framebuffer_size(services.user)
 	phys := coords.Physical_Size{f32(width), f32(height)}
 	if phys.width <= 0 || phys.height <= 0 {
@@ -121,14 +150,42 @@ current_window :: proc() -> (layout.Window, coords.Physical_Size, bool) {
 		logical_size = coords.Logical_Size{phys.width, phys.height}
 	}
 
-	font_px := coords.points_to_logical_px(state.dpi.points)
-	pad := f32(2)
-	win, layout_err := layout.window(logical_size, font_px + 2 * pad, pad)
+	geometry, layout_err := layout.arrange(&editor.workspace, logical_size, workspace_metrics())
 	if !errs.ok(layout_err) {
-		errs.destroy(&layout_err)
+		editor_report(layout_err)
 		return {}, phys, false
 	}
-	return win, phys, true
+	return geometry, phys, true
+}
+
+current_window :: proc() -> (layout.Window, coords.Physical_Size, bool) {
+	geometry, phys, ok := current_layout()
+	if !ok {
+		return {}, phys, false
+	}
+	win, found := window_for_id(&geometry, editor.active_window)
+	return win, phys, found
+}
+
+window_for_id :: proc(geometry: ^layout.Geometry, id: layout.Window_ID) -> (layout.Window, bool) {
+	for column_index in 0 ..< geometry.column_count {
+		column := &geometry.columns[column_index]
+		for placed in column.windows[:column.window_count] {
+			if placed.id == id {
+				return placed.window, true
+			}
+		}
+	}
+	return {}, false
+}
+
+render_append_quad :: proc(verts: ^[dynamic]Vertex, rect: layout.Rect, color: [4]f32, fb: coords.Physical_Size) {
+	if rect.width <= 0 || rect.height <= 0 || len(verts) + 6 > MAX_QUADS_PER_DRAW * 6 {
+		return
+	}
+	start := len(verts)
+	resize(verts, start + 6)
+	quad_vertices(verts[start:], rect, color, fb)
 }
 
 draw_quads :: proc(verts: []Vertex) {
@@ -197,12 +254,12 @@ when ODIN_OS == .Linux {
 		tag := probe_pixel(rect_center(win.tag), fb)
 		body := probe_pixel(rect_center(win.body), fb)
 		corner := probe_pixel(coords.Logical_Point{1, 1}, fb)
-		// A fixed point 30 logical px below the top edge: inside the
-		// default 12pt tag strip (height 20) it is body color, but a
-		// larger configured font (21pt -> tag height 32) paints tag
-		// color there — proving font-size settings visibly change
-		// the layout after rebuild.
-		below_tag := probe_pixel(coords.Logical_Point{fb.width / (2 * state.dpi.scale), 30}, fb)
+		// A fixed point 30 logical px below the active window's top edge:
+		// inside the default 12pt tag strip (height 20) it is body color,
+		// but a larger configured font (21pt -> tag height 32) paints tag
+		// color there — proving font-size settings visibly change the
+		// layout after rebuild.
+		below_tag := probe_pixel(coords.Logical_Point{win.frame.x + win.frame.width / 2, win.frame.y + 30}, fb)
 		log.infof(
 			"render-probe: tag=#%02X%02X%02X body=#%02X%02X%02X corner=#%02X%02X%02X below-tag=#%02X%02X%02X",
 			tag[0],

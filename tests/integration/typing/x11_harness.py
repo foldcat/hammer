@@ -241,7 +241,7 @@ class X11:
         image = self.image(window)
         try:
             count = 0
-            for y in range(24, 80):
+            for y in range(24, 130):
                 for x in range(2, 220):
                     if self.lib.XGetPixel(image, x, y) & 0xFFFFFF == 0x33B1FF:
                         count += 1
@@ -427,12 +427,12 @@ def main() -> int:
             time.sleep(0.3)
             if x11.selection_pixels(window) != 0:
                 raise HarnessFailure("unexpected selection highlight before mouse input")
-            x11.drag(window, (3, 34), (60, 56))
+            x11.drag(window, (3, 76), (60, 104))
             time.sleep(0.3)
             selected = x11.selection_pixels(window)
             if selected < 20:
                 raise HarnessFailure(f"mouse drag produced only {selected} selection pixels; log: {log_path}")
-            x11.move(window, 3, 34)
+            x11.move(window, 3, 76)
             x11.button(1, True)
             x11.button(1, False)
             time.sleep(0.3)

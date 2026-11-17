@@ -6,9 +6,9 @@
 // The application layer converts to framebuffer pixels with
 // `core/coords` when rendering.
 //
-// M07 builds the real column/window layout (multiple windows per
-// column, dragging, scrollbars) on these types; this package stays
-// the backend-free geometry core.
+// M07 adds bounded multi-column/window state, weighted arrangement,
+// stable IDs, hit-testing, and dragging in workspace.odin. This package
+// stays the backend-free geometry core; scrolling is a later task.
 package layout
 
 import "core:math"
