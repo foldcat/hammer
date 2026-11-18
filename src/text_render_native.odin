@@ -212,11 +212,10 @@ text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbe
 		}
 		line_index := int(first_line) + visible_index
 		line_top := win.body.y + TEXT_PADDING + f32(visual_row) * line_height
-		baseline_padding := TEXT_PADDING
+		text_height := (ascent + descent) / state.dpi.scale
+		baseline_padding := max(0, (line_height - text_height) / 2)
 		if line_height_override > 0 {
 			line_top = win.body.y + f32(visual_row) * line_height
-			text_height := (ascent + descent) / state.dpi.scale
-			baseline_padding = max(0, (line_height - text_height) / 2)
 		}
 		baseline := (line_top + baseline_padding) * state.dpi.scale + ascent
 		skip_rows := 0

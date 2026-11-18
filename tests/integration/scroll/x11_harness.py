@@ -136,6 +136,27 @@ def run_mode(binary: Path, sandbox: Path, mode: str) -> None:
             raise HarnessFailure("reverse wheel input did not restore the initial viewport")
         print(f"PASS: {mode} wheel scrolling advances and restores the viewport")
 
+        # A held primary-button selection keeps following the pointer while the
+        # wheel scrolls the viewport; the scroll must not cancel the drag.
+        x11.move(window, 80, 100)
+        x11.button(1, True)
+        time.sleep(0.1)
+        collapsed = x11.selection_pixels(window)
+        for _ in range(6):
+            x11.button(5, True)
+            x11.button(5, False)
+            time.sleep(0.05)
+        time.sleep(0.3)
+        extended = x11.selection_pixels(window)
+        x11.button(1, False)
+        if extended <= collapsed + 20:
+            raise HarnessFailure(
+                f"wheel scrolling during a selection drag did not extend the highlight: collapsed={collapsed} extended={extended}"
+            )
+        print(f"PASS: {mode} wheel scrolling during a selection drag extends the highlight")
+        click_button(x11, window, 2, 5, 67)
+        wait_for_origin(log_path, (0, 0))
+
         x11.move(window, 5, 70)
         x11.button(3, True)
         expected = (0, 1) if mode == "soft" else (1, 0)
@@ -188,9 +209,10 @@ def run_mode(binary: Path, sandbox: Path, mode: str) -> None:
         if process.poll() is not None:
             raise HarnessFailure("editor exited while resizing a scrolled view")
         x11.move(window, 60, 100)
+        scroll_before = log_path.read_text(encoding="utf-8", errors="replace").count("view: vertical scroll window=1")
         x11.button(5, True)
         x11.button(5, False)
-        wait_for_count(log_path, "view: vertical scroll window=1", 3, 20.0)
+        wait_for_count(log_path, "view: vertical scroll window=1", scroll_before + 1, 20.0)
         if line_number_pixels(x11, window, 66, 86) <= 0:
             raise HarnessFailure("line numbers disappeared after resize")
         print(f"PASS: {mode} viewport and line numbers remain correct after resize")

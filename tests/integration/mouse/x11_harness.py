@@ -78,14 +78,16 @@ def main() -> int:
             x11.button(3, True)
             x11.button(3, False)
             x11.button(1, False)
-            wait_for_log(log_path, "clipboard: selection has no owner or refused UTF-8 conversion", args.timeout)
+            wait_for_log(log_path, "clipboard: no selection owner; paste is a no-op", args.timeout)
             if "mouse: chord Paste applied transaction=" in log_path.read_text(encoding="utf-8"):
                 raise HarnessFailure("empty clipboard unexpectedly applied a paste transaction")
+            if "clipboard: selection has no owner or refused UTF-8 conversion" in log_path.read_text(encoding="utf-8"):
+                raise HarnessFailure("empty clipboard paste still reported a no-owner error")
             clipboard_owner = ClipboardOwner(clipboard_peer, payload, sandbox, args.timeout)
             x11.move(window, 250, 130)
             x11.button(1, True)
             x11.button(1, False)
-            print("PASS: empty clipboard warns without editing and later chords still work")
+            print("PASS: empty clipboard is a silent no-op and later chords still work")
 
             x11.move(window, 46, 76)
             x11.button(3, True)
@@ -343,7 +345,7 @@ def main() -> int:
             x11.button(2, True)
             x11.button(2, False)
             wait_for_log(log_path, 'mouse: execute "Del" target=2001 argument_chord=false', args.timeout)
-            wait_for_log(log_path, "view: closed window 1; 2 views remain", args.timeout)
+            wait_for_log(log_path, "view: closed window 1; 1 views remain", args.timeout)
             print("PASS: button-2 Del in a window tag uses the safe per-view close path")
 
             x11.tap(0xFF1B)
@@ -374,7 +376,7 @@ def main() -> int:
                 x11.button(3, True)
                 x11.button(3, False)
                 x11.button(1, False)
-                wait_for_log(cut_log, "clipboard: selection has no owner or refused UTF-8 conversion", args.timeout)
+                wait_for_log(cut_log, "clipboard: no selection owner; paste is a no-op", args.timeout)
                 x11.move(window, 164, 117)
                 x11.button(1, True)
                 x11.button(1, False)

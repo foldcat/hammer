@@ -244,6 +244,33 @@ editor_target_rect :: proc(geometry: ^layout.Geometry, target: Mouse_Text_Target
 
 MAX_HORIZONTAL_SCROLL_OFFSET :: f32(1024 * 1024)
 
+// editor_selection_gesture_active reports whether the primary button is held
+// in Select mode, i.e. the user is dragging to extend a text selection.
+editor_selection_gesture_active :: proc() -> bool {
+	return mouse.active(&editor.mouse_gesture) &&
+		editor.mouse_gesture.mode == .Select &&
+		.Left in editor.mouse_gesture.buttons
+}
+
+// editor_continue_selection_at re-hits the held selection gesture at a logical
+// position after the viewport moved under the pointer (wheel scroll). It keeps
+// the anchor fixed and extends the active edge to whatever text now sits there.
+editor_continue_selection_at :: proc(pos: coords.Logical_Point) {
+	target := editor_text_target_by_id(editor.mouse_gesture.target)
+	if !editor_mouse_target_current(target) {
+		editor_cancel_pointer_gesture()
+		return
+	}
+	hit, hit_ok := editor_mouse_hit(target, pos, true)
+	if !hit_ok {
+		editor_cancel_pointer_gesture()
+		return
+	}
+	target.selection.affinity = hit.affinity
+	action := mouse.move(&editor.mouse_gesture, hit.offset, pos, editor.mouse_gesture.buttons)
+	editor_dispatch_mouse_action(action)
+}
+
 editor_scroll :: proc(event: input.Scroll) {
 	valid_dx := event.dx != 0 && !math.is_nan(event.dx) && !math.is_inf(event.dx)
 	valid_dy := event.dy != 0 && !math.is_nan(event.dy) && !math.is_inf(event.dy)
@@ -266,8 +293,14 @@ editor_scroll :: proc(event: input.Scroll) {
 	if !win_found {
 		return
 	}
-	editor_cancel_pointer_gesture()
-	editor_cancel_close_review()
+	// A held primary-button selection keeps following the pointer as the
+	// viewport scrolls; any other gesture is cancelled by scrolling.
+	selecting := editor_selection_gesture_active() &&
+		editor.mouse_gesture.target == editor_body_target_id(area.window_id)
+	if !selecting {
+		editor_cancel_pointer_gesture()
+		editor_cancel_close_review()
+	}
 	if valid_dx {
 		if item.wrap_mode == .Soft {
 			item.horizontal_offset = 0
@@ -281,6 +314,9 @@ editor_scroll :: proc(event: input.Scroll) {
 		doc := &editor_buffer_for_view(item).doc
 		_, _, text := editor_body_parts(item, doc, win.body)
 		editor_wheel_vertical(item, doc, text, event.dy)
+	}
+	if selecting {
+		editor_continue_selection_at(event.pos)
 	}
 }
 

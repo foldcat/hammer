@@ -519,7 +519,15 @@ editor_poll_clipboard :: proc() {
 	if !errs.ok(result.err) {
 		err := result.err
 		result.err = {}
-		editor_report(err)
+		if err.kind == .NotFound {
+			// A read with no selection owner (empty CLIPBOARD/PRIMARY) is a
+			// normal no-op for a paste, not a user-facing error. Drop it
+			// without logging a warning or opening an error window.
+			log.infof("clipboard: no selection owner; paste is a no-op")
+			errs.destroy(&err)
+		} else {
+			editor_report(err)
+		}
 	}
 }
 
