@@ -98,6 +98,7 @@ resolved :: proc(c: Config, source: Source, allocator := context.allocator) -> (
 		Line_Height = c.Line_Height,
 		Ligatures = c.Ligatures,
 		Autopair = c.Autopair.? or_else DEFAULT_AUTOPAIR,
+		Wrap_Mode = c.Wrap_Mode,
 		Theme = c.Theme,
 		Source = source,
 	}
@@ -169,12 +170,13 @@ describe :: proc(r: Resolved, allocator := context.allocator) -> string {
 		families = "?"
 	}
 	return fmt.aprintf(
-		"config: source=%s, font_size=%.1fpt, line_height=%.2f, ligatures=%v, autopair=%v, families=[%s], font_path=%q, body_bg=#%02x%02x%02x",
+		"config: source=%s, font_size=%.1fpt, line_height=%.2f, ligatures=%v, autopair=%v, wrap=%v, families=[%s], font_path=%q, body_bg=#%02x%02x%02x",
 		source_name(r.Source),
 		r.Font_Size_Points,
 		r.Line_Height,
 		r.Ligatures,
 		r.Autopair,
+		r.Wrap_Mode,
 		families,
 		r.Font_Path,
 		u8(r.Theme.Body_Bg[0] * 255.0 + 0.5),
@@ -238,6 +240,19 @@ build_config :: proc(root: ^map_node, allocator := context.allocator) -> (Config
 				return cfg, errs.newf(.Invalid_Input, "config: line %d: invalid line_height", root.lines[key])
 			}
 			cfg.Line_Height = f32(value_parsed)
+		case "wrap":
+			scalar, is_scalar := node.(value)
+			if !is_scalar || scalar.kind != .String {
+				return cfg, errs.newf(.Invalid_Input, "config: line %d: wrap must be \"soft\" or \"truncate\"", root.lines[key])
+			}
+			switch scalar.text {
+			case "soft":
+				cfg.Wrap_Mode = .Soft
+			case "truncate":
+				cfg.Wrap_Mode = .Truncate
+			case:
+				return cfg, errs.newf(.Invalid_Input, "config: line %d: wrap must be \"soft\" or \"truncate\"", root.lines[key])
+			}
 		case "ligatures", "autopair":
 			scalar, is_scalar := node.(value)
 			if !is_scalar || scalar.kind != .Bool {

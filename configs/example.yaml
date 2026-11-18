@@ -50,6 +50,10 @@ ligatures: false
 # and delete empty pairs with Backspace. Default true.
 autopair: true
 
+# Body line layout for new views: "truncate" enables horizontal scrolling;
+# "soft" wraps at grapheme boundaries. Default "truncate".
+# wrap: "soft"
+
 # The oxocarbon-derived theme (colorscheme.yaml). Either all ten colors
 # or none; partial themes are rejected. Colors are "#RRGGBB".
 theme:

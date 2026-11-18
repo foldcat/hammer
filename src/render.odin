@@ -131,7 +131,7 @@ render_frame :: proc() {
 				window_tag_active := editor.active_text_kind == .Window_Tag && editor.active_window == placed.id
 				text_render_tag(tag_content_rect(placed.window.tag, placed.control), &item.tag.doc, item.tag.selection, window_tag_active, phys, &verts)
 				body_active := editor.active_text_kind == .Body && editor.active_window == placed.id
-				text_render_document(placed.window, &editor_buffer_for_view(item).doc, item.selection, item.first_line, body_active, 0, phys, &verts)
+				text_render_document(placed.window, &editor_buffer_for_view(item).doc, item.selection, item.first_line, body_active, 0, item.wrap_mode, &item.horizontal_offset, phys, &verts)
 			}
 		}
 	}
@@ -159,7 +159,7 @@ tag_content_rect :: proc(tag, control: layout.Rect) -> layout.Rect {
 
 text_render_tag :: proc(rect: layout.Rect, doc: ^txn.Doc, selection: txn.Selection, active: bool, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	win := layout.Window{body = rect}
-	text_render_document(win, doc, selection, 0, active, rect.height, fb, quads)
+	text_render_document(win, doc, selection, 0, active, rect.height, .Truncate, nil, fb, quads)
 }
 
 current_layout :: proc() -> (layout.Geometry, coords.Physical_Size, bool) {

@@ -26,11 +26,17 @@ test_views_own_independent_ui_state :: proc(t: ^testing.T) {
 	testing.expect(t, first_ok && second_ok)
 	first.selection = {anchor = 2, active = 5, affinity = .Right}
 	first.first_line = 3
+	first.wrap_mode = .Soft
+	first.horizontal_offset = 12
 	second.selection = {anchor = 8, active = 1, affinity = .Left}
 	second.first_line = 9
+	second.wrap_mode = .Truncate
+	second.horizontal_offset = 48
 	testing.expect(t, first.buffer_id == second.buffer_id)
 	testing.expect(t, first.selection.anchor == 2 && second.selection.anchor == 8)
 	testing.expect(t, first.first_line == 3 && second.first_line == 9)
+	testing.expect(t, first.wrap_mode == .Soft && second.wrap_mode == .Truncate)
+	testing.expect(t, first.horizontal_offset == 12 && second.horizontal_offset == 48)
 	testing.expect(t, view.buffer_view_count(&state, 7) == 3)
 	testing.expect(t, view.buffer_view_count(&state, 8) == 0)
 

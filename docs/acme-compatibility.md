@@ -23,6 +23,9 @@ Acme behavior, not an implementation to copy mechanically.
 - Directory windows present sorted, three-lane listings, mark subdirectories,
   and resolve nested Look paths relative to the listing. Covered by
   `directory-test` and the directory unit tests.
+- Each view has a configurable soft-wrap or truncate mode. Soft wrapping shares
+  grapheme-safe visual rows between rendering and hit-testing; truncate views
+  support horizontal wheel/touchpad scrolling. Covered by `wrap-test`.
 - Recoverable editor errors accumulate in a reusable `+Errors` window without
   taking focus. Automatic output uses transactions and cannot silently clean a
   user-edited error buffer.
@@ -53,8 +56,8 @@ Acme behavior, not an implementation to copy mechanically.
   visible in tags.
 - A product command for multiple views of one buffer (Zerox) is deferred; only
   the underlying core view model and tests currently exist.
-- Soft wrapping, horizontal scrolling, scrollbar interaction, and line-number
-  gutters are later M07 tasks.
+- Vertical viewport scrolling, scrollbar interaction, and line-number gutters
+  remain later M07 tasks.
 - Persistent layout restoration, filesystem projection, local IPC automation,
   and external event interception are later milestones.
 - Native Windows behavior is source-checked but not runtime-tested here.

@@ -158,6 +158,7 @@ editor_open_buffer_in_column :: proc(buffer: ^Editor_Buffer, column_id: layout.C
 		return nil, add_err
 	}
 	item, _ := view.find(&editor.views, window_id)
+	item.wrap_mode = cfg.Wrap_Mode
 	if tag_err := editor_init_window_tag(item); !errs.ok(tag_err) {
 		view.remove(&editor.views, window_id)
 		layout.remove_window(&editor.workspace, window_id)

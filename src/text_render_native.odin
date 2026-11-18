@@ -3,9 +3,11 @@
 package main
 
 import "core:log"
+import "core:math"
 
 import sg "sokol:gfx"
 
+import config "core/config"
 import coords "core/coords"
 import errs "core/errs"
 import "core/ime"
@@ -158,7 +160,7 @@ text_render_begin :: proc() {
 	text_draws = make([dynamic]Glyph_Draw, context.temp_allocator)
 }
 
-text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, active: bool, line_height_override: f32, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	if doc == nil || text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 {
 		return
 	}
@@ -198,29 +200,24 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 	if active {
 		preedit = ime.snapshot(&state.preedit)
 	}
-	line_count := min(
-		max(0, rope.tree_line_count(&doc.tree) - int(first_line)),
-		MAX_VISIBLE_TEXT_LINES,
-		int(win.body.height / line_height) + 1,
-	)
+	line_count := min(max(0, rope.tree_line_count(&doc.tree) - int(first_line)), MAX_VISIBLE_TEXT_LINES)
+	max_rows := int(win.body.height / line_height) + 1
+	visual_row := 0
 	text_draw_body = win.body
 	for visible_index in 0 ..< line_count {
+		if visual_row >= max_rows {
+			break
+		}
 		line_index := int(first_line) + visible_index
-		line_top := win.body.y + TEXT_PADDING + f32(visible_index) * line_height
+		line_top := win.body.y + TEXT_PADDING + f32(visual_row) * line_height
 		baseline_padding := TEXT_PADDING
 		if line_height_override > 0 {
-			// A tag is a single line in a fixed-height strip. Center its
-			// baseline vertically using the font's real ascender/descender so
-			// neither the ascender nor the descender is clipped at the strip's
-			// edge. Clamp to zero: if the font is taller than the strip, the
-			// descender still overflows rather than pushing the cap height off
-			// the top.
-			line_top = win.body.y + f32(visible_index) * line_height
+			line_top = win.body.y + f32(visual_row) * line_height
 			text_height := (ascent + descent) / state.dpi.scale
 			baseline_padding = max(0, (line_height - text_height) / 2)
 		}
 		baseline := (line_top + baseline_padding) * state.dpi.scale + ascent
-		text_render_line(
+		consumed := text_render_line(
 			doc,
 			rope.Line_Index(line_index),
 			caret_line,
@@ -232,9 +229,12 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 			line_top,
 			baseline,
 			line_height,
+			wrap_mode,
+			horizontal_offset,
 			fb,
 			quads,
 		)
+		visual_row += max(1, consumed)
 	}
 }
 
@@ -285,13 +285,15 @@ text_render_line :: proc(
 	line_top: f32,
 	baseline: f32,
 	line_height: f32,
+	wrap_mode: config.Wrap_Mode,
+	horizontal_offset: ^f32,
 	fb: coords.Physical_Size,
 	quads: ^[dynamic]Vertex,
-) {
+) -> int {
 	start, end, range_err := text_line_range(doc, line_index)
 	if !errs.ok(range_err) {
 		text_render_error(range_err)
-		return
+		return 0
 	}
 	read_length := min(end - start, shaping.DEFAULT_VISIBLE_BYTES + shaping.VISIBLE_LOOKAHEAD_BYTES)
 	line_bytes, read_err := rope.tree_read_all(
@@ -301,13 +303,13 @@ text_render_line :: proc(
 	)
 	if !errs.ok(read_err) {
 		text_render_error(read_err)
-		return
+		return 0
 	}
 
 	expansion, tab_err := shaping.expand_tabs(string(line_bytes), shaping.DEFAULT_TAB_WIDTH, context.temp_allocator)
 	if !errs.ok(tab_err) {
 		text_render_error(tab_err)
-		return
+		return 0
 	}
 	composing := active && preedit.active && caret_line == line_index &&
 		selection.active >= start && selection.active <= start + len(line_bytes)
@@ -316,7 +318,7 @@ text_render_line :: proc(
 	if caret_line == line_index {
 		mapped, mapped_ok := shaping.tab_display_offset(expansion, selection.active - start)
 		if !mapped_ok {
-			return
+			return 0
 		}
 		caret_offset = mapped
 	}
@@ -340,72 +342,79 @@ text_render_line :: proc(
 	visible, shape_err := product_shape_visible(display, &measurement, pixel_size)
 	if !errs.ok(shape_err) {
 		text_render_error(shape_err)
-		return
+		return 0
 	}
 	defer shaping.destroy(&visible.text)
 
-	if !composing {
-		text_render_selection(visible.text, expansion, selection, start, end, body, line_top, line_height, fb, quads)
+	visible_width := max(1, body.width - 2 * TEXT_PADDING)
+	content_width := f32(visible.text.total_advance) / (64 * state.dpi.scale)
+	horizontal := f32(0)
+	if wrap_mode == .Truncate && horizontal_offset != nil {
+		if math.is_nan(horizontal_offset^) || math.is_inf(horizontal_offset^) {
+			horizontal_offset^ = 0
+		}
+		horizontal_offset^ = clamp(horizontal_offset^, 0, MAX_HORIZONTAL_SCROLL_OFFSET)
+		horizontal = horizontal_offset^
+	} else if horizontal_offset != nil {
+		horizontal_offset^ = 0
 	}
+	rows: [dynamic]shaping.Wrap_Row
+	if wrap_mode == .Soft {
+		rows_err: errs.Error
+		rows, rows_err = shaping.wrap_rows(visible.text, visible_width, state.dpi.scale, context.temp_allocator)
+		if !errs.ok(rows_err) {
+			text_render_error(rows_err)
+			return 0
+		}
+	} else {
+		rows = make([dynamic]shaping.Wrap_Row, context.temp_allocator)
+		append(&rows, shaping.Wrap_Row{start = 0, end = content_width})
+	}
+	defer delete(rows)
+
 	font_storage: [shaping.MAX_FONTS]shaping.Font
 	font_list := product_shaping_fonts(&font_storage)
-	text_collect_glyphs(visible.text, font_list, body.x * state.dpi.scale, baseline, fb)
+	for row, row_index in rows {
+		row_top := line_top + f32(row_index) * line_height
+		row_baseline := baseline + f32(row_index) * line_height * state.dpi.scale
+		x_offset := -horizontal - row.start
+		if !composing {
+			text_render_selection(visible.text, expansion, selection, start, end, body, row_top, line_height, row, x_offset, fb, quads)
+		}
+		text_collect_glyphs(visible.text, font_list, body.x * state.dpi.scale, row_baseline, row, x_offset, fb)
 
-	if composing && preedit_start < preedit_end && preedit_start <= visible.end {
-		preedit_end = min(preedit_end, visible.end)
-		spans, spans_err := shaping.selection_spans(
-			visible.text,
-			preedit_start,
-			preedit_end,
-			state.dpi.scale,
-			context.temp_allocator,
-		)
-		if errs.ok(spans_err) {
-			for span in spans {
-				text_append_quad(
-					quads,
-					body.x + span.start,
-					line_top + line_height - 1,
-					span.end - span.start,
-					max(1 / state.dpi.scale, 1),
-					cfg.Theme.Caret,
-					fb,
-				)
+		if composing && preedit_start < preedit_end && preedit_start <= visible.end {
+			preedit_end = min(preedit_end, visible.end)
+			spans, spans_err := shaping.selection_spans(visible.text, preedit_start, preedit_end, state.dpi.scale, context.temp_allocator)
+			if errs.ok(spans_err) {
+				for span in spans {
+					span_start := max(span.start, row.start)
+					span_end := min(span.end, row.end)
+					if span_start < span_end {
+						text_append_quad(quads, body.x + x_offset + span_start, row_top + line_height - 1, span_end - span_start, max(1 / state.dpi.scale, 1), cfg.Theme.Caret, fb)
+					}
+				}
+			} else {
+				text_render_error(spans_err)
 			}
-		} else {
-			text_render_error(spans_err)
 		}
-	}
 
-	if active && caret_line == line_index && caret_offset >= 0 && caret_offset <= visible.end {
-		edge := shaping.Edge.Leading
-		if selection.affinity == .Right {
-			edge = .Trailing
+		if active && caret_line == line_index && caret_offset >= 0 && caret_offset <= visible.end {
+			edge := shaping.Edge.Leading
+			if selection.affinity == .Right {
+				edge = .Trailing
+			}
+			if caret_x, ok := shaping.caret_position(visible.text, caret_offset, edge, state.dpi.scale); ok {
+				if caret_x >= row.start && (caret_x < row.end || row_index == len(rows) - 1 && caret_x <= row.end) {
+					text_append_quad(quads, body.x + x_offset + caret_x, row_top, max(1 / state.dpi.scale, 1), line_height, cfg.Theme.Caret, fb)
+				}
+			}
 		}
-		if caret_x, ok := shaping.caret_position(visible.text, caret_offset, edge, state.dpi.scale); ok {
-			text_append_quad(
-				quads,
-				body.x + caret_x,
-				line_top,
-				max(1 / state.dpi.scale, 1),
-				line_height,
-				cfg.Theme.Caret,
-				fb,
-			)
+		if row_index == len(rows) - 1 && (!visible.done || end - start > len(line_bytes) || wrap_mode == .Truncate && content_width > visible_width) {
+			text_append_quad(quads, body.x + body.width - TEXT_PADDING, row_top, TEXT_PADDING, line_height, cfg.Theme.Git_Modified, fb)
 		}
 	}
-
-	if !visible.done || end - start > len(line_bytes) {
-		text_append_quad(
-			quads,
-			body.x + body.width - TEXT_PADDING,
-			line_top,
-			TEXT_PADDING,
-			line_height,
-			cfg.Theme.Git_Modified,
-			fb,
-		)
-	}
+	return len(rows)
 }
 
 text_line_range :: proc(doc: ^txn.Doc, line_index: rope.Line_Index) -> (int, int, errs.Error) {
@@ -457,6 +466,8 @@ text_render_selection :: proc(
 	line_start, line_end: int,
 	body: layout.Rect,
 	line_top, line_height: f32,
+	row: shaping.Wrap_Row,
+	x_offset: f32,
 	fb: coords.Physical_Size,
 	quads: ^[dynamic]Vertex,
 ) {
@@ -489,7 +500,11 @@ text_render_selection :: proc(
 		return
 	}
 	for span in spans {
-		text_append_quad(quads, body.x + span.start, line_top, span.end - span.start, line_height, cfg.Theme.Selection_Bg, fb)
+		span_start := max(span.start, row.start)
+		span_end := min(span.end, row.end)
+		if span_start < span_end {
+			text_append_quad(quads, body.x + x_offset + span_start, line_top, span_end - span_start, line_height, cfg.Theme.Selection_Bg, fb)
+		}
 	}
 }
 
@@ -505,6 +520,8 @@ text_collect_glyphs :: proc(
 	text: shaping.Text,
 	font_list: []shaping.Font,
 	origin_x, baseline: f32,
+	row: shaping.Wrap_Row,
+	x_offset: f32,
 	fb: coords.Physical_Size,
 ) {
 	for run in text.runs {
@@ -515,6 +532,10 @@ text_collect_glyphs :: proc(
 		for glyph in run.glyphs {
 			if len(text_vertices) / 6 >= MAX_TEXT_GLYPHS_PER_FRAME {
 				return
+			}
+			glyph_x := f32(glyph.x) / (64 * state.dpi.scale)
+			if row.end > row.start && (glyph_x < row.start || glyph_x >= row.end) {
+				continue
 			}
 			entry, err := glyphcache.get(
 				&glyph_cache,
@@ -529,7 +550,7 @@ text_collect_glyphs :: proc(
 			if entry.page < 0 {
 				continue
 			}
-			x := origin_x + f32(glyph.x) / 64 + f32(entry.metrics.bearing_x)
+			x := origin_x + x_offset * state.dpi.scale + f32(glyph.x) / 64 + f32(entry.metrics.bearing_x)
 			y := baseline - f32(glyph.y) / 64 - f32(entry.metrics.bearing_y)
 			if x + f32(entry.rect.width) < 0 || y + f32(entry.rect.height) < 0 || x >= fb.width || y >= fb.height {
 				continue

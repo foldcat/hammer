@@ -26,6 +26,7 @@
 //     odin run make.odin -file -- look-test        # M07.06 X11 Look expansion and file opening
 //     odin run make.odin -file -- directory-test   # M07.07 X11 directory and error windows
 //     odin run make.odin -file -- compatibility-test # M07.08 integrated Acme window behavior
+//     odin run make.odin -file -- wrap-test        # M07.09 X11 soft wrap and horizontal scrolling
 //     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering
@@ -127,6 +128,9 @@ MOUSE_TEST_HARNESS :: #directory + "/tests/integration/mouse/x11_harness.py"
 LOOK_TEST_HARNESS :: #directory + "/tests/integration/look/x11_harness.py"
 DIRECTORY_TEST_HARNESS :: #directory + "/tests/integration/directory/x11_harness.py"
 COMPATIBILITY_TEST_HARNESS :: #directory + "/tests/integration/compatibility/x11_harness.py"
+WRAP_TEST_HARNESS :: #directory + "/tests/integration/wrap/x11_harness.py"
+WRAP_SOFT_BINARY :: OUT_DIR + "/hammer-wrap-soft"
+WRAP_TRUNCATE_BINARY :: OUT_DIR + "/hammer-wrap-truncate"
 AUTOPAIR_TEST_HARNESS :: #directory + "/tests/integration/autopair/x11_harness.py"
 AUTOPAIR_ENABLED_BINARY :: OUT_DIR + "/hammer-autopair-on"
 AUTOPAIR_DISABLED_BINARY :: OUT_DIR + "/hammer-autopair-off"
@@ -651,6 +655,16 @@ main :: proc() {
 		return
 	}
 
+	if len(args) > 1 && args[1] == "wrap-test" {
+		when ODIN_OS == .Linux {
+			wrap_test_main()
+		} else {
+			fmt.eprintln("[Test] wrap-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
 	if len(args) > 1 && args[1] == "autopair-test" {
 		when ODIN_OS == .Linux {
 			autopair_test_main()
@@ -914,6 +928,44 @@ stage_config :: proc(args: []string) {
 	if werr := config.write_staged(r, GENERATED_CONFIG_PATH); !errs.ok(werr) {
 		config_fail(werr)
 	}
+}
+
+wrap_test_main :: proc() {
+	if !setup_sokol_linux() {
+		os.exit(1)
+	}
+	defer stage_config([]string{"--no-config"})
+	wrap_test_build("soft", WRAP_SOFT_BINARY)
+	wrap_test_build("truncate", WRAP_TRUNCATE_BINARY)
+	run_odin([]string {
+		"xvfb-run",
+		"-a",
+		"python3",
+		WRAP_TEST_HARNESS,
+		"--soft",
+		WRAP_SOFT_BINARY,
+		"--truncate",
+		WRAP_TRUNCATE_BINARY,
+	}, true)
+}
+
+wrap_test_build :: proc(mode: string, binary_path: string) {
+	config_path := fmt.tprintf("%s/wrap-%s.yaml", OUT_DIR, mode)
+	source := fmt.tprintf("wrap: %q\n", mode)
+	if err := os.write_entire_file(config_path, transmute([]byte)source); err != nil {
+		fmt.eprintf("[Test] cannot stage wrap config: %v\n", err)
+		os.exit(1)
+	}
+	stage_config([]string{fmt.tprintf("--config=%s", config_path)})
+	run_odin([]string {
+		"odin",
+		"build",
+		SRC_DIR,
+		SOKOL_COLLECTION,
+		"-vet",
+		fmt.tprintf("-out:%s", binary_path),
+		"-debug",
+	})
 }
 
 autopair_test_main :: proc() {

@@ -1,5 +1,6 @@
 package view
 
+import config "../config"
 import editing "../editing"
 import errs "../errs"
 import layout "../layout"
@@ -13,9 +14,11 @@ MAX_VIEWS :: layout.MAX_COLUMNS * layout.MAX_WINDOWS_PER_COLUMN
 View :: struct {
 	window_id:     layout.Window_ID,
 	buffer_id:     Buffer_ID,
-	selection:     txn.Selection,
-	first_line:    rope.Line_Index,
-	tag:           tagstate.State,
+	selection:         txn.Selection,
+	first_line:        rope.Line_Index,
+	wrap_mode:         config.Wrap_Mode,
+	horizontal_offset: f32,
+	tag:               tagstate.State,
 	delayed_paste: editing.Delayed_Paste,
 	delayed_cut:   editing.Delayed_Cut,
 }

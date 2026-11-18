@@ -291,6 +291,7 @@ editor_workspace_init :: proc() -> errs.Error {
 				return add_err
 			}
 			item, _ := view.find(&editor.views, placed.id)
+			item.wrap_mode = cfg.Wrap_Mode
 			if tag_err := editor_init_window_tag(item); !errs.ok(tag_err) {
 				return tag_err
 			}
@@ -341,6 +342,11 @@ editor_consume_input :: proc(event: input.Event) {
 	case input.Pointer_Up:
 		editor_pointer_up(e)
 		return
+	case input.Scroll:
+		if e.modifiers != {.Ctrl} {
+			editor_scroll(e)
+			return
+		}
 	}
 	editor_cancel_pointer_gesture()
 

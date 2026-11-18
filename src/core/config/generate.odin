@@ -54,6 +54,10 @@ generate_source :: proc(r: Resolved, allocator := context.allocator) -> string {
 	if r.Source == .File {
 		source_kind = ".File"
 	}
+	wrap_kind := ".Truncate"
+	if r.Wrap_Mode == .Soft {
+		wrap_kind = ".Soft"
+	}
 
 	families_literal := family_list_literal(r.Font_Families, allocator)
 	tag_families_literal := family_list_literal(r.Tag_Font_Families, allocator)
@@ -83,6 +87,7 @@ resolved :: config.Resolved {{
     Line_Height           = %v,
     Ligatures             = %v,
     Autopair              = %v,
+    Wrap_Mode             = %s,
     Theme            = config.Theme{{
         Body_Bg      = [4]f32 {{%v, %v, %v, %v}},
         Body_Fg      = [4]f32 {{%v, %v, %v, %v}},
@@ -109,6 +114,7 @@ resolved :: config.Resolved {{
 		r.Line_Height,
 		r.Ligatures,
 		r.Autopair,
+		wrap_kind,
 		t.Body_Bg[0], t.Body_Bg[1], t.Body_Bg[2], t.Body_Bg[3],
 		t.Body_Fg[0], t.Body_Fg[1], t.Body_Fg[2], t.Body_Fg[3],
 		t.Tag_Bg[0], t.Tag_Bg[1], t.Tag_Bg[2], t.Tag_Bg[3],

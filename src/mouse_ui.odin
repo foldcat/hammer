@@ -1,9 +1,11 @@
 package main
 
 import "core:log"
+import "core:math"
 import "core:strings"
 import "core:time"
 
+import config "core/config"
 import coords "core/coords"
 import editing "core/editing"
 import errs "core/errs"
@@ -236,6 +238,35 @@ editor_target_rect :: proc(geometry: ^layout.Geometry, target: Mouse_Text_Target
 	return {}, false
 }
 
+MAX_HORIZONTAL_SCROLL_OFFSET :: f32(1024 * 1024)
+
+editor_scroll :: proc(event: input.Scroll) {
+	if event.dx == 0 || math.is_nan(event.dx) || math.is_inf(event.dx) {
+		return
+	}
+	geometry, _, ok := current_layout()
+	if !ok {
+		return
+	}
+	area := layout.hit_test(&geometry, event.pos)
+	if area.kind != .Body {
+		return
+	}
+	item, found := view.find(&editor.views, area.window_id)
+	if !found {
+		return
+	}
+	editor_cancel_pointer_gesture()
+	editor_cancel_close_review()
+	if item.wrap_mode == .Soft {
+		item.horizontal_offset = 0
+	} else {
+		step := coords.points_to_logical_px(state.dpi.points) * 4
+		item.horizontal_offset = clamp(item.horizontal_offset + event.dx * step, 0, MAX_HORIZONTAL_SCROLL_OFFSET)
+	}
+	log.infof("view: horizontal scroll window=%d offset=%.2f", u64(item.window_id), item.horizontal_offset)
+}
+
 editor_mouse_hit :: proc(target: Mouse_Text_Target, pos: coords.Logical_Point, clamp_to_visible: bool) -> (Text_Hit, bool) {
 	geometry, _, ok := current_layout()
 	if !ok || target.doc == nil || target.selection == nil {
@@ -246,10 +277,14 @@ editor_mouse_hit :: proc(target: Mouse_Text_Target, pos: coords.Logical_Point, c
 		return {}, false
 	}
 	first_line := rope.Line_Index(0)
+	wrap_mode := config.Wrap_Mode.Truncate
+	horizontal_offset: ^f32
 	if target.kind == .Body && target.item != nil {
 		first_line = target.item.first_line
+		wrap_mode = target.item.wrap_mode
+		horizontal_offset = &target.item.horizontal_offset
 	}
-	return text_hit_test(pos, clamp_to_visible, rect, first_line, target.doc)
+	return text_hit_test(pos, clamp_to_visible, rect, first_line, wrap_mode, horizontal_offset, target.doc)
 }
 
 editor_mouse_target_current :: proc(target: Mouse_Text_Target) -> bool {

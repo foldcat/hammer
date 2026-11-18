@@ -73,6 +73,7 @@ test_builtin_defaults :: proc(t: ^testing.T) {
 	expect_near(t, r.Font_Size_Points, 12.0, "font size")
 	expect_near(t, r.Line_Height, 1.4, "line height")
 	testing.expect(t, !r.Ligatures)
+	testing.expect(t, r.Wrap_Mode == .Truncate)
 	// Oxocarbon body_bg #161616.
 	expect_near(t, r.Theme.Body_Bg[0], 22.0 / 255.0, "body_bg.r")
 	expect_near(t, r.Theme.Body_Bg[1], 22.0 / 255.0, "body_bg.g")
@@ -126,6 +127,22 @@ test_autopair_resolution_and_generation :: proc(t: ^testing.T) {
 	testing.expect(t, enabled.Autopair)
 	expect_fail(t, "autopair: 1\n", "invalid input")
 	expect_fail(t, "autopair: \"false\"\n", "invalid input")
+}
+
+@(test)
+test_wrap_resolution_generation_and_validation :: proc(t: ^testing.T) {
+	soft, soft_err := config.resolve_from_yaml("wrap: \"soft\"\n")
+	defer config.resolved_destroy(&soft)
+	testing.expect(t, errs.ok(soft_err) && soft.Wrap_Mode == .Soft)
+	src := config.generate_source(soft)
+	defer delete(src)
+	testing.expect(t, strings.contains(src, "Wrap_Mode             = .Soft"))
+
+	truncate, truncate_err := config.resolve_from_yaml("wrap: \"truncate\"\n")
+	defer config.resolved_destroy(&truncate)
+	testing.expect(t, errs.ok(truncate_err) && truncate.Wrap_Mode == .Truncate)
+	expect_fail(t, "wrap: \"words\"\n", "invalid input")
+	expect_fail(t, "wrap: true\n", "invalid input")
 }
 
 @(test)

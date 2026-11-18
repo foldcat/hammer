@@ -4,6 +4,7 @@ package main
 
 import "core:math"
 
+import config "core/config"
 import coords "core/coords"
 import errs "core/errs"
 import layout "core/layout"
@@ -18,7 +19,7 @@ Text_Hit :: struct {
 	affinity: txn.Affinity,
 }
 
-text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: layout.Rect, first_line: rope.Line_Index, doc: ^txn.Doc) -> (Text_Hit, bool) {
+text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: layout.Rect, first_line: rope.Line_Index, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, doc: ^txn.Doc) -> (Text_Hit, bool) {
 	if math.is_nan(pos.x) || math.is_inf(pos.x) || math.is_nan(pos.y) || math.is_inf(pos.y) {
 		return {}, false
 	}
@@ -46,66 +47,86 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: l
 	if line_height <= 0 {
 		return {}, false
 	}
-	line_count := min(
-		max(0, rope.tree_line_count(&doc.tree) - int(first_line)),
-		MAX_VISIBLE_TEXT_LINES,
-		int(body.height / line_height) + 1,
-	)
+	line_count := min(max(0, rope.tree_line_count(&doc.tree) - int(first_line)), MAX_VISIBLE_TEXT_LINES)
 	if line_count <= 0 {
 		return {}, false
 	}
-
+	target_row := 0
 	line_position := (pos.y - body.y - TEXT_PADDING) / line_height
-	line_index := int(first_line)
-	if line_position >= f32(line_count - 1) {
-		line_index += line_count - 1
-	} else if line_position > 0 {
-		line_index += int(math.floor(line_position))
+	if line_position > 0 {
+		target_row = int(math.floor(line_position))
 	}
-	start, end, range_err := text_line_range(doc, rope.Line_Index(line_index))
-	if !errs.ok(range_err) {
-		text_render_error(range_err)
-		return {}, false
-	}
-	read_length := min(end - start, shaping.DEFAULT_VISIBLE_BYTES + shaping.VISIBLE_LOOKAHEAD_BYTES)
-	line_bytes, read_err := rope.tree_read_all(
-		&doc.tree,
-		{start, start + read_length},
-		context.temp_allocator,
-	)
-	if !errs.ok(read_err) {
-		text_render_error(read_err)
-		return {}, false
-	}
-	expansion, tab_err := shaping.expand_tabs(string(line_bytes), shaping.DEFAULT_TAB_WIDTH, context.temp_allocator)
-	if !errs.ok(tab_err) {
-		text_render_error(tab_err)
-		return {}, false
-	}
-	defer shaping.tab_expansion_destroy(&expansion)
-
 	previous_allocator := context.allocator
 	context.allocator = context.temp_allocator
 	defer context.allocator = previous_allocator
-	measurement: shaping.Measurement
-	visible, shape_err := product_shape_visible(string(expansion.text[:]), &measurement, pixel_size)
-	if !errs.ok(shape_err) {
-		text_render_error(shape_err)
-		return {}, false
-	}
-	defer shaping.destroy(&visible.text)
 
-	hit, hit_ok := shaping.hit_test(visible.text, pos.x - body.x, state.dpi.scale)
-	if !hit_ok {
-		return {}, false
+	for line_offset in 0 ..< line_count {
+		line_index := int(first_line) + line_offset
+		start, end, range_err := text_line_range(doc, rope.Line_Index(line_index))
+		if !errs.ok(range_err) {
+			text_render_error(range_err)
+			return {}, false
+		}
+		read_length := min(end - start, shaping.DEFAULT_VISIBLE_BYTES + shaping.VISIBLE_LOOKAHEAD_BYTES)
+		line_bytes, read_err := rope.tree_read_all(&doc.tree, {start, start + read_length}, context.temp_allocator)
+		if !errs.ok(read_err) {
+			text_render_error(read_err)
+			return {}, false
+		}
+		expansion, tab_err := shaping.expand_tabs(string(line_bytes), shaping.DEFAULT_TAB_WIDTH, context.temp_allocator)
+		if !errs.ok(tab_err) {
+			text_render_error(tab_err)
+			return {}, false
+		}
+		defer shaping.tab_expansion_destroy(&expansion)
+		measurement: shaping.Measurement
+		visible, shape_err := product_shape_visible(string(expansion.text[:]), &measurement, pixel_size)
+		if !errs.ok(shape_err) {
+			text_render_error(shape_err)
+			return {}, false
+		}
+		defer shaping.destroy(&visible.text)
+
+		visible_width := max(1, body.width - 2 * TEXT_PADDING)
+		content_width := f32(visible.text.total_advance) / (64 * state.dpi.scale)
+		horizontal := f32(0)
+		if wrap_mode == .Truncate && horizontal_offset != nil {
+			if math.is_nan(horizontal_offset^) || math.is_inf(horizontal_offset^) {
+				horizontal_offset^ = 0
+			}
+			horizontal_offset^ = clamp(horizontal_offset^, 0, MAX_HORIZONTAL_SCROLL_OFFSET)
+			horizontal = horizontal_offset^
+		}
+		rows: [dynamic]shaping.Wrap_Row
+		if wrap_mode == .Soft {
+			rows_err: errs.Error
+			rows, rows_err = shaping.wrap_rows(visible.text, visible_width, state.dpi.scale, context.temp_allocator)
+			if !errs.ok(rows_err) {
+				text_render_error(rows_err)
+				return {}, false
+			}
+		} else {
+			rows = make([dynamic]shaping.Wrap_Row, context.temp_allocator)
+			append(&rows, shaping.Wrap_Row{start = 0, end = content_width})
+		}
+		defer delete(rows)
+		if target_row < len(rows) || line_offset == line_count - 1 {
+			row := rows[min(target_row, len(rows) - 1)]
+			hit, hit_ok := shaping.hit_test_wrap_row(visible.text, pos.x - body.x + horizontal + row.start, row, state.dpi.scale)
+			if !hit_ok {
+				return {}, false
+			}
+			source_offset, source_ok := shaping.tab_source_offset(expansion, hit.offset)
+			if !source_ok {
+				return {}, false
+			}
+			affinity := txn.Affinity.Left
+			if hit.edge == .Trailing {
+				affinity = .Right
+			}
+			return Text_Hit{offset = start + source_offset, affinity = affinity}, true
+		}
+		target_row -= len(rows)
 	}
-	source_offset, source_ok := shaping.tab_source_offset(expansion, hit.offset)
-	if !source_ok {
-		return {}, false
-	}
-	affinity := txn.Affinity.Left
-	if hit.edge == .Trailing {
-		affinity = .Right
-	}
-	return Text_Hit{offset = start + source_offset, affinity = affinity}, true
+	return {}, false
 }

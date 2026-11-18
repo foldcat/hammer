@@ -41,6 +41,11 @@ Theme :: struct {
 // the defaults by `resolve_from_yaml`/`resolved`; optional booleans left nil
 // inherit their defaults. There is deliberately no way to spell "empty" for a
 // color or a negative font size, so zero-means-default is unambiguous.
+Wrap_Mode :: enum u8 {
+	Truncate,
+	Soft,
+}
+
 Config :: struct {
 	Font_Families:        []string,
 	Tag_Font_Families:    []string,
@@ -50,6 +55,7 @@ Config :: struct {
 	Line_Height:          f32,
 	Ligatures:            bool,
 	Autopair:             Maybe(bool),
+	Wrap_Mode:            Wrap_Mode,
 	Theme:                Theme,
 }
 
@@ -65,6 +71,7 @@ Resolved :: struct {
 	Line_Height:           f32,
 	Ligatures:             bool,
 	Autopair:              bool,
+	Wrap_Mode:             Wrap_Mode,
 	Theme:                 Theme,
 	Source:                Source, // where the config came from
 }
@@ -100,7 +107,7 @@ MAX_FONT_PATH_LEN :: 4096
 // SCHEMA_VERSION is bumped whenever the generated-package shape
 // changes. The generated file carries the version it was staged with
 // and fails to compile against a mismatching schema.
-SCHEMA_VERSION :: 3
+SCHEMA_VERSION :: 4
 
 // parse_hex_color converts "#RRGGBB" into a [4]f32 RGBA color (alpha
 // forced to 1). Returns `.Invalid_Input` on a malformed string.
@@ -199,6 +206,9 @@ validate :: proc(c: Config) -> errs.Error {
 				MAX_LINE_HEIGHT,
 			)
 		}
+	}
+	if c.Wrap_Mode != .Truncate && c.Wrap_Mode != .Soft {
+		return errs.new(.Invalid_Input, "config: invalid wrap mode")
 	}
 	return errs.Error{}
 }
