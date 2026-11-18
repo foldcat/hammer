@@ -131,7 +131,7 @@ render_frame :: proc() {
 				window_tag_active := editor.active_text_kind == .Window_Tag && editor.active_window == placed.id
 				text_render_tag(tag_content_rect(placed.window.tag, placed.control), &item.tag.doc, item.tag.selection, window_tag_active, phys, &verts)
 				body_active := editor.active_text_kind == .Body && editor.active_window == placed.id
-				text_render_document(placed.window, &editor.buffer.doc, item.selection, item.first_line, body_active, 0, phys, &verts)
+				text_render_document(placed.window, &editor_buffer_for_view(item).doc, item.selection, item.first_line, body_active, 0, phys, &verts)
 			}
 		}
 	}

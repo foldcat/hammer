@@ -15,9 +15,12 @@ bounded set of views (up to the workspace's 8×16 windows). Each view has:
   viewport origin.
 - Its own delayed-paste and delayed-cut request state.
 
-The initial three windows are real views of the same buffer. All display the
-same text and undo history, but selections and viewport origins are not
-shared. No additional file/buffer registry was added in this slice.
+M07.02 initially used three views of one buffer. M07.06 adds a bounded buffer
+registry and changes the product default: the startup file belongs to the first
+window, while the other initial windows are separate untitled buffers. Typing,
+undo history, dirty state, and saves no longer propagate between those windows.
+The view core still supports shared-buffer views for a future explicit
+Zerox-style feature.
 
 `src/view_ui.odin` performs stable-ID lookup, active-window transitions, and
 post-edit synchronization. Switching windows ends the typing group and any
@@ -26,10 +29,11 @@ IME preedit so composition cannot jump between views.
 ## Editing and asynchronous results
 
 After a successful transaction, `view.transform_after_edit` applies its
-operations to every other view's selection anchors. The initiating view uses
-the transaction's exact resulting selection. Undo/redo restores the active
-view's history selection and clamps other selections to valid byte offsets;
-it does not fabricate cross-branch anchor mappings.
+operations to selection anchors in other views of the same buffer. The
+initiating view uses the transaction's exact resulting selection. Undo/redo
+restores the active view's history selection and clamps other same-buffer
+selections to valid byte offsets; it does not fabricate cross-branch anchor
+mappings or modify views of other buffers.
 
 Clipboard reads/writes are matched against every view's request ID. Results
 are applied to the originating view and buffer ID/generation, even if another
@@ -53,12 +57,12 @@ remained in `Ready`.
 
 ## Tests and validation
 
-`tests/unit/view/view_test.odin` adds four tests covering independent view
-state, operation-based selection transformation, history-jump clamping, and
-view removal/buffer view counts. `tests/integration/views/x11_harness.py`
-uses real pointer/key events to prove that two windows retain independent
-visible selections, inactive selections survive active-view changes and
-edit/undo, and closing one view does not exit the editor.
+`tests/unit/view/view_test.odin` covers independent view state,
+operation-based selection transformation, history-jump clamping, view
+removal/buffer view counts, and isolation between different buffer IDs. The
+current `tests/integration/views/x11_harness.py` uses real pointer/key events
+to prove independent selections, independent typing/saves, and safe closure of
+one view without exiting the editor.
 
 Commands run:
 

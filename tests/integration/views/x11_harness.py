@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X11 shared-buffer/independent-view smoke test for M07.02."""
+"""Real X11 independent-buffer/view smoke test for M07.02 and M07.06."""
 
 from __future__ import annotations
 
@@ -36,6 +36,8 @@ def main() -> int:
         parser.error("--binary must name an executable")
 
     sandbox = Path(tempfile.mkdtemp(prefix="hammer-m07-02-views-"))
+    source = sandbox / "source.txt"
+    source.write_bytes(b"alpha\n")
     log_path = sandbox / "hammer.log"
     process: subprocess.Popen[bytes] | None = None
     x11: X11 | None = None
@@ -47,7 +49,7 @@ def main() -> int:
         environment["XDG_STATE_HOME"] = str(sandbox / "state")
         with log_path.open("wb") as log:
             process = subprocess.Popen(
-                [str(binary)],
+                [str(binary), str(source)],
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
@@ -59,60 +61,58 @@ def main() -> int:
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
 
-            for character in "abcdef":
-                x11.tap(ord(character))
-            x11.tap(0xFF0D)
-            for character in "ghijkl":
-                x11.tap(ord(character))
-            time.sleep(0.3)
-            if x11.selection_pixels(window, 60, 310) or x11.selection_pixels(window, 345, 590):
-                raise HarnessFailure("unexpected selection before view interaction")
-
+            x11.tap(ord("X"))
             x11.drag(window, (3, 76), (55, 76))
-            time.sleep(0.3)
-            first = x11.selection_pixels(window, 60, 310)
-            if first < 20 or x11.selection_pixels(window, 345, 590) != 0:
-                raise HarnessFailure("the first window did not own its initial selection")
-
-            x11.drag(window, (3, 356), (90, 356))
-            time.sleep(0.3)
+            time.sleep(0.2)
             if x11.selection_pixels(window, 60, 310) < 20:
-                raise HarnessFailure("selecting in the second window cleared the first window's selection")
-            if x11.selection_pixels(window, 345, 590) < 20:
-                raise HarnessFailure("the second window did not render its own selection")
-            print("PASS: two windows retain independent visible selections over one buffer")
+                raise HarnessFailure("the first window did not own its initial selection")
 
             x11.move(window, 3, 356)
             x11.button(1, True)
             x11.button(1, False)
-            time.sleep(0.3)
+            x11.tap(ord("Y"))
+            x11.drag(window, (3, 356), (50, 356))
+            time.sleep(0.2)
+            if x11.selection_pixels(window, 60, 310) < 20:
+                raise HarnessFailure("selecting in the second window cleared the first window's selection")
+            if x11.selection_pixels(window, 345, 590) < 20:
+                raise HarnessFailure("the second window did not render its own selection")
+            print("PASS: independent buffers retain independent visible selections")
+
+            x11.move(window, 3, 356)
+            x11.button(1, True)
+            x11.button(1, False)
+            time.sleep(0.2)
             if x11.selection_pixels(window, 60, 310) < 20:
                 raise HarnessFailure("collapsing the second view's selection changed the first view")
             if x11.selection_pixels(window, 345, 590) != 0:
                 raise HarnessFailure("the second view's selection did not collapse")
             print("PASS: changing the active view preserves the inactive view's selection")
 
-            x11.tap(ord("Z"))
-            time.sleep(0.2)
+            x11.move(window, 3, 76)
+            x11.button(1, True)
+            x11.button(1, False)
             x11.key(0xFFE3, True)
-            x11.tap(ord("z"))
+            x11.tap(ord("s"))
             x11.key(0xFFE3, False)
-            time.sleep(0.2)
-            if x11.selection_pixels(window, 60, 310) < 20:
-                raise HarnessFailure("an edit/undo in the second view lost the first view's selection")
-            x11.key(0xFFE3, True)
-            x11.tap(ord("z"))
-            x11.key(0xFFE3, False)
-            time.sleep(0.3)
-            print("PASS: shared-buffer edit and undo preserve the other view's valid selection")
+            wait_for_log(log_path, "file: saved ", args.timeout)
+            if source.read_bytes() != b"xalpha\n":
+                raise HarnessFailure(f"typing leaked between independent buffers: {source.read_bytes()!r}")
+            print("PASS: typing in one window does not appear in another window's buffer")
 
+            x11.move(window, 3, 356)
+            x11.button(1, True)
+            x11.button(1, False)
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.key(0xFFE3, False)
             x11.key(0xFFE3, True)
             x11.tap(ord("w"))
             x11.key(0xFFE3, False)
             wait_for_log(log_path, "view: closed window 2; 2 views remain", args.timeout)
             if process.poll() is not None:
                 raise HarnessFailure("closing one of several views exited the editor")
-            print("PASS: closing one view keeps the shared buffer and other views open")
+            print("PASS: closing one view preserves the other independent buffers")
 
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)

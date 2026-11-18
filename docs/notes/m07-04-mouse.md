@@ -56,7 +56,8 @@ behavior.
 Button 3 performs literal wrapped forward/backward search and selects the
 match. Search streams rope spans with a 64 KiB needle limit and a 64 MiB
 document budget; it does not flatten the body and reports over-budget input
-explicitly. Full Look expansion, addresses, and file opening belong to M07.06.
+explicitly. M07.06 adds normalized file opening and `file:line` jumps before
+this literal-search fallback; full address expressions remain M08 work.
 Modifier-assisted primary-button gestures belong to M07.05. HTML-tag-specific
 double-click matching remains a compatibility-gap candidate for M07.08.
 

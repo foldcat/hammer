@@ -1,5 +1,7 @@
 package main
 
+import "core:log"
+
 import editing "core/editing"
 import errs "core/errs"
 import mouse "core/mouse"
@@ -40,20 +42,20 @@ editor_poll_body_clipboard :: proc(item: ^view.View, result: ^platform.Clipboard
 			editor_cancel_delayed_paste(&item.delayed_paste)
 		} else {
 			editor.typing_group = 0
-			previous_revision := txn.doc_revision(&editor.buffer.doc)
+			previous_revision := txn.doc_revision(&editor_buffer_for_view(item).doc)
 			apply_err := editing.delayed_paste_apply(
 				&item.delayed_paste,
-				&editor.buffer.doc,
+				&editor_buffer_for_view(item).doc,
 				&item.selection,
 				u64(item.buffer_id),
-				editor.buffer.generation,
+				editor_buffer_for_view(item).generation,
 				u64(result.id),
 				result.data,
 			)
 			applied = errs.ok(apply_err)
 			editor_finish_edit(item, previous_revision, apply_err)
 		}
-		editor_mouse_clipboard_result(target_id, result.id, result.operation, applied, editor.buffer.doc.current, len(result.data))
+		editor_mouse_clipboard_result(target_id, result.id, result.operation, applied, editor_buffer_for_view(item).doc.current, len(result.data))
 		return true
 	}
 	if result.operation == .Write && item.delayed_cut.pending && item.delayed_cut.target.request_id == u64(result.id) {
@@ -62,19 +64,19 @@ editor_poll_body_clipboard :: proc(item: ^view.View, result: ^platform.Clipboard
 			editor_cancel_delayed_cut(&item.delayed_cut)
 		} else {
 			editor.typing_group = 0
-			previous_revision := txn.doc_revision(&editor.buffer.doc)
+			previous_revision := txn.doc_revision(&editor_buffer_for_view(item).doc)
 			apply_err := editing.delayed_cut_apply(
 				&item.delayed_cut,
-				&editor.buffer.doc,
+				&editor_buffer_for_view(item).doc,
 				&item.selection,
 				u64(item.buffer_id),
-				editor.buffer.generation,
+				editor_buffer_for_view(item).generation,
 				u64(result.id),
 			)
 			applied = errs.ok(apply_err)
 			editor_finish_edit(item, previous_revision, apply_err)
 		}
-		editor_mouse_clipboard_result(target_id, result.id, result.operation, applied, editor.buffer.doc.current, len(result.data))
+		editor_mouse_clipboard_result(target_id, result.id, result.operation, applied, editor_buffer_for_view(item).doc.current, len(result.data))
 		return true
 	}
 	return false
@@ -86,18 +88,30 @@ editor_poll_tag_clipboard :: proc(tag: ^tagstate.State, buffer_id: u64, result: 
 		if !errs.ok(result.err) {
 			editor_cancel_delayed_paste(&tag.delayed_paste)
 		} else {
-			editor.typing_group = 0
-			apply_err := editing.delayed_paste_apply(
-				&tag.delayed_paste,
-				&tag.doc,
-				&tag.selection,
-				buffer_id,
-				DEFAULT_BUFFER_GENERATION,
-				u64(result.id),
-				result.data,
-			)
-			applied = errs.ok(apply_err)
-			editor_report(apply_err)
+			has_line_break := false
+			for c in result.data {
+				if c == '\n' || c == '\r' {
+					has_line_break = true
+					break
+				}
+			}
+			if has_line_break {
+				editor_cancel_delayed_paste(&tag.delayed_paste)
+				log.warn("tag: newline input is not allowed")
+			} else {
+				editor.typing_group = 0
+				apply_err := editing.delayed_paste_apply(
+					&tag.delayed_paste,
+					&tag.doc,
+					&tag.selection,
+					buffer_id,
+					DEFAULT_BUFFER_GENERATION,
+					u64(result.id),
+					result.data,
+				)
+				applied = errs.ok(apply_err)
+				editor_report(apply_err)
+			}
 		}
 		editor_mouse_clipboard_result(mouse.Target_ID(buffer_id), result.id, result.operation, applied, tag.doc.current, len(result.data))
 		return true

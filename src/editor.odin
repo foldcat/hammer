@@ -43,7 +43,10 @@ Editor_Buffer :: struct {
 }
 
 Editor :: struct {
-	buffer:                 Editor_Buffer,
+	buffers:                [view.MAX_VIEWS]Editor_Buffer,
+	buffer_count:           int,
+	next_buffer_id:         u64,
+	buffer:                 ^Editor_Buffer,
 	views:                  view.State,
 	global_tag:             tagstate.State,
 	column_tags:            [layout.MAX_COLUMNS]tagstate.State,
@@ -65,9 +68,37 @@ Editor :: struct {
 
 editor: Editor
 
-editor_init :: proc(path := "") -> errs.Error {
+editor_buffer_by_id :: proc(id: view.Buffer_ID) -> ^Editor_Buffer {
+	for index in 0 ..< view.MAX_VIEWS {
+		buffer := &editor.buffers[index]
+		if buffer.id == id {
+			return buffer
+		}
+	}
+	return nil
+}
+
+editor_buffer_for_view :: proc(item: ^view.View) -> ^Editor_Buffer {
+	if item == nil {
+		return nil
+	}
+	return editor_buffer_by_id(item.buffer_id)
+}
+
+editor_destroy_buffer :: proc(buffer: ^Editor_Buffer) {
+	if buffer == nil || buffer.id == 0 {
+		return
+	}
+	txn.doc_destroy(&buffer.doc)
+	delete(buffer.path, permanent())
+	buffer^ = {}
+	editor.buffer_count -= 1
+}
+
+editor_buffer_init :: proc(buffer: ^Editor_Buffer, id: view.Buffer_ID, path: string) -> errs.Error {
+	buffer^ = {id = id, generation = DEFAULT_BUFFER_GENERATION}
 	if path == "" {
-		if err := txn.doc_init(&editor.buffer.doc, {}, permanent()); !errs.ok(err) {
+		if err := txn.doc_init(&buffer.doc, {}, permanent()); !errs.ok(err) {
 			return err
 		}
 	} else {
@@ -111,19 +142,47 @@ editor_init :: proc(path := "") -> errs.Error {
 			copy(content[position:], span)
 			position += len(span)
 		}
-		if err := txn.doc_init_from_bytes(&editor.buffer.doc, content, {}, permanent()); !errs.ok(err) {
+		if err := txn.doc_init_from_bytes(&buffer.doc, content, {}, permanent()); !errs.ok(err) {
 			return err
 		}
-		editor.buffer.capture = loaded.capture
-		editor.buffer.metadata = decoded.metadata
+		buffer.capture = loaded.capture
+		buffer.metadata = decoded.metadata
 		log.infof("file: opened %s (%d bytes)", path, decoded.content.length)
 	}
-	editor.buffer.id = DEFAULT_BUFFER_ID
-	editor.buffer.generation = DEFAULT_BUFFER_GENERATION
-	editor.buffer.path = strings.clone(path, permanent())
-	if err := lifecycle.close_guard_init(&editor.close_guard, {}, permanent()); !errs.ok(err) {
-		txn.doc_destroy(&editor.buffer.doc)
+	buffer.path = strings.clone(path, permanent())
+	return {}
+}
+
+editor_alloc_buffer :: proc(path: string) -> (^Editor_Buffer, errs.Error) {
+	if editor.next_buffer_id == 0 {
+		return nil, errs.new(.Resource_Limit, "file: buffer ID space exhausted", allocator = permanent())
+	}
+	for index in 0 ..< view.MAX_VIEWS {
+		buffer := &editor.buffers[index]
+		if buffer.id != 0 {
+			continue
+		}
+		id := view.Buffer_ID(editor.next_buffer_id)
+		if err := editor_buffer_init(buffer, id, path); !errs.ok(err) {
+			buffer^ = {}
+			return nil, err
+		}
+		editor.next_buffer_id += 1
+		editor.buffer_count += 1
+		return buffer, {}
+	}
+	return nil, errs.new(.Resource_Limit, "file: no buffer slot is available", allocator = permanent())
+}
+
+editor_init :: proc(path := "") -> errs.Error {
+	editor.next_buffer_id = 1
+	buffer, err := editor_alloc_buffer(path)
+	if !errs.ok(err) {
 		return err
+	}
+	editor.buffer = buffer
+	if close_err := lifecycle.close_guard_init(&editor.close_guard, {}, permanent()); !errs.ok(close_err) {
+		return close_err
 	}
 	return editor_workspace_init()
 }
@@ -143,10 +202,19 @@ editor_workspace_init :: proc() -> errs.Error {
 	if _, add_err := layout.add_window(&editor.workspace, right); !errs.ok(add_err) {
 		return add_err
 	}
+	first := true
 	for column_index in 0 ..< editor.workspace.column_count {
 		column := &editor.workspace.columns[column_index]
 		for placed in column.windows[:column.window_count] {
-			if add_err := view.add(&editor.views, placed.id, editor.buffer.id); !errs.ok(add_err) {
+			buffer := editor.buffer
+			if !first {
+				buffer, err = editor_alloc_buffer("")
+				if !errs.ok(err) {
+					return err
+				}
+			}
+			first = false
+			if add_err := view.add(&editor.views, placed.id, buffer.id); !errs.ok(add_err) {
 				return add_err
 			}
 			item, _ := view.find(&editor.views, placed.id)
@@ -182,8 +250,9 @@ editor_destroy :: proc() {
 		tagstate.destroy(&editor.column_tags[column_index])
 	}
 	lifecycle.close_guard_destroy(&editor.close_guard)
-	txn.doc_destroy(&editor.buffer.doc)
-	delete(editor.buffer.path, permanent())
+	for index in 0 ..< view.MAX_VIEWS {
+		editor_destroy_buffer(&editor.buffers[index])
+	}
 	editor = {}
 }
 
@@ -430,6 +499,23 @@ editor_log_layout_drag :: proc(kind: layout.Drag_Kind, column_id: layout.Column_
 }
 
 editor_perform :: proc(action: editing.Action) {
+	if editor.active_text_kind != .Body {
+		#partial switch a in action {
+		case editing.Insert_Text:
+			if a.text == '\n' || a.text == '\r' {
+				log.warn("tag: newline input is not allowed")
+				return
+			}
+		case editing.Commit_Text:
+			for r in a.text {
+				if r == '\n' || r == '\r' {
+					log.warn("tag: newline input is not allowed")
+					return
+				}
+			}
+		case:
+		}
+	}
 	doc := editor_active_doc()
 	previous_revision := txn.doc_revision(doc)
 	err := editing.perform_with_options(doc, editor_active_selection(), action, {autopair = cfg.Autopair, indent = {style = .Tabs}})
@@ -529,14 +615,34 @@ editor_request_close :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close
 		request.buffer_id = 0
 		request.buffer_generation = 0
 	}
-	buffers := []lifecycle.Buffer_Snapshot{{
-		id = u64(editor.buffer.id),
-		generation = editor.buffer.generation,
-		revision = txn.doc_revision(&editor.buffer.doc),
-		view_count = view.buffer_view_count(&editor.views, editor.buffer.id),
-		dirty = editor_dirty(),
-	}}
-	if err := lifecycle.close_request(&editor.close_guard, request, buffers); !errs.ok(err) {
+	snapshots: [view.MAX_VIEWS]lifecycle.Buffer_Snapshot
+	snapshot_count := 0
+	if kind == .Quit {
+		for index in 0 ..< view.MAX_VIEWS {
+			buffer := &editor.buffers[index]
+			if buffer.id == 0 {
+				continue
+			}
+			snapshots[snapshot_count] = {
+				id = u64(buffer.id),
+				generation = buffer.generation,
+				revision = txn.doc_revision(&buffer.doc),
+				view_count = view.buffer_view_count(&editor.views, buffer.id),
+				dirty = txn.doc_revision(&buffer.doc) != buffer.saved_revision,
+			}
+			snapshot_count += 1
+		}
+	} else {
+		snapshots[0] = {
+			id = u64(editor.buffer.id),
+			generation = editor.buffer.generation,
+			revision = txn.doc_revision(&editor.buffer.doc),
+			view_count = view.buffer_view_count(&editor.views, editor.buffer.id),
+			dirty = editor_dirty(),
+		}
+		snapshot_count = 1
+	}
+	if err := lifecycle.close_request(&editor.close_guard, request, snapshots[:snapshot_count]); !errs.ok(err) {
 		editor_report(err)
 		return
 	}
@@ -561,12 +667,16 @@ editor_close_active_view :: proc() {
 		return
 	}
 	window_id := item.window_id
+	buffer_id := item.buffer_id
 	editor_cancel_delayed_paste(&item.delayed_paste)
 	editor_cancel_delayed_cut(&item.delayed_cut)
 	editor_cancel_tag_requests(&item.tag)
 	tagstate.destroy(&item.tag)
 	view.remove(&editor.views, window_id)
 	layout.remove_window(&editor.workspace, window_id)
+	if view.buffer_view_count(&editor.views, buffer_id) == 0 {
+		editor_destroy_buffer(editor_buffer_by_id(buffer_id))
+	}
 	next := editor_active_view()
 	if next == nil {
 		if first := editor_first_view(); first != nil {

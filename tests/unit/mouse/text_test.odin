@@ -108,3 +108,28 @@ test_token_budget_is_explicit :: proc(t: ^testing.T) {
 	testing.expect(t, !errs.ok(err) && err.kind == .Resource_Limit)
 	errs.destroy(&err)
 }
+
+
+@(test)
+test_look_path_and_windows_token_expansion :: proc(t: ^testing.T) {
+	reference := mouse.parse_look_path("target.txt")
+	testing.expect(t, reference.path == "target.txt" && reference.line == 0)
+	reference = mouse.parse_look_path("target.txt:12")
+	testing.expect(t, reference.path == "target.txt" && reference.line == 12)
+	reference = mouse.parse_look_path(`C:\work\target.txt:9`)
+	testing.expect(t, reference.path == `C:\work\target.txt` && reference.line == 9)
+	reference = mouse.parse_look_path("relative.txt:001")
+	testing.expect(t, reference.path == "relative.txt" && reference.line == 1)
+	unchanged := []string{"target.txt:", ":2", "target.txt:0", "target.txt:x", "target.txt:999999999999999999999999999"}
+	for text in unchanged {
+		reference = mouse.parse_look_path(text)
+		testing.expect(t, reference.path == text && reference.line == 0)
+	}
+
+	doc: txn.Doc
+	init_doc(t, &doc, `xx C:\work\target.txt:9 yy`)
+	defer txn.doc_destroy(&doc)
+	range, err := mouse.action_range(&doc, {}, 6, 6, .Look)
+	testing.expect(t, errs.ok(err))
+	expect_text(t, &doc, range, `C:\work\target.txt:9`)
+}

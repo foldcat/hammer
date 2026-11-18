@@ -12,11 +12,13 @@ owns initialization, destruction, and generated-prefix replacement.
 
 Pointer focus distinguishes body, global tag, column tag, and window tag.
 Keyboard editing, mouse selection, undo/redo, indentation, copy/cut/paste,
-and IME commit operate on the active document. Clipboard completions retain
-stable tag/body buffer identities and return to the originating view/tag.
-Closing a view or shutting down cancels its tag requests and destroys its tag
-document. Tag text is UI command state, not file content, and does not make
-the file buffer dirty.
+and IME commit operate on the active document. Tags are single-line: Enter,
+keypad Enter, CR/LF text commits, and clipboard/chord pastes containing CR or
+LF are rejected without a transaction (see `m07-tag-newlines.md`). Clipboard
+completions retain stable tag/body buffer identities and return to the
+originating view/tag. Closing a view or shutting down cancels its tag requests
+and destroys its tag document. Tag text is UI command state, not file content,
+and does not make the file buffer dirty.
 
 `src/core/view/view.odin` now uses stable slots with holes. `txn.Doc` is
 fixed-location, so views are never compacted by copying. A regression test
@@ -59,7 +61,8 @@ Three tag unit tests cover suffix/selection preservation, adding/removing
 `Put`, no-op refresh revisions, input validation, and repair after deleting
 the generated prefix. A fifth view unit test pins fixed-location ownership.
 `tests/integration/tags/x11_harness.py` covers real typing into all three tag
-kinds, body/tag isolation, dirty `Put` generation, and clean-state removal.
+kinds, body/tag isolation, dirty `Put` generation, clean-state removal, and
+single-line enforcement for Enter and CR/LF clipboard input.
 
 Commands run:
 

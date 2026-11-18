@@ -83,6 +83,8 @@ is_token :: proc(r: rune, kind: Token_Kind) -> bool {
 		return true
 	case ':':
 		return kind == .Look
+	case '\\':
+		return kind == .Look
 	case '<', '|', '>':
 		return kind == .Execute
 	}

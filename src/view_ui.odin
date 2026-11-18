@@ -13,6 +13,15 @@ import txn "core/txn"
 import view "core/view"
 
 editor_activate_window :: proc(window_id: layout.Window_ID) {
+	item, found := view.find(&editor.views, window_id)
+	if !found {
+		return
+	}
+	buffer := editor_buffer_by_id(item.buffer_id)
+	if buffer == nil {
+		return
+	}
+	editor.buffer = buffer
 	if editor.active_window != window_id {
 		editor.active_window = window_id
 		editor.typing_group = 0
@@ -112,10 +121,11 @@ editor_active_delayed_cut :: proc() -> ^editing.Delayed_Cut {
 }
 
 editor_finish_edit :: proc(item: ^view.View, previous_revision: u64, err: errs.Error) {
-	if errs.ok(err) && item != nil && txn.doc_revision(&editor.buffer.doc) != previous_revision {
-		current := editor.buffer.doc.current
-		if current > 0 && int(current) <= len(editor.buffer.doc.log) {
-			view.transform_after_edit(&editor.views, item.window_id, editor.buffer.doc.log[current - 1].ops, rope.tree_byte_count(&editor.buffer.doc.tree))
+	buffer := editor_buffer_for_view(item)
+	if errs.ok(err) && buffer != nil && txn.doc_revision(&buffer.doc) != previous_revision {
+		current := buffer.doc.current
+		if current > 0 && int(current) <= len(buffer.doc.log) {
+			view.transform_after_edit(&editor.views, item.window_id, item.buffer_id, buffer.doc.log[current - 1].ops, rope.tree_byte_count(&buffer.doc.tree))
 		}
 		editor_refresh_window_tags()
 	}
@@ -123,32 +133,34 @@ editor_finish_edit :: proc(item: ^view.View, previous_revision: u64, err: errs.E
 }
 
 editor_finish_history_jump :: proc(item: ^view.View) {
-	if item == nil {
+	buffer := editor_buffer_for_view(item)
+	if buffer == nil {
 		return
 	}
-	view.clamp_after_history_jump(&editor.views, item.window_id, rope.tree_byte_count(&editor.buffer.doc.tree))
+	view.clamp_after_history_jump(&editor.views, item.window_id, item.buffer_id, rope.tree_byte_count(&buffer.doc.tree))
 	editor_refresh_window_tags()
 }
 
-editor_window_generated :: proc() -> string {
+editor_window_generated :: proc(item: ^view.View) -> string {
 	name := "New"
-	if editor.buffer.path != "" {
-		name = editor.buffer.path
-		for r, index in editor.buffer.path {
+	buffer := editor_buffer_for_view(item)
+	if buffer != nil && buffer.path != "" {
+		name = buffer.path
+		for r, index in buffer.path {
 			if r == '/' || r == '\\' {
-				name = editor.buffer.path[index + 1:]
+				name = buffer.path[index + 1:]
 			}
 		}
 	}
 	commands := "Del"
-	if editor_dirty() {
+	if buffer != nil && txn.doc_revision(&buffer.doc) != buffer.saved_revision {
 		commands = "Del Put"
 	}
 	return fmt.aprintf("%s %s | ", name, commands, allocator = context.temp_allocator)
 }
 
 editor_init_window_tag :: proc(item: ^view.View) -> errs.Error {
-	return tagstate.init(&item.tag, editor_window_generated(), permanent())
+	return tagstate.init(&item.tag, editor_window_generated(item), permanent())
 }
 
 editor_init_global_and_column_tags :: proc() -> errs.Error {
@@ -164,12 +176,12 @@ editor_init_global_and_column_tags :: proc() -> errs.Error {
 }
 
 editor_refresh_window_tags :: proc() {
-	generated := editor_window_generated()
 	for index in 0 ..< view.MAX_VIEWS {
 		item := &editor.views.views[index]
 		if item.window_id == 0 {
 			continue
 		}
+		generated := editor_window_generated(item)
 		previous_revision := txn.doc_revision(&item.tag.doc)
 		editor_report(tagstate.refresh_generated(&item.tag, generated, permanent()))
 		if txn.doc_revision(&item.tag.doc) != previous_revision {

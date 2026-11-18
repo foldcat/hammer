@@ -72,12 +72,12 @@ editor_active_text_target :: proc() -> Mouse_Text_Target {
 		}
 		target.id = editor_body_target_id(item.window_id)
 		target.window_id = item.window_id
-		target.doc = &editor.buffer.doc
+		target.doc = &editor_buffer_for_view(item).doc
 		target.selection = &item.selection
 		target.delayed_paste = &item.delayed_paste
 		target.delayed_cut = &item.delayed_cut
 		target.buffer_id = u64(item.buffer_id)
-		target.generation = editor.buffer.generation
+		target.generation = editor_buffer_for_view(item).generation
 		target.item = item
 	case .Global_Tag:
 		target.id = mouse.Target_ID(GLOBAL_TAG_BUFFER_ID)
@@ -115,6 +115,7 @@ editor_active_text_target :: proc() -> Mouse_Text_Target {
 		target.delayed_cut = &item.tag.delayed_cut
 		target.buffer_id = WINDOW_TAG_BUFFER_BASE + u64(item.window_id)
 		target.tag = &item.tag
+		target.item = item
 	}
 	return target
 }
@@ -143,12 +144,12 @@ editor_text_target_by_id :: proc(id: mouse.Target_ID) -> Mouse_Text_Target {
 			id = id,
 			kind = .Body,
 			window_id = window_id,
-			doc = &editor.buffer.doc,
+			doc = &editor_buffer_for_view(item).doc,
 			selection = &item.selection,
 			delayed_paste = &item.delayed_paste,
 			delayed_cut = &item.delayed_cut,
 			buffer_id = u64(item.buffer_id),
-			generation = editor.buffer.generation,
+			generation = editor_buffer_for_view(item).generation,
 			item = item,
 		}
 	}
@@ -169,6 +170,7 @@ editor_text_target_by_id :: proc(id: mouse.Target_ID) -> Mouse_Text_Target {
 			buffer_id = WINDOW_TAG_BUFFER_BASE + u64(window_id),
 			generation = DEFAULT_BUFFER_GENERATION,
 			tag = &item.tag,
+			item = item,
 		}
 	}
 	if u64(id) > COLUMN_TAG_BUFFER_BASE && u64(id) < WINDOW_TAG_BUFFER_BASE {
@@ -793,7 +795,7 @@ editor_execute_mouse :: proc(action: mouse.Execute) {
 		if owned != nil {
 			defer delete(owned, context.temp_allocator)
 		}
-		editor_search_body(body, needle, false)
+		editor_look_text(target, needle, false)
 	case:
 		log.warnf("mouse: command %q was not executed; external commands and the full built-in registry are later milestones", name)
 	}
@@ -850,7 +852,7 @@ editor_look_mouse :: proc(action: mouse.Look) {
 		}
 		body.selection^ = txn.Selection{anchor = caret, active = caret, affinity = .Left}
 	}
-	editor_search_body(body, data, action.reverse)
+	editor_look_text(target, data, action.reverse)
 }
 
 editor_search_body :: proc(body: Mouse_Text_Target, needle: []byte, reverse: bool) {

@@ -78,10 +78,10 @@ buffer_view_count :: proc(state: ^State, buffer_id: Buffer_ID) -> int {
 	return count
 }
 
-transform_after_edit :: proc(state: ^State, edited_window: layout.Window_ID, ops: []txn.Operation, byte_count: int) {
+transform_after_edit :: proc(state: ^State, edited_window: layout.Window_ID, buffer_id: Buffer_ID, ops: []txn.Operation, byte_count: int) {
 	for index in 0 ..< MAX_VIEWS {
 		item := &state.views[index]
-		if item.window_id == 0 || item.window_id == edited_window {
+		if item.window_id == 0 || item.window_id == edited_window || item.buffer_id != buffer_id {
 			continue
 		}
 		anchor := txn.Anchor{pos = item.selection.anchor, affinity = item.selection.affinity}
@@ -96,10 +96,10 @@ transform_after_edit :: proc(state: ^State, edited_window: layout.Window_ID, ops
 	}
 }
 
-clamp_after_history_jump :: proc(state: ^State, selected_window: layout.Window_ID, byte_count: int) {
+clamp_after_history_jump :: proc(state: ^State, selected_window: layout.Window_ID, buffer_id: Buffer_ID, byte_count: int) {
 	for index in 0 ..< MAX_VIEWS {
 		item := &state.views[index]
-		if item.window_id == 0 || item.window_id == selected_window {
+		if item.window_id == 0 || item.window_id == selected_window || item.buffer_id != buffer_id {
 			continue
 		}
 		item.selection.anchor = clamp(item.selection.anchor, 0, byte_count)
