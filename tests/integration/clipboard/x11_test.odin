@@ -159,7 +159,7 @@ test_x11_ownership_loss_and_no_owner :: proc(t: ^testing.T) {
 	xwrite(t, &second, 21, .Clipboard, transmute([]byte)string("second"))
 	lost := xnext(t, &first)
 	defer platform.result_destroy(&lost)
-	testing.expect(t, lost.id == 20 && lost.ownership == .Lost && lost.err.kind == .Conflict)
+	testing.expect(t, lost.id == 20 && lost.ownership == .Lost && errs.ok(lost.err))
 
 	xclient_init(t, &reader)
 	defer xclient_destroy(&reader)

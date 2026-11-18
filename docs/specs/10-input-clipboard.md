@@ -37,6 +37,10 @@ Track:
 - Gesture cancellation.
 - Lost focus/capture.
 
+Column control boxes show a horizontal resize cursor on hover, and window
+control boxes show a vertical resize cursor. Other areas use the default
+cursor without changing drag behavior.
+
 Test original Acme chords against the reference behavior.
 
 Do not automatically enable X11 middle-click paste over Acme’s middle-button execution behavior.
@@ -146,9 +150,12 @@ Rules:
   indentation from the line where the replacement begins.
 - The newline plus inherited indentation is one undo transaction.
 
-This is baseline literal inheritance. General reindenting against surrounding
-bracket/brace structure is not part of this behavior; the adjacent-pair exception
-is defined below.
+This is baseline literal inheritance. The product additionally adds one
+indentation unit when Enter follows a collapsed caret whose previous
+non-whitespace byte on the line is `(`, `[`, or `{`. Trailing spaces/tabs are
+skipped for this check. Opener indentation is independent of the autopair
+switch and does not by itself add a closing line; the adjacent-pair expansion is
+defined below. General syntax-aware reindenting is not part of this behavior.
 
 ## 10.7 Autopair policy
 
@@ -217,6 +224,10 @@ Handle:
 - UTF-8 targets.
 - Large transfers, including incremental transfer behavior.
 - Clipboard-manager persistence where available.
+
+Another client taking selection ownership is normal. Report the ownership-loss
+state without a warning or error window; continue to report genuine acquisition,
+transfer, timeout, and read failures explicitly.
 
 ### Wayland
 

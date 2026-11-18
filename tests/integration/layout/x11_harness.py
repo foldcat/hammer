@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
 from x11_harness import HarnessFailure, X11, wait_for_exit  # noqa: E402
 
@@ -70,6 +71,25 @@ def main() -> int:
             # active window changes only the caret position; the default region
             # (x>=10) missed it and made this check a false "no change".
             initial_pixels = x11.pixels(window, 2, 220, 66, 130)
+
+            x11.move(window, 450, 100)
+            time.sleep(0.2)
+            default_cursor = x11.cursor_signature()
+            x11.move(window, 5, 25)
+            time.sleep(0.2)
+            horizontal_cursor = x11.cursor_signature()
+            if horizontal_cursor == default_cursor:
+                raise HarnessFailure("column control did not change the real X11 cursor")
+            x11.move(window, 403, 50)
+            time.sleep(0.2)
+            vertical_cursor = x11.cursor_signature()
+            if vertical_cursor == default_cursor or vertical_cursor == horizontal_cursor:
+                raise HarnessFailure("window control did not select a distinct vertical X11 cursor")
+            x11.move(window, 450, 100)
+            time.sleep(0.2)
+            if x11.cursor_signature() != default_cursor:
+                raise HarnessFailure("leaving resize controls did not restore the default X11 cursor")
+            print("PASS: resize controls select horizontal/vertical X11 cursors and restore the default")
 
             x11.drag(window, (5, 50), (600, 100))
             wait_for_layout_line(log_path, r"layout: window 1 column 2 index 0 weight 1\.0000", args.timeout)

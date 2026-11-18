@@ -31,7 +31,6 @@ handle_selection_clear :: proc(state: ^State, event: xlib.XSelectionClearEvent) 
 		selection = selection,
 		operation = .Write,
 		ownership = .Lost,
-		err = errs.new(.Conflict, "clipboard: another X11 client took selection ownership", allocator = state.options.allocator),
 		allocator = state.options.allocator,
 	})
 }

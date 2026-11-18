@@ -599,7 +599,12 @@ editor_perform :: proc(action: editing.Action) {
 	}
 	doc := editor_active_doc()
 	previous_revision := txn.doc_revision(doc)
-	err := editing.perform_with_options(doc, editor_active_selection(), action, {autopair = cfg.Autopair, indent = {style = .Tabs}})
+	err := editing.perform_with_options(
+		doc,
+		editor_active_selection(),
+		action,
+		{autopair = cfg.Autopair, auto_indent = true, indent = {style = .Tabs}},
+	)
 	if editor.active_text_kind == .Body {
 		editor_finish_edit(editor_active_view(), previous_revision, err)
 	} else {

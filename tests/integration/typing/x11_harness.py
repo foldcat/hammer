@@ -20,6 +20,21 @@ class HarnessFailure(RuntimeError):
     pass
 
 
+class XFixesCursorImage(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_short),
+        ("y", ctypes.c_short),
+        ("width", ctypes.c_ushort),
+        ("height", ctypes.c_ushort),
+        ("xhot", ctypes.c_ushort),
+        ("yhot", ctypes.c_ushort),
+        ("cursor_serial", ctypes.c_ulong),
+        ("pixels", ctypes.POINTER(ctypes.c_ulong)),
+        ("atom", ctypes.c_ulong),
+        ("name", ctypes.c_char_p),
+    ]
+
+
 class ClipboardOwner:
     def __init__(self, peer: Path, payload: Path, sandbox: Path, timeout: float) -> None:
         self.log_path = sandbox / "clipboard-owner.log"
@@ -219,6 +234,31 @@ class X11:
         if not self.xtst.XTestFakeButtonEvent(self.display, button, int(down), 0):
             raise HarnessFailure("XTestFakeButtonEvent failed")
         self.lib.XSync(self.display, 0)
+
+    def cursor_signature(self) -> str:
+        if not hasattr(self, "xfixes"):
+            xfixes_name = ctypes.util.find_library("Xfixes")
+            if xfixes_name is None:
+                raise HarnessFailure("libXfixes is required for cursor inspection")
+            self.xfixes = ctypes.CDLL(xfixes_name)
+            self.xfixes.XFixesGetCursorImage.argtypes = [ctypes.c_void_p]
+            self.xfixes.XFixesGetCursorImage.restype = ctypes.POINTER(XFixesCursorImage)
+        image = self.xfixes.XFixesGetCursorImage(self.display)
+        if not image:
+            raise HarnessFailure("XFixesGetCursorImage failed")
+        try:
+            cursor = image.contents
+            count = cursor.width * cursor.height
+            if count == 0 or count > 4096 or not cursor.pixels:
+                raise HarnessFailure(f"invalid X11 cursor dimensions: {cursor.width}x{cursor.height}")
+            digest = hashlib.sha256()
+            digest.update(f"{cursor.width}x{cursor.height}".encode("ascii"))
+            if cursor.name:
+                digest.update(cursor.name)
+            digest.update(ctypes.string_at(cursor.pixels, count * ctypes.sizeof(ctypes.c_ulong)))
+            return digest.hexdigest()
+        finally:
+            self.lib.XFree(ctypes.cast(image, ctypes.c_void_p))
 
     def drag(self, window: int, start: tuple[int, int], end: tuple[int, int]) -> None:
         self.move(window, *start)
@@ -751,6 +791,9 @@ def main() -> int:
             wait_for_exit(process, args.timeout, log_path)
             process = None
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        if "another X11 client took selection ownership" in log_text:
+            raise HarnessFailure("normal X11 clipboard ownership replacement produced a warning")
+        print("PASS: external X11 clipboard ownership replacement does not produce a warning")
         page_counts = [
             int(line.split("glyph-cache: pages=", 1)[1].split(None, 1)[0])
             for line in log_text.splitlines()

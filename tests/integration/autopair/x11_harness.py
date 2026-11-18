@@ -97,6 +97,17 @@ def run_case(
             print(f"PASS: {label} product pair-newline indentation policy")
 
             reset_document(x11, window, initial, label)
+            for keysym in (ord("["), 0xFFFF, 0xFF0D):
+                x11.tap(keysym)
+            time.sleep(0.3)
+            actual = copy_document(x11, peer, sandbox / f"{label}-opener-newline.txt", timeout)
+            if actual != b"[\n\t":
+                raise HarnessFailure(
+                    f"{label}: opener newline produced {actual!r}, want an indented line after the opening bracket"
+                )
+            print(f"PASS: {label} product indents after an opening bracket without an adjacent closer")
+
+            reset_document(x11, window, initial, label)
             for keysym in (ord("a"), 0xFF0D, ord(")")):
                 x11.tap(keysym)
             x11.key(0xFFE3, True)
@@ -165,7 +176,7 @@ def main() -> int:
     try:
         x11 = X11()
         run_case(x11, enabled, peer, "enabled", sandbox, args.timeout, b"z", b"[\n\t\n]", b"[x'']")
-        run_case(x11, disabled, peer, "disabled", sandbox, args.timeout, b"z)", b"[\n", b"[x''")
+        run_case(x11, disabled, peer, "disabled", sandbox, args.timeout, b"z)", b"[\n\t", b"[x''")
         succeeded = True
         print("PASS: compiled autopair configuration controls real product editing")
         return 0

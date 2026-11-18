@@ -36,7 +36,8 @@ Clipboard_Ownership :: enum u8 {
 
 // Clipboard_Result owns data and err. result_destroy releases both with their
 // original allocators. Ownership Lost reports a later X11 SelectionClear for the
-// write identified by id; it does not pretend the payload remains published.
+// write identified by id without treating normal ownership replacement as an
+// error; it does not pretend the payload remains published.
 Clipboard_Result :: struct {
 	id:        Clipboard_Request_ID,
 	selection: Clipboard_Selection,

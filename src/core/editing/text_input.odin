@@ -36,7 +36,7 @@ insert_text :: proc(
 		return errs.new(.Invalid_Input, "editing: invalid committed text scalar", allocator = allocator)
 	}
 	if text == '\n' {
-		return insert_newline(doc, selection, grouping_key, {}, false, allocator)
+		return insert_newline(doc, selection, grouping_key, {}, allocator)
 	}
 	encoded, width := utf8.encode_rune(text)
 	return insert_committed_bytes(doc, selection, encoded[:width], grouping_key, allocator)
@@ -46,8 +46,7 @@ insert_newline :: proc(
 	doc: ^txn.Doc,
 	selection: ^txn.Selection,
 	grouping_key: u64,
-	pair_indent: Indent_Settings,
-	indent_pair: bool,
+	options: Input_Options,
 	allocator := context.allocator,
 ) -> errs.Error {
 	if err := validate_edit_selection(doc, selection^, allocator); !errs.ok(err) {
@@ -64,31 +63,49 @@ insert_newline :: proc(
 	for indent_len < len(line.data) && (line.data[indent_len] == ' ' || line.data[indent_len] == '\t') {
 		indent_len += 1
 	}
-	extra_indent := 0
-	if indent_pair && range.start == range.end && range.start > 0 && range.start < rope.tree_byte_count(&doc.tree) {
-		bytes: [2]u8
-		n, read_err := rope.tree_read(&doc.tree, {range.start - 1, range.start + 1}, bytes[:], allocator)
-		if !errs.ok(read_err) {
-			return read_err
+	indent_opener := false
+	expand_pair := false
+	if range.start == range.end && range.start > 0 {
+		caret_offset := range.start - line.start
+		if options.auto_indent {
+			previous := caret_offset
+			for previous > 0 && (line.data[previous - 1] == ' ' || line.data[previous - 1] == '\t') {
+				previous -= 1
+			}
+			if previous > 0 {
+				pair, paired := autopair_open_pair(rune(line.data[previous - 1]))
+				indent_opener = paired && pair.open != pair.close
+			}
 		}
-		pair, paired := autopair_open_pair(rune(bytes[0]))
-		if n == 2 && paired && pair.open != pair.close && pair.close == bytes[1] {
-			width := pair_indent.width
-			if width == 0 {
-				width = DEFAULT_INDENT_WIDTH
-			}
-			if width < 0 || width > MAX_INDENT_WIDTH ||
-				(pair_indent.style != .Tabs && pair_indent.style != .Spaces) {
-				return errs.new(.Invalid_Input, "editing: invalid indentation settings", allocator = allocator)
-			}
-			extra_indent = width
-			if pair_indent.style == .Tabs {
-				extra_indent = 1
+		if options.autopair && caret_offset > 0 && range.start < rope.tree_byte_count(&doc.tree) {
+			pair, paired := autopair_open_pair(rune(line.data[caret_offset - 1]))
+			if paired && pair.open != pair.close {
+				next: [1]u8
+				n, read_err := rope.tree_read(&doc.tree, {range.start, range.start + 1}, next[:], allocator)
+				if !errs.ok(read_err) {
+					return read_err
+				}
+				expand_pair = n == 1 && pair.close == next[0]
 			}
 		}
 	}
+	extra_indent := 0
+	if indent_opener || expand_pair {
+		width := options.indent.width
+		if width == 0 {
+			width = DEFAULT_INDENT_WIDTH
+		}
+		if width < 0 || width > MAX_INDENT_WIDTH ||
+			(options.indent.style != .Tabs && options.indent.style != .Spaces) {
+			return errs.new(.Invalid_Input, "editing: invalid indentation settings", allocator = allocator)
+		}
+		extra_indent = width
+		if options.indent.style == .Tabs {
+			extra_indent = 1
+		}
+	}
 	closing_line_len := 0
-	if extra_indent > 0 {
+	if expand_pair {
 		closing_line_len = indent_len + 1
 	}
 	inserted := make([]byte, indent_len + 1 + extra_indent + closing_line_len, allocator)
@@ -98,7 +115,7 @@ insert_newline :: proc(
 	caret := range.start + len(inserted)
 	if extra_indent > 0 {
 		unit := inserted[indent_len + 1:indent_len + 1 + extra_indent]
-		if pair_indent.style == .Tabs {
+		if options.indent.style == .Tabs {
 			unit[0] = '\t'
 		} else {
 			for &b in unit {
@@ -106,9 +123,11 @@ insert_newline :: proc(
 			}
 		}
 		caret = range.start + indent_len + 1 + extra_indent
-		closing_line := caret - range.start
-		inserted[closing_line] = '\n'
-		copy(inserted[closing_line + 1:], line.data[:indent_len])
+		if expand_pair {
+			closing_line := caret - range.start
+			inserted[closing_line] = '\n'
+			copy(inserted[closing_line + 1:], line.data[:indent_len])
+		}
 	}
 	operation: txn.Operation
 	if range.start == range.end {

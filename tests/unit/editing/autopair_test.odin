@@ -86,6 +86,53 @@ test_autopair_newline_does_not_indent_nonbracket_or_disabled_pairs :: proc(t: ^t
 }
 
 @(test)
+test_newline_indents_after_previous_bracket_token_without_requiring_autopair :: proc(t: ^testing.T) {
+	cases := []struct {
+		original: string,
+		caret:    int,
+		want:     string,
+		after:    int,
+	} {
+		{original = "{", caret = 1, want = "{\n\t", after = 3},
+		{original = "\t[  ", caret = 4, want = "\t[  \n\t\t", after = 7},
+		{original = "()", caret = 1, want = "(\n\t)", after = 3},
+		{original = "plain", caret = 5, want = "plain\n", after = 6},
+	}
+	for c in cases {
+		doc: txn.Doc
+		doc_with_text(t, &doc, c.original)
+		defer txn.doc_destroy(&doc)
+		selection := txn.Selection{anchor = c.caret, active = c.caret}
+		err := editing.perform_with_options(
+			&doc,
+			&selection,
+			editing.Insert_Text{text = '\n'},
+			{auto_indent = true, indent = {style = .Tabs}},
+		)
+		defer errs.destroy(&err)
+		testing.expectf(t, errs.ok(err), "%v", errs.describe(err))
+		expect_content(t, &doc, c.want)
+		testing.expect(t, selection == txn.Selection{anchor = c.after, active = c.after, affinity = .Left})
+		testing.expect(t, txn.doc_log_len(&doc) == 1 && len(doc.log[0].ops) == 1)
+	}
+
+	spaces: txn.Doc
+	doc_with_text(t, &spaces, "  {")
+	defer txn.doc_destroy(&spaces)
+	selection := txn.Selection{anchor = 3, active = 3}
+	err := editing.perform_with_options(
+		&spaces,
+		&selection,
+		editing.Insert_Text{text = '\n'},
+		{auto_indent = true, indent = {style = .Spaces, width = 2}},
+	)
+	defer errs.destroy(&err)
+	testing.expectf(t, errs.ok(err), "%v", errs.describe(err))
+	expect_content(t, &spaces, "  {\n    ")
+	testing.expect(t, selection.anchor == 8 && selection.active == 8)
+}
+
+@(test)
 test_autopair_delimiters_skip_close_and_delete_empty_pair :: proc(t: ^testing.T) {
 	cases := []struct {
 		open:  rune,

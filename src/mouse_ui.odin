@@ -5,6 +5,8 @@ import "core:math"
 import "core:strings"
 import "core:time"
 
+import sapp "sokol:app"
+
 import config "core/config"
 import coords "core/coords"
 import editing "core/editing"
@@ -376,7 +378,21 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 	editor_dispatch_mouse_action(action)
 }
 
+editor_update_mouse_cursor :: proc(pos: coords.Logical_Point) {
+	cursor := sapp.Mouse_Cursor.DEFAULT
+	if geometry, _, ok := current_layout(); ok {
+		#partial switch layout.hit_test(&geometry, pos).kind {
+		case .Column_Control:
+			cursor = .RESIZE_EW
+		case .Window_Control:
+			cursor = .RESIZE_NS
+		}
+	}
+	sapp.set_mouse_cursor(cursor)
+}
+
 editor_pointer_move :: proc(event: input.Pointer_Move) {
+	editor_update_mouse_cursor(event.pos)
 	if editor_scrollbar_pointer_move(event) {
 		return
 	}

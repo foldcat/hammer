@@ -38,8 +38,9 @@ Move :: struct {
 Select_All :: struct {}
 
 Input_Options :: struct {
-	autopair: bool,
-	indent:   Indent_Settings,
+	autopair:    bool,
+	auto_indent: bool,
+	indent:      Indent_Settings,
 }
 
 Action :: union {
@@ -82,10 +83,10 @@ perform_with_options :: proc(
 		select_all(doc, selection)
 		return {}
 	case Insert_Text:
+		if a.text == '\n' {
+			return insert_newline(doc, selection, a.grouping_key, options, allocator)
+		}
 		if options.autopair {
-			if a.text == '\n' {
-				return insert_newline(doc, selection, a.grouping_key, options.indent, true, allocator)
-			}
 			handled, err := autopair_insert(doc, selection, a.text, a.grouping_key, allocator)
 			if handled {
 				return err
