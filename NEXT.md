@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M07.08 Add compatibility scenarios for window behavior
+## Current task: M07.09 Implement configurable line wrapping (soft wrap vs truncate + horizontal scroll)

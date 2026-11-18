@@ -25,6 +25,7 @@
 //     odin run make.odin -file -- mouse-test       # M07.04 X11 original mouse actions/chords
 //     odin run make.odin -file -- look-test        # M07.06 X11 Look expansion and file opening
 //     odin run make.odin -file -- directory-test   # M07.07 X11 directory and error windows
+//     odin run make.odin -file -- compatibility-test # M07.08 integrated Acme window behavior
 //     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering
@@ -125,6 +126,7 @@ TAG_TEST_HARNESS :: #directory + "/tests/integration/tags/x11_harness.py"
 MOUSE_TEST_HARNESS :: #directory + "/tests/integration/mouse/x11_harness.py"
 LOOK_TEST_HARNESS :: #directory + "/tests/integration/look/x11_harness.py"
 DIRECTORY_TEST_HARNESS :: #directory + "/tests/integration/directory/x11_harness.py"
+COMPATIBILITY_TEST_HARNESS :: #directory + "/tests/integration/compatibility/x11_harness.py"
 AUTOPAIR_TEST_HARNESS :: #directory + "/tests/integration/autopair/x11_harness.py"
 AUTOPAIR_ENABLED_BINARY :: OUT_DIR + "/hammer-autopair-on"
 AUTOPAIR_DISABLED_BINARY :: OUT_DIR + "/hammer-autopair-off"
@@ -614,6 +616,36 @@ main :: proc() {
 			}, true)
 		} else {
 			fmt.eprintln("[Test] directory-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "compatibility-test" {
+		when ODIN_OS == .Linux {
+			stage_config(args[2:])
+			if !setup_sokol_linux() {
+				os.exit(1)
+			}
+			run_odin([]string {
+				"odin",
+				"build",
+				SRC_DIR,
+				SOKOL_COLLECTION,
+				"-vet",
+				"-out:" + BINARY_PATH,
+				"-debug",
+			})
+			run_odin([]string {
+				"xvfb-run",
+				"-a",
+				"python3",
+				COMPATIBILITY_TEST_HARNESS,
+				"--binary",
+				BINARY_PATH,
+			}, true)
+		} else {
+			fmt.eprintln("[Test] compatibility-test currently requires Linux/X11")
 			os.exit(1)
 		}
 		return
