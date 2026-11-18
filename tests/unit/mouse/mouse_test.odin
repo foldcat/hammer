@@ -102,3 +102,43 @@ test_reverse_lookup_and_lost_capture :: proc(t: ^testing.T) {
 	mouse.cancel(&state)
 	testing.expect(t, !state.last_click.valid)
 }
+
+
+@(test)
+test_modified_primary_execute_and_look_do_not_select :: proc(t: ^testing.T) {
+	state: mouse.State
+	action := mouse.down(&state, .Left, 3, 2, point(), {.Ctrl}, 0)
+	_, selected := action.(mouse.Select_Start)
+	testing.expect(t, !selected && mouse.active(&state))
+	mouse.move(&state, 8, point(30), {.Left})
+	action = mouse.up(&state, .Left, 8, point(30), 1)
+	execute, execute_ok := action.(mouse.Execute)
+	testing.expect(t, execute_ok && execute.anchor == 2 && execute.active == 8 && !execute.with_argument)
+
+	action = mouse.down(&state, .Left, 9, 4, point(), {.Alt}, 10)
+	_, selected = action.(mouse.Select_Start)
+	testing.expect(t, !selected && mouse.active(&state))
+	action = mouse.up(&state, .Left, 6, point(20), 11)
+	look, look_ok := action.(mouse.Look)
+	testing.expect(t, look_ok && look.anchor == 4 && look.active == 6 && !look.reverse)
+}
+
+@(test)
+test_modified_primary_rejects_altgr_and_cancels_on_lost_capture :: proc(t: ^testing.T) {
+	state: mouse.State
+	action := mouse.down(&state, .Left, 3, 2, point(), {.Ctrl, .Alt}, 0)
+	testing.expect(t, action == nil && !mouse.active(&state))
+	action = mouse.down(&state, .Left, 3, 2, point(), {.Ctrl, .Shift}, 1)
+	testing.expect(t, action == nil && !mouse.active(&state))
+	action = mouse.down(&state, .Left, 3, 2, point(), {.Alt, .Shift}, 2)
+	testing.expect(t, action == nil && !mouse.active(&state))
+	action = mouse.down(&state, .Left, 3, 2, point(), {.Super}, 3)
+	testing.expect(t, action == nil && !mouse.active(&state))
+
+	mouse.down(&state, .Left, 3, 2, point(), {.Ctrl}, 10)
+	action = mouse.move(&state, 5, point(20), {})
+	_, canceled := action.(mouse.Cancel)
+	testing.expect(t, canceled && !mouse.active(&state))
+	action = mouse.up(&state, .Left, 5, point(20), 11)
+	testing.expect(t, action == nil)
+}

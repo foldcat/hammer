@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X11 Acme mouse action and chord smoke test for M07.04."""
+"""Real X11 Acme mouse action, chord, and modifier smoke tests for M07.04-M07.05."""
 
 from __future__ import annotations
 
@@ -95,9 +95,83 @@ def main() -> int:
                 raise HarnessFailure("button 3 did not render the next literal match as selected")
             print("PASS: button 3 expands a token and selects the next literal match")
 
+            x11.move(window, 180, 76)
+            x11.button(1, True)
+            x11.button(1, False)
+            x11.key(0xFFE3, True)
+            x11.move(window, 62, 76)
+            x11.button(1, True)
+            x11.move(window, 100, 80)
+            x11.button(1, False)
+            x11.key(0xFFE3, False)
+            wait_for_log(log_path, 'mouse: execute "beta" target=3001 argument_chord=false', args.timeout)
+            if x11.selection_pixels(window) != 0:
+                raise HarnessFailure("Ctrl+primary drag accidentally started a primary selection")
+            print("PASS: Ctrl+primary drag executes without starting a primary selection")
+
+            x11.key(0xFFE9, True)
             x11.move(window, 3, 76)
             x11.button(1, True)
-            for x in (12, 22, 32, 40):
+            x11.move(window, 50, 78)
+            x11.button(1, False)
+            x11.key(0xFFE9, False)
+            wait_for_log(log_path, 'mouse: look "alpha" reverse=false match=[11,16)', args.timeout, occurrence=2)
+            print("PASS: Alt+primary drag looks up the dragged text")
+
+            x11.move(window, 70, 76)
+            x11.button(1, True)
+            x11.button(1, False)
+            x11.key(0xFFE3, True)
+            x11.tap(0xFF0D)
+            x11.key(0xFFE3, False)
+            wait_for_log(log_path, 'mouse: execute "beta" target=3001 argument_chord=false', args.timeout, occurrence=2)
+            if x11.selection_pixels(window) != 0:
+                raise HarnessFailure("Ctrl+Enter accidentally changed the primary selection")
+            print("PASS: Ctrl+Enter executes the token at the caret through the mouse action layer")
+
+            x11.move(window, 15, 76)
+            x11.button(1, True)
+            x11.button(1, False)
+            x11.key(0xFFE9, True)
+            x11.tap(0xFF0D)
+            x11.key(0xFFE9, False)
+            wait_for_log(log_path, 'mouse: look "alpha" reverse=false match=[11,16)', args.timeout, occurrence=3)
+            print("PASS: Alt+Enter looks up the token at the caret through the mouse action layer")
+
+            x11.key(0xFFE3, True)
+            x11.key(0xFFE9, True)
+            x11.tap(0xFF0D)
+            x11.key(0xFFE9, False)
+            x11.key(0xFFE3, False)
+            time.sleep(0.2)
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            if log_text.count('mouse: execute "beta" target=3001 argument_chord=false') != 2:
+                raise HarnessFailure("Ctrl+Alt+Enter unexpectedly executed text")
+            if log_text.count('mouse: look "alpha" reverse=false match=[11,16)') != 3:
+                raise HarnessFailure("Ctrl+Alt+Enter unexpectedly looked up text")
+            print("PASS: Ctrl+Alt+Enter does not trigger either modified action")
+
+            x11.move(window, 180, 76)
+            x11.button(1, True)
+            x11.button(1, False)
+            x11.key(0xFFE3, True)
+            x11.move(window, 70, 76)
+            x11.button(1, True)
+            x11.tap(0xFFE1)
+            x11.button(1, False)
+            x11.key(0xFFE3, False)
+            time.sleep(0.2)
+            if log_path.read_text(encoding="utf-8", errors="replace").count(
+                'mouse: execute "beta" target=3001 argument_chord=false'
+            ) != 2:
+                raise HarnessFailure("non-pointer input did not cancel Ctrl+primary execution")
+            if x11.selection_pixels(window) != 0:
+                raise HarnessFailure("canceled Ctrl+primary gesture left a primary selection")
+            print("PASS: non-pointer input cancels a modified gesture without selecting")
+
+            x11.move(window, 3, 76)
+            x11.button(1, True)
+            for x in (12, 22, 32, 50):
                 x11.move(window, x, 76)
                 time.sleep(0.03)
             x11.button(1, False)
@@ -107,7 +181,7 @@ def main() -> int:
             x11.button(2, False)
             x11.button(1, False)
             wait_for_log(log_path, 'mouse: execute "Look" target=3001 argument_chord=true', args.timeout)
-            wait_for_log(log_path, 'mouse: look "alpha" reverse=false match=[11,16)', args.timeout)
+            wait_for_log(log_path, 'mouse: look "alpha" reverse=false match=[11,16)', args.timeout, occurrence=4)
             print("PASS: 2-1 supplies the last primary selection as a distinct Look argument")
 
             x11.move(window, 15, 76)

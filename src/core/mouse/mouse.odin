@@ -157,6 +157,9 @@ down :: proc(
 		if target == 0 || offset < 0 || math.is_nan(pos.x) || math.is_nan(pos.y) || math.is_inf(pos.x) || math.is_inf(pos.y) {
 			return {}
 		}
+		if button == .Left && modifiers != {} && modifiers != {.Shift} && modifiers != {.Ctrl} && modifiers != {.Alt} {
+			return {}
+		}
 		reset_gesture(state, true)
 		state.target = target
 		state.anchor = offset
@@ -166,6 +169,14 @@ down :: proc(
 		state.buttons = {button}
 		switch button {
 		case .Left:
+			if modifiers == {.Ctrl} {
+				state.mode = .Execute
+				return {}
+			}
+			if modifiers == {.Alt} {
+				state.mode = .Look
+				return {}
+			}
 			state.mode = .Select
 			expand := .Shift not_in modifiers && state.last_click.valid &&
 				state.last_click.target == target && state.last_click.offset == offset &&

@@ -266,7 +266,8 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 		editor_dispatch_mouse_action(mouse.down(&editor.mouse_gesture, event.button, target.id, offset, event.pos, event.modifiers, mouse_now_ms()))
 		return
 	}
-	if event.button == .Left && (.Ctrl in event.modifiers || .Alt in event.modifiers || .Super in event.modifiers) {
+	if event.button == .Left && event.modifiers != {} && event.modifiers != {.Shift} &&
+		event.modifiers != {.Ctrl} && event.modifiers != {.Alt} {
 		return
 	}
 	geometry, _, geometry_ok := current_layout()
@@ -277,7 +278,8 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 	if area.kind == .Window_Control {
 		editor_activate_window(area.window_id)
 	}
-	if event.button == .Left && layout.begin_drag(&editor.workspace, area, event.pos) {
+	if event.button == .Left && .Ctrl not_in event.modifiers && .Alt not_in event.modifiers &&
+		layout.begin_drag(&editor.workspace, area, event.pos) {
 		editor.typing_group = 0
 		editor_cancel_close_review()
 		return

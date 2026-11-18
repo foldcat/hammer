@@ -300,7 +300,21 @@ editor_consume_input :: proc(event: input.Event) {
 		editor_save()
 	case keybind.Save_As:
 		log.debug("edit: Save As is deferred until tag commands can request a destination path")
-	case keybind.Find, keybind.Open_Finder, keybind.Execute_Text, keybind.Look_Text:
+	case keybind.Execute_Text:
+		editor.typing_group = 0
+		target := editor_active_text_target()
+		if target.selection != nil {
+			offset := target.selection.active
+			editor_execute_mouse(mouse.Execute{target = target.id, anchor = offset, active = offset})
+		}
+	case keybind.Look_Text:
+		editor.typing_group = 0
+		target := editor_active_text_target()
+		if target.selection != nil {
+			offset := target.selection.active
+			editor_look_mouse(mouse.Look{target = target.id, anchor = offset, active = offset})
+		}
+	case keybind.Find, keybind.Open_Finder:
 		log.debugf("edit: action %T is not connected in this milestone", action)
 	case keybind.Request_Quit, keybind.Close_Window:
 	}
