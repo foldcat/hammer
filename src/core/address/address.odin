@@ -20,12 +20,16 @@ Operation_Kind :: enum u8 {
 	End,
 	Line,
 	Character,
+	Regex,
 }
 
 Operation :: struct {
-	kind:      Operation_Kind,
-	direction: Direction,
-	count:     int,
+	kind:           Operation_Kind,
+	direction:      Direction,
+	origin:         Direction,
+	count:          int,
+	pattern_offset: int,
+	pattern_length: int,
 }
 
 Node_Kind :: enum u8 {
@@ -49,11 +53,18 @@ Node :: struct {
 }
 
 Expression :: struct {
-	nodes:           [MAX_NODES]Node,
-	operations:      [MAX_OPERATIONS]Operation,
-	node_count:      int,
-	operation_count: int,
-	root:            int,
+	nodes:             [MAX_NODES]Node,
+	operations:        [MAX_OPERATIONS]Operation,
+	pattern_bytes:     [MAX_ADDRESS_BYTES]u8,
+	node_count:        int,
+	operation_count:   int,
+	pattern_bytes_used: int,
+	root:              int,
+}
+
+Regex_History :: struct {
+	pattern_bytes: [MAX_ADDRESS_BYTES]u8,
+	pattern_length: int,
 }
 
 Parser :: struct {
@@ -83,18 +94,13 @@ parse :: proc(text: string, allocator := context.allocator) -> (Expression, errs
 	}
 	skip_blanks(&parser)
 	if !at_end(&parser) {
-		switch parser.text[parser.index] {
-		case '/', '?':
-			return {}, errs.new(.Unsupported, "address: regular expressions are implemented by M08.03", allocator = allocator)
-		case:
-			return {}, errs.newf(
-				.Invalid_Input,
-				"address: unexpected byte %q at offset %d",
-				parser.text[parser.index],
-				parser.index,
-				allocator = allocator,
-			)
-		}
+		return {}, errs.newf(
+			.Invalid_Input,
+			"address: unexpected byte %q at offset %d",
+			parser.text[parser.index],
+			parser.index,
+			allocator = allocator,
+		)
 	}
 	parser.result.root = root
 	return parser.result, {}
@@ -116,7 +122,7 @@ skip_blanks :: proc(parser: ^Parser) {
 }
 
 simple_start :: proc(c: u8) -> bool {
-	return c == '.' || c == '$' || c == '+' || c == '-' || c == '#' || (c >= '0' && c <= '9')
+	return c == '.' || c == '$' || c == '+' || c == '-' || c == '#' || c == '/' || c == '?' || (c >= '0' && c <= '9')
 }
 
 add_operation :: proc(parser: ^Parser, operation: Operation) -> errs.Error {
@@ -161,6 +167,58 @@ parse_number :: proc(parser: ^Parser) -> (int, errs.Error) {
 	return int(value), {}
 }
 
+parse_regex :: proc(parser: ^Parser, origin: Direction) -> errs.Error {
+	delimiter := parser.text[parser.index]
+	parser.index += 1
+	start := parser.index
+	escaped := false
+	for !at_end(parser) {
+		c := parser.text[parser.index]
+		if c == '\n' {
+			return errs.new(.Invalid_Input, "address: a regular expression cannot contain a literal newline", allocator = parser.allocator)
+		}
+		if escaped {
+			escaped = false
+			parser.index += 1
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			parser.index += 1
+			continue
+		}
+		if c == delimiter {
+			length := parser.index - start
+			offset := parser.result.pattern_bytes_used
+			if length > len(parser.result.pattern_bytes) - offset {
+				return errs.new(.Resource_Limit, "address: regular-expression storage is exhausted", allocator = parser.allocator)
+			}
+			copy(parser.result.pattern_bytes[offset:offset + length], parser.text[start:parser.index])
+			parser.result.pattern_bytes_used += length
+			direction := Direction.Forward if delimiter == '/' else Direction.Backward
+			if origin == .Backward {
+				direction = Direction.Backward if direction == .Forward else Direction.Forward
+			}
+			parser.index += 1
+			return add_operation(parser, {
+				kind = .Regex,
+				direction = direction,
+				origin = origin,
+				pattern_offset = offset,
+				pattern_length = length,
+			})
+		}
+		parser.index += 1
+	}
+	return errs.newf(
+		.Invalid_Input,
+		"address: missing closing %q for regular expression at offset %d",
+		delimiter,
+		start - 1,
+		allocator = parser.allocator,
+	)
+}
+
 parse_simple :: proc(parser: ^Parser) -> (int, errs.Error) {
 	skip_blanks(parser)
 	if at_end(parser) || !simple_start(parser.text[parser.index]) {
@@ -191,6 +249,14 @@ parse_simple :: proc(parser: ^Parser) -> (int, errs.Error) {
 			pending = Direction.Forward if c == '+' else Direction.Backward
 			last_sign = true
 			parser.index += 1
+			continue
+		}
+		if c == '/' || c == '?' {
+			if err := parse_regex(parser, pending if last_sign else Direction.Absolute); !errs.ok(err) {
+				return -1, err
+			}
+			pending = .Absolute
+			last_sign = false
 			continue
 		}
 		if c == '#' || (c >= '0' && c <= '9') {
@@ -250,9 +316,6 @@ parse_compound :: proc(parser: ^Parser, depth: int, allow_empty: bool) -> (int, 
 			return -1, {}
 		}
 		return -1, errs.new(.Invalid_Input, "address: missing address", allocator = parser.allocator)
-	}
-	if parser.text[parser.index] == '/' || parser.text[parser.index] == '?' {
-		return -1, errs.new(.Unsupported, "address: regular expressions are implemented by M08.03", allocator = parser.allocator)
 	}
 	left, err := parse_simple(parser)
 	if !errs.ok(err) {

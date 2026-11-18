@@ -21,8 +21,8 @@ Supported forms are:
 - `,` ranges and `;` ranges. Missing left/right sides default to `0`/`$`;
   semicolon makes the left result the right side's dot.
 
-Malformed syntax returns `Invalid_Input`. `/.../` and `?...?` return
-`Unsupported` explicitly and remain M08.03 work.
+Malformed syntax returns `Invalid_Input`. `/.../` and `?...?` are implemented
+by M08.03; see `docs/notes/m08-03-regex-addresses.md`.
 
 ## Evaluation
 
@@ -67,17 +67,17 @@ git diff --check
 The address tests use chunked ropes and cover absolute/relative lines and
 characters, Unicode scalar-to-byte conversion, dot and end, comma/semicolon
 ranges and defaults, nested ranges, empty documents, trailing newlines, lone CR
-and CRLF, scans crossing the 16 KiB buffer, malformed syntax, unsupported
-regular expressions, numeric overflow, operation/range budgets, out-of-range
-motion, reversed ranges, invalid dots, and nil evaluator inputs.
+and CRLF, scans crossing the 16 KiB buffer, malformed syntax, numeric overflow,
+operation/range budgets, out-of-range motion, reversed ranges, invalid dots, and
+nil evaluator inputs. Regex forms were unsupported at this stage; M08.03 adds
+their implementation and coverage.
 
 No native Windows/Wine run, direct differential run against Acme, or product UI
 address execution was performed. Differential compatibility fixtures remain
 M08.08.
 
-## Next task
+## Follow-up
 
-M08.03 should add compatible forward/backward regular-expression addresses to
-the existing AST and evaluator, including delimiter escaping, previous-pattern
-behavior, Unicode/chunked-rope matching, no-match errors, and bounded test
-coverage without weakening the existing line/character semantics.
+M08.03 added forward/backward regular-expression addresses, delimiter escaping,
+previous-pattern history, and Unicode/chunked-rope matching. See
+`docs/notes/m08-03-regex-addresses.md`.

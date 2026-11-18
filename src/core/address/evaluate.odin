@@ -13,6 +13,16 @@ evaluate :: proc(
 	dot: rope.Byte_Range,
 	allocator := context.allocator,
 ) -> (rope.Byte_Range, errs.Error) {
+	return evaluate_with_history(tree, expression, dot, nil, allocator)
+}
+
+evaluate_with_history :: proc(
+	tree: ^rope.Tree,
+	expression: ^Expression,
+	dot: rope.Byte_Range,
+	history: ^Regex_History,
+	allocator := context.allocator,
+) -> (rope.Byte_Range, errs.Error) {
 	if tree == nil || expression == nil {
 		return {}, errs.new(.Invalid_Input, "address: nil tree or expression", allocator = allocator)
 	}
@@ -30,7 +40,7 @@ evaluate :: proc(
 	if expression.node_count <= 0 || expression.root < 0 || expression.root >= expression.node_count {
 		return {}, errs.new(.Invalid_Input, "address: empty or invalid expression", allocator = allocator)
 	}
-	return eval_node(tree, expression, expression.root, dot, 0, allocator)
+	return eval_node(tree, expression, expression.root, dot, 0, history, allocator)
 }
 
 eval_node :: proc(
@@ -39,6 +49,7 @@ eval_node :: proc(
 	node_index: int,
 	dot: rope.Byte_Range,
 	depth: int,
+	history: ^Regex_History,
 	allocator: runtime.Allocator,
 ) -> (rope.Byte_Range, errs.Error) {
 	if depth > MAX_RANGE_DEPTH {
@@ -69,6 +80,8 @@ eval_node :: proc(
 				next, err = line_address(tree, current, operation.count, operation.direction, allocator)
 			case .Character:
 				next, err = character_address(tree, current, operation.count, operation.direction, allocator)
+			case .Regex:
+				next, err = regex_address(tree, expression, operation, current, history, allocator)
 			}
 			if !errs.ok(err) {
 				return {}, err
@@ -83,7 +96,7 @@ eval_node :: proc(
 		left := rope.Byte_Range{}
 		err: errs.Error
 		if node.left >= 0 {
-			left, err = eval_node(tree, expression, node.left, dot, depth + 1, allocator)
+			left, err = eval_node(tree, expression, node.left, dot, depth + 1, history, allocator)
 			if !errs.ok(err) {
 				return {}, err
 			}
@@ -95,7 +108,7 @@ eval_node :: proc(
 		total := rope.tree_byte_count(tree)
 		right := rope.Byte_Range{start = total, end = total}
 		if node.right >= 0 {
-			right, err = eval_node(tree, expression, node.right, right_dot, depth + 1, allocator)
+			right, err = eval_node(tree, expression, node.right, right_dot, depth + 1, history, allocator)
 			if !errs.ok(err) {
 				return {}, err
 			}

@@ -42,9 +42,11 @@ Acme behavior, not an implementation to copy mechanically.
   taking focus. Automatic output uses transactions and cannot silently clean a
   user-edited error buffer.
 - The headless address core evaluates line, Unicode-character, dot/end, relative,
-  comma, and semicolon addresses into checked byte ranges over chunked ropes.
-  Covered by the address unit tests; product Look and Edit integration are not
-  implied.
+  comma, semicolon, and native regular-expression addresses into checked byte
+  ranges over chunked ropes. Regex searches wrap, reuse an explicit previous-
+  pattern history, and implement Plan 9 longest-match and backward-search
+  semantics. Covered by the address unit tests; product Look and Edit
+  integration are not implied.
 - `Del`, `Put`, `Undo`, `Redo`, `Look`, and the implemented clipboard commands
   operate through their ordinary editor paths. A bounded parser and exact-name
   registry dispatch them with revalidated source and argument snapshots;
@@ -67,9 +69,8 @@ Acme behavior, not an implementation to copy mechanically.
 
 ## Unsupported or deferred behavior
 
-- Additional internal command coverage, Acme Edit, regular-expression addresses,
-  product address integration, external command execution, and asynchronous
-  command output belong to M08/M09.
+- Additional internal command coverage, Acme Edit, product address integration,
+  external command execution, and asynchronous command output belong to M08/M09.
   Directory `Get`, `New`, `Newcol`, `Zerox`, and the other unregistered commands
   are not claimed as working merely because their names are recognized or
   visible in tags.

@@ -178,7 +178,7 @@ test_empty_trailing_newline_and_crlf_documents :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_syntax_unsupported_constructs_and_budgets :: proc(t: ^testing.T) {
+test_syntax_invalid_constructs_and_budgets :: proc(t: ^testing.T) {
 	doc: txn.Doc
 	init_doc(t, &doc, "a\nb\n")
 	defer txn.doc_destroy(&doc)
@@ -187,10 +187,9 @@ test_syntax_unsupported_constructs_and_budgets :: proc(t: ^testing.T) {
 	for text in invalid {
 		expect_error(t, &doc, text, {}, .Invalid_Input)
 	}
-	unsupported := []string{"/a/", "?a?", "1,/a/"}
-	for text in unsupported {
-		expect_error(t, &doc, text, {}, .Unsupported)
-	}
+	expect_range(t, &doc, "/a/", {}, {0, 1})
+	expect_range(t, &doc, "?b?", {4, 4}, {2, 3})
+	expect_range(t, &doc, "1,/a/", {}, {0, 1})
 	expect_error(t, &doc, "999999999999999999999999999999", {}, .Resource_Limit)
 
 	oversized := make([]byte, address.MAX_ADDRESS_BYTES + 1, context.allocator)
