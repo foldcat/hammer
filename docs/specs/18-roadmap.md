@@ -360,6 +360,7 @@ serialization) are covered by M16.
 - Working-directory/environment context.
 - Cancellation.
 - Selection pipes.
+- Named filter-command registry with optional external engines (Raku first).
 
 ### Tasks
 
@@ -372,6 +373,10 @@ M09.05  Implement output-window batching/backpressure.
 M09.06  Implement selection stdin/output replacement.
 M09.07  Implement stale-target conflict behavior.
 M09.08  Integrate running-job quit decisions.
+M09.09  Implement named filter-command registry, scoping, and discovery.
+M09.10  Implement command invocation with context snapshot and routing.
+M09.11  Implement optional external regex verb (Raku when present, native fallback).
+M09.12  Implement Raku engine (temp-file programs, -n/-p filters, REPL window).
 ```
 
 ### Acceptance
@@ -380,6 +385,15 @@ M09.08  Integrate running-job quit decisions.
 - Cancellation cleans up child processes appropriately.
 - Output floods remain bounded.
 - A late pipe result cannot overwrite newer selection edits.
+- A named command is a pure `(stdin + env + args) -> stdout` filter; it
+  receives a one-shot context snapshot (file, dot, word, cwd, selection),
+  never a live editor handle.
+- Command definitions are enumerable and validatable without executing any
+  body; invoking one is explicit and echoed before run.
+- The address language never falls back to an external engine; the optional
+  external regex verb degrades gracefully (native fallback) when the binary
+  is absent.
+- External regex/commands are bounded and cancellable via the job service.
 
 ---
 
