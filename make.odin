@@ -27,6 +27,7 @@
 //     odin run make.odin -file -- directory-test   # M07.07 X11 directory and error windows
 //     odin run make.odin -file -- compatibility-test # M07.08 integrated Acme window behavior
 //     odin run make.odin -file -- wrap-test        # M07.09 X11 soft wrap and horizontal scrolling
+//     odin run make.odin -file -- scroll-test      # M07.10 X11 vertical viewport and scrollbar behavior
 //     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering
@@ -129,6 +130,7 @@ LOOK_TEST_HARNESS :: #directory + "/tests/integration/look/x11_harness.py"
 DIRECTORY_TEST_HARNESS :: #directory + "/tests/integration/directory/x11_harness.py"
 COMPATIBILITY_TEST_HARNESS :: #directory + "/tests/integration/compatibility/x11_harness.py"
 WRAP_TEST_HARNESS :: #directory + "/tests/integration/wrap/x11_harness.py"
+SCROLL_TEST_HARNESS :: #directory + "/tests/integration/scroll/x11_harness.py"
 WRAP_SOFT_BINARY :: OUT_DIR + "/hammer-wrap-soft"
 WRAP_TRUNCATE_BINARY :: OUT_DIR + "/hammer-wrap-truncate"
 AUTOPAIR_TEST_HARNESS :: #directory + "/tests/integration/autopair/x11_harness.py"
@@ -159,6 +161,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/dpi",
 	"tests/unit/input",
 	"tests/unit/mouse",
+	"tests/unit/scroll",
 	"tests/unit/directory",
 	"tests/unit/ime",
 	"tests/unit/editing",
@@ -665,6 +668,16 @@ main :: proc() {
 		return
 	}
 
+	if len(args) > 1 && args[1] == "scroll-test" {
+		when ODIN_OS == .Linux {
+			scroll_test_main()
+		} else {
+			fmt.eprintln("[Test] scroll-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
 	if len(args) > 1 && args[1] == "autopair-test" {
 		when ODIN_OS == .Linux {
 			autopair_test_main()
@@ -942,6 +955,25 @@ wrap_test_main :: proc() {
 		"-a",
 		"python3",
 		WRAP_TEST_HARNESS,
+		"--soft",
+		WRAP_SOFT_BINARY,
+		"--truncate",
+		WRAP_TRUNCATE_BINARY,
+	}, true)
+}
+
+scroll_test_main :: proc() {
+	if !setup_sokol_linux() {
+		os.exit(1)
+	}
+	defer stage_config([]string{"--no-config"})
+	wrap_test_build("soft", WRAP_SOFT_BINARY)
+	wrap_test_build("truncate", WRAP_TRUNCATE_BINARY)
+	run_odin([]string {
+		"xvfb-run",
+		"-a",
+		"python3",
+		SCROLL_TEST_HARNESS,
 		"--soft",
 		WRAP_SOFT_BINARY,
 		"--truncate",

@@ -160,8 +160,8 @@ text_render_begin :: proc() {
 	text_draws = make([dynamic]Glyph_Draw, context.temp_allocator)
 }
 
-text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
-	if doc == nil || text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 {
+text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, first_row: int, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+	if doc == nil || text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 || first_row < 0 {
 		return
 	}
 	selected := fonts.face(&font_set, .Body)
@@ -217,6 +217,10 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 			baseline_padding = max(0, (line_height - text_height) / 2)
 		}
 		baseline := (line_top + baseline_padding) * state.dpi.scale + ascent
+		skip_rows := 0
+		if visible_index == 0 {
+			skip_rows = first_row
+		}
 		consumed := text_render_line(
 			doc,
 			rope.Line_Index(line_index),
@@ -231,6 +235,7 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 			line_height,
 			wrap_mode,
 			horizontal_offset,
+			skip_rows,
 			fb,
 			quads,
 		)
@@ -287,6 +292,7 @@ text_render_line :: proc(
 	line_height: f32,
 	wrap_mode: config.Wrap_Mode,
 	horizontal_offset: ^f32,
+	skip_rows: int,
 	fb: coords.Physical_Size,
 	quads: ^[dynamic]Vertex,
 ) -> int {
@@ -375,8 +381,12 @@ text_render_line :: proc(
 	font_storage: [shaping.MAX_FONTS]shaping.Font
 	font_list := product_shaping_fonts(&font_storage)
 	for row, row_index in rows {
-		row_top := line_top + f32(row_index) * line_height
-		row_baseline := baseline + f32(row_index) * line_height * state.dpi.scale
+		if row_index < skip_rows {
+			continue
+		}
+		visible_index := row_index - skip_rows
+		row_top := line_top + f32(visible_index) * line_height
+		row_baseline := baseline + f32(visible_index) * line_height * state.dpi.scale
 		x_offset := -horizontal - row.start
 		if !composing {
 			text_render_selection(visible.text, expansion, selection, start, end, body, row_top, line_height, row, x_offset, fb, quads)
@@ -414,7 +424,7 @@ text_render_line :: proc(
 			text_append_quad(quads, body.x + body.width - TEXT_PADDING, row_top, TEXT_PADDING, line_height, cfg.Theme.Git_Modified, fb)
 		}
 	}
-	return len(rows)
+	return max(0, len(rows) - skip_rows)
 }
 
 text_line_range :: proc(doc: ^txn.Doc, line_index: rope.Line_Index) -> (int, int, errs.Error) {

@@ -3,6 +3,7 @@
 
 package main
 
+import config "core/config"
 import coords "core/coords"
 import layout "core/layout"
 import rope "core/rope"
@@ -13,6 +14,6 @@ Text_Hit :: struct {
 	affinity: txn.Affinity,
 }
 
-text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: layout.Rect, first_line: rope.Line_Index, doc: ^txn.Doc) -> (Text_Hit, bool) {
+text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: layout.Rect, first_line: rope.Line_Index, first_row: int, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, doc: ^txn.Doc) -> (Text_Hit, bool) {
 	return {}, false
 }

@@ -19,11 +19,11 @@ Text_Hit :: struct {
 	affinity: txn.Affinity,
 }
 
-text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: layout.Rect, first_line: rope.Line_Index, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, doc: ^txn.Doc) -> (Text_Hit, bool) {
+text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: layout.Rect, first_line: rope.Line_Index, first_row: int, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, doc: ^txn.Doc) -> (Text_Hit, bool) {
 	if math.is_nan(pos.x) || math.is_inf(pos.x) || math.is_nan(pos.y) || math.is_inf(pos.y) {
 		return {}, false
 	}
-	if doc == nil || body.width <= 0 || body.height <= 0 || first_line < 0 {
+	if doc == nil || body.width <= 0 || body.height <= 0 || first_line < 0 || first_row < 0 {
 		return {}, false
 	}
 	if !clamp_to_visible &&
@@ -110,8 +110,17 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: l
 			append(&rows, shaping.Wrap_Row{start = 0, end = content_width})
 		}
 		defer delete(rows)
-		if target_row < len(rows) || line_offset == line_count - 1 {
-			row := rows[min(target_row, len(rows) - 1)]
+		skip_rows := 0
+		if line_offset == 0 {
+			skip_rows = first_row
+		}
+		available_rows := len(rows) - skip_rows
+		if available_rows <= 0 {
+			return {}, false
+		}
+		if target_row < available_rows || line_offset == line_count - 1 {
+			row_index := skip_rows + min(target_row, available_rows - 1)
+			row := rows[row_index]
 			hit, hit_ok := shaping.hit_test_wrap_row(visible.text, pos.x - body.x + horizontal + row.start, row, state.dpi.scale)
 			if !hit_ok {
 				return {}, false
@@ -126,7 +135,7 @@ text_hit_test :: proc(pos: coords.Logical_Point, clamp_to_visible: bool, body: l
 			}
 			return Text_Hit{offset = start + source_offset, affinity = affinity}, true
 		}
-		target_row -= len(rows)
+		target_row -= available_rows
 	}
 	return {}, false
 }

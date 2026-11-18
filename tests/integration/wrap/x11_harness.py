@@ -32,7 +32,7 @@ def ink(x11: X11, window: int, y_start: int, y_end: int) -> int:
     try:
         count = 0
         for y in range(y_start, y_end):
-            for x in range(2, 390):
+            for x in range(14, 390):
                 if x11.lib.XGetPixel(image, x, y) & 0xFFFFFF != 0x161616:
                     count += 1
         return count
@@ -112,7 +112,7 @@ def run_soft(binary: Path, sandbox: Path) -> None:
             raise HarnessFailure("horizontal input changed a soft-wrapped view")
         print("PASS: horizontal input leaves soft-wrapped content at offset zero")
 
-        click(x11, window, 3, 100)
+        click(x11, window, 15, 100)
         x11.tap(ord(";"))
         save(x11)
         wait_for_log(log_path, f"file: saved {source}", 20.0)
@@ -163,7 +163,7 @@ def run_truncate(binary: Path, sandbox: Path) -> None:
         x11.button(6, True)
         x11.button(6, False)
         wait_for_log(log_path, "view: horizontal scroll window=1 offset=64.00", 20.0)
-        click(x11, window, 3, 76)
+        click(x11, window, 15, 76)
         x11.tap(ord(";"))
         save(x11)
         wait_for_log(log_path, f"file: saved {source}", 20.0)

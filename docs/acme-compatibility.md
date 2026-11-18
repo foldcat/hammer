@@ -26,6 +26,14 @@ Acme behavior, not an implementation to copy mechanically.
 - Each view has a configurable soft-wrap or truncate mode. Soft wrapping shares
   grapheme-safe visual rows between rendering and hit-testing; truncate views
   support horizontal wheel/touchpad scrolling. Covered by `wrap-test`.
+- Vertical wheel/touchpad input scrolls independent viewports by visual row.
+  Each body has a left scrollbar: button 1 scrolls toward the start, button 3
+  toward the end with position-dependent held-button repeat, and button 2 jumps
+  to an absolute logical line. Clicking outside the thumb also jumps directly.
+  Dragging any button follows the pointer with absolute positioning, disables
+  timed repeat, and remains captured outside the track with endpoint clamping.
+  Soft-wrapped rows use the same origin for rendering and hit-testing. Covered
+  by `scroll-test`.
 - Recoverable editor errors accumulate in a reusable `+Errors` window without
   taking focus. Automatic output uses transactions and cannot silently clean a
   user-edited error buffer.
@@ -56,8 +64,7 @@ Acme behavior, not an implementation to copy mechanically.
   visible in tags.
 - A product command for multiple views of one buffer (Zerox) is deferred; only
   the underlying core view model and tests currently exist.
-- Vertical viewport scrolling, scrollbar interaction, and line-number gutters
-  remain later M07 tasks.
+- Line-number gutters remain a later M07 task.
 - Persistent layout restoration, filesystem projection, local IPC automation,
   and external event interception are later milestones.
 - Native Windows behavior is source-checked but not runtime-tested here.

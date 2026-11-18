@@ -18,6 +18,7 @@ import lifecycle "core/lifecycle"
 import mouse "core/mouse"
 import platform "platform"
 import rope "core/rope"
+import scroll "core/scroll"
 import tagstate "core/tag"
 import txn "core/txn"
 import view "core/view"
@@ -66,6 +67,7 @@ Editor :: struct {
 	next_group:             u64,
 	next_clipboard_request: u64,
 	mouse_gesture:          mouse.State,
+	scrollbar:              scroll.State,
 	mouse_argument:         Mouse_Argument,
 	mouse_chord:            Mouse_Chord_Runtime,
 	mouse_expanded:         bool,

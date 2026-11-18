@@ -79,7 +79,7 @@ def main() -> int:
             wait_for_log(log_path, f"directory: opened {sandbox}/ buffer=2", args.timeout)
             print("PASS: requested file and working-directory explorer coexist at startup")
 
-            x11.drag(window, (3, 76), (55, 76))
+            x11.drag(window, (15, 76), (67, 76))
             x11.tap(ord("x"))
             wait_for_log(log_path, 'tag: window 1 generated "source.txt Del Put | "', args.timeout)
             click(x11, window, 2, 175, 52)

@@ -16,6 +16,8 @@ View :: struct {
 	buffer_id:     Buffer_ID,
 	selection:         txn.Selection,
 	first_line:        rope.Line_Index,
+	first_row:         int,
+	wheel_remainder:   f32,
 	wrap_mode:         config.Wrap_Mode,
 	horizontal_offset: f32,
 	tag:               tagstate.State,
@@ -111,5 +113,16 @@ clamp_after_history_jump :: proc(state: ^State, selected_window: layout.Window_I
 		if item.first_line < 0 {
 			item.first_line = 0
 		}
+		if item.first_row < 0 {
+			item.first_row = 0
+		}
 	}
+}
+
+clamp_origin :: proc(item: ^View, line_count: int) {
+	if item == nil {
+		return
+	}
+	item.first_line = clamp(item.first_line, 0, rope.Line_Index(max(0, line_count - 1)))
+	item.first_row = max(0, item.first_row)
 }

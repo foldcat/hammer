@@ -137,6 +137,8 @@ editor_apply_look_line :: proc(item: ^view.View, line: int) {
 	}
 	item.selection = txn.Selection{anchor = start, active = start, affinity = .Left}
 	item.first_line = line_index
+	item.first_row = 0
+	item.wheel_remainder = 0
 }
 
 editor_open_buffer_in_column :: proc(buffer: ^Editor_Buffer, column_id: layout.Column_ID) -> (^view.View, errs.Error) {

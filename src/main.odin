@@ -219,6 +219,7 @@ frame :: proc "c" () {
 	state.frame_count += 1
 	sync_dpi_changes()
 	editor_poll_clipboard()
+	editor_poll_scrollbar()
 
 	if app.phase == .Initializing {
 		lifecycle.app_enter_running(&app)

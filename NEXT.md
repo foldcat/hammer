@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M07.10 Implement viewport scrolling and scrollbar rendering/interaction
+## Current task: M07.11 Implement line-number gutter display

@@ -8,7 +8,7 @@
 //
 // M07 adds bounded multi-column/window state, weighted arrangement,
 // stable IDs, hit-testing, and dragging in workspace.odin. This package
-// stays the backend-free geometry core; scrolling is a later task.
+// stays the backend-free geometry core.
 package layout
 
 import "core:math"

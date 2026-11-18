@@ -14,6 +14,7 @@ import layout "core/layout"
 import mouse "core/mouse"
 import platform "platform"
 import rope "core/rope"
+import scroll "core/scroll"
 import tagstate "core/tag"
 import txn "core/txn"
 import view "core/view"
@@ -231,7 +232,8 @@ editor_target_rect :: proc(geometry: ^layout.Geometry, target: Mouse_Text_Target
 				if target.kind == .Window_Tag {
 					return tag_content_rect(placed.window.tag, placed.control), true
 				}
-				return placed.window.body, true
+				_, text := scroll.body_rects(placed.window.body)
+				return text, true
 			}
 		}
 	}
@@ -241,7 +243,9 @@ editor_target_rect :: proc(geometry: ^layout.Geometry, target: Mouse_Text_Target
 MAX_HORIZONTAL_SCROLL_OFFSET :: f32(1024 * 1024)
 
 editor_scroll :: proc(event: input.Scroll) {
-	if event.dx == 0 || math.is_nan(event.dx) || math.is_inf(event.dx) {
+	valid_dx := event.dx != 0 && !math.is_nan(event.dx) && !math.is_inf(event.dx)
+	valid_dy := event.dy != 0 && !math.is_nan(event.dy) && !math.is_inf(event.dy)
+	if !valid_dx && !valid_dy {
 		return
 	}
 	geometry, _, ok := current_layout()
@@ -256,15 +260,25 @@ editor_scroll :: proc(event: input.Scroll) {
 	if !found {
 		return
 	}
+	win, win_found := window_for_id(&geometry, area.window_id)
+	if !win_found {
+		return
+	}
 	editor_cancel_pointer_gesture()
 	editor_cancel_close_review()
-	if item.wrap_mode == .Soft {
-		item.horizontal_offset = 0
-	} else {
-		step := coords.points_to_logical_px(state.dpi.points) * 4
-		item.horizontal_offset = clamp(item.horizontal_offset + event.dx * step, 0, MAX_HORIZONTAL_SCROLL_OFFSET)
+	if valid_dx {
+		if item.wrap_mode == .Soft {
+			item.horizontal_offset = 0
+		} else {
+			step := coords.points_to_logical_px(state.dpi.points) * 4
+			item.horizontal_offset = clamp(item.horizontal_offset + event.dx * step, 0, MAX_HORIZONTAL_SCROLL_OFFSET)
+		}
+		log.infof("view: horizontal scroll window=%d offset=%.2f", u64(item.window_id), item.horizontal_offset)
 	}
-	log.infof("view: horizontal scroll window=%d offset=%.2f", u64(item.window_id), item.horizontal_offset)
+	if valid_dy {
+		_, text := scroll.body_rects(win.body)
+		editor_wheel_vertical(item, &editor_buffer_for_view(item).doc, text, event.dy)
+	}
 }
 
 editor_mouse_hit :: proc(target: Mouse_Text_Target, pos: coords.Logical_Point, clamp_to_visible: bool) -> (Text_Hit, bool) {
@@ -277,14 +291,17 @@ editor_mouse_hit :: proc(target: Mouse_Text_Target, pos: coords.Logical_Point, c
 		return {}, false
 	}
 	first_line := rope.Line_Index(0)
+	first_row := 0
 	wrap_mode := config.Wrap_Mode.Truncate
 	horizontal_offset: ^f32
 	if target.kind == .Body && target.item != nil {
+		editor_normalize_view_origin(target.item, target.doc, rect)
 		first_line = target.item.first_line
+		first_row = target.item.first_row
 		wrap_mode = target.item.wrap_mode
 		horizontal_offset = &target.item.horizontal_offset
 	}
-	return text_hit_test(pos, clamp_to_visible, rect, first_line, wrap_mode, horizontal_offset, target.doc)
+	return text_hit_test(pos, clamp_to_visible, rect, first_line, first_row, wrap_mode, horizontal_offset, target.doc)
 }
 
 editor_mouse_target_current :: proc(target: Mouse_Text_Target) -> bool {
@@ -293,6 +310,21 @@ editor_mouse_target_current :: proc(target: Mouse_Text_Target) -> bool {
 }
 
 editor_pointer_down :: proc(event: input.Pointer_Down) {
+	geometry, _, geometry_ok := current_layout()
+	if !geometry_ok {
+		return
+	}
+	area := layout.hit_test(&geometry, event.pos)
+	if scroll.active(&editor.scrollbar) && area.kind != .Body {
+		editor_cancel_pointer_gesture()
+		return
+	}
+	if area.kind == .Body {
+		if win, found := window_for_id(&geometry, area.window_id); found &&
+			editor_scrollbar_pointer_down(event, area, win.body) {
+			return
+		}
+	}
 	if mouse.active(&editor.mouse_gesture) {
 		target := editor_text_target_by_id(editor.mouse_gesture.target)
 		if !editor_mouse_target_current(target) {
@@ -307,11 +339,6 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 		event.modifiers != {.Ctrl} && event.modifiers != {.Alt} {
 		return
 	}
-	geometry, _, geometry_ok := current_layout()
-	if !geometry_ok {
-		return
-	}
-	area := layout.hit_test(&geometry, event.pos)
 	if area.kind == .Window_Control {
 		editor_activate_window(area.window_id)
 	}
@@ -349,6 +376,9 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 }
 
 editor_pointer_move :: proc(event: input.Pointer_Move) {
+	if editor_scrollbar_pointer_move(event) {
+		return
+	}
 	if layout.dragging(&editor.workspace) {
 		if .Left not_in event.buttons {
 			layout.drag_cancel(&editor.workspace)
@@ -376,6 +406,9 @@ editor_pointer_move :: proc(event: input.Pointer_Move) {
 }
 
 editor_pointer_up :: proc(event: input.Pointer_Up) {
+	if editor_scrollbar_pointer_up(event) {
+		return
+	}
 	if event.button == .Left && layout.dragging(&editor.workspace) {
 		kind := editor.workspace.drag.kind
 		window_id := editor.workspace.drag.window_id
@@ -509,6 +542,7 @@ editor_mouse_argument_target :: proc() -> (Mouse_Text_Target, bool) {
 
 editor_cancel_pointer_gesture :: proc() {
 	mouse.cancel(&editor.mouse_gesture)
+	scroll.cancel(&editor.scrollbar)
 	editor_cancel_mouse_chord()
 	editor.mouse_expanded = false
 	editor.mouse_revision = 0
