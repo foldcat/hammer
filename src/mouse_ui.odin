@@ -2,7 +2,6 @@ package main
 
 import "core:log"
 import "core:math"
-import "core:strings"
 import "core:time"
 
 import sapp "sokol:app"
@@ -36,15 +35,6 @@ Mouse_Text_Target :: struct {
 	generation: u64,
 	item: ^view.View,
 	tag: ^tagstate.State,
-}
-
-Mouse_Argument :: struct {
-	valid: bool,
-	target: mouse.Target_ID,
-	selection: txn.Selection,
-	buffer_id: u64,
-	generation: u64,
-	revision: u64,
 }
 
 Mouse_Chord_Runtime :: struct {
@@ -562,37 +552,6 @@ editor_dispatch_mouse_action :: proc(action: mouse.Action) {
 	}
 }
 
-editor_capture_mouse_argument :: proc(target: Mouse_Text_Target) {
-	if target.doc == nil || target.selection == nil {
-		return
-	}
-	editor.mouse_argument = {
-		valid = true,
-		target = target.id,
-		selection = target.selection^,
-		buffer_id = target.buffer_id,
-		generation = target.generation,
-		revision = txn.doc_revision(target.doc),
-	}
-}
-
-editor_mouse_argument_target :: proc() -> (Mouse_Text_Target, bool) {
-	argument := editor.mouse_argument
-	if !argument.valid {
-		return {}, false
-	}
-	target := editor_text_target_by_id(argument.target)
-	if target.doc == nil || target.selection == nil || target.buffer_id != argument.buffer_id ||
-		target.generation != argument.generation || txn.doc_revision(target.doc) != argument.revision {
-		return {}, false
-	}
-	if !txn.selection_in_bounds(argument.selection, rope.tree_byte_count(&target.doc.tree)) {
-		return {}, false
-	}
-	target.selection = &editor.mouse_argument.selection
-	return target, true
-}
-
 editor_cancel_pointer_gesture :: proc() {
 	mouse.cancel(&editor.mouse_gesture)
 	scroll.cancel(&editor.scrollbar)
@@ -823,128 +782,6 @@ editor_mouse_clipboard_result :: proc(
 		}
 	}
 	log.infof("mouse: chord %v applied transaction=%d", runtime.operation, u64(transaction))
-}
-
-editor_execute_mouse :: proc(action: mouse.Execute) {
-	target := editor_text_target_by_id(action.target)
-	if target.doc == nil || target.selection == nil {
-		return
-	}
-	range, range_err := mouse.action_range(target.doc, target.selection^, action.anchor, action.active, .Execute)
-	if !errs.ok(range_err) {
-		editor_report(range_err)
-		return
-	}
-	data, read_err := mouse.read_action_text(target.doc, range, context.temp_allocator)
-	if !errs.ok(read_err) {
-		editor_report(read_err)
-		return
-	}
-	defer delete(data, context.temp_allocator)
-	command := strings.trim_space(string(data))
-	if command == "" {
-		return
-	}
-	name := command
-	remainder := ""
-	for index := 0; index < len(command); index += 1 {
-		if command[index] == ' ' || command[index] == '\t' || command[index] == '\r' || command[index] == '\n' {
-			name = command[:index]
-			remainder = strings.trim_space(command[index:])
-			break
-		}
-	}
-	log.infof("mouse: execute %q target=%d argument_chord=%v", name, u64(action.target), action.with_argument)
-	switch name {
-	case "Del":
-		if target.window_id != 0 {
-			if editor.active_window != target.window_id {
-				editor_activate_window(target.window_id)
-			}
-			editor_request_close(.Close_View, .Tag_Command)
-		}
-	case "Exit":
-		editor_request_close(.Quit, .Tag_Command)
-	case "Put":
-		if target.window_id != 0 {
-			editor_save()
-		}
-	case "Undo":
-		editor_execute_history(target, false)
-	case "Redo":
-		editor_execute_history(target, true)
-	case "Cut", "Snarf":
-		if selected, ok := editor_mouse_argument_target(); ok {
-			if name == "Cut" {
-				editor_cut_target(selected)
-			} else {
-				editor_copy_target(selected)
-			}
-		} else {
-			log.warn("mouse: Cut/Snarf requires a current button-1 selection")
-		}
-	case "Paste":
-		if selected, ok := editor_mouse_argument_target(); ok {
-			editor_paste_target(selected)
-		} else {
-			log.warn("mouse: Paste requires a current button-1 selection")
-		}
-	case "Look":
-		body := editor_target_body(target)
-		needle := transmute([]byte)remainder
-		owned: []byte
-		if remainder == "" && action.with_argument {
-			if selected, ok := editor_mouse_argument_target(); ok {
-				arg_range := editing.selection_range(selected.selection^)
-				arg, err := mouse.read_action_text(selected.doc, arg_range, context.temp_allocator)
-				if !errs.ok(err) {
-					editor_report(err)
-					return
-				}
-				owned = arg
-				needle = owned
-			}
-		} else if remainder == "" && body.selection != nil {
-			selected_range := editing.selection_range(body.selection^)
-			arg, err := mouse.read_action_text(body.doc, selected_range, context.temp_allocator)
-			if !errs.ok(err) {
-				editor_report(err)
-				return
-			}
-			owned = arg
-			needle = owned
-		}
-		if owned != nil {
-			defer delete(owned, context.temp_allocator)
-		}
-		editor_look_text(target, needle, false)
-	case:
-		log.warnf("mouse: command %q was not executed; external commands and the full built-in registry are later milestones", name)
-	}
-}
-
-editor_execute_history :: proc(target: Mouse_Text_Target, redo: bool) {
-	body := editor_target_body(target)
-	if body.doc == nil || body.selection == nil {
-		return
-	}
-	selection: txn.Selection
-	err: errs.Error
-	if redo {
-		selection, err = txn.doc_redo(body.doc)
-	} else {
-		selection, err = txn.doc_undo(body.doc)
-	}
-	if !errs.ok(err) {
-		if err.kind != .NotFound {
-			editor_report(err)
-		} else {
-			errs.destroy(&err)
-		}
-		return
-	}
-	body.selection^ = selection
-	editor_finish_history_jump(body.item)
 }
 
 editor_look_mouse :: proc(action: mouse.Look) {

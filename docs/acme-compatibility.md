@@ -42,7 +42,9 @@ Acme behavior, not an implementation to copy mechanically.
   taking focus. Automatic output uses transactions and cannot silently clean a
   user-edited error buffer.
 - `Del`, `Put`, `Undo`, `Redo`, `Look`, and the implemented clipboard commands
-  operate through their ordinary editor paths. The integrated
+  operate through their ordinary editor paths. A bounded parser and exact-name
+  registry dispatch them with revalidated source and argument snapshots;
+  unknown text never falls through to a shell. The integrated
   `compatibility-test` exercises these behaviors together rather than treating
   each window feature as an isolated callback.
 
@@ -61,7 +63,7 @@ Acme behavior, not an implementation to copy mechanically.
 
 ## Unsupported or deferred behavior
 
-- The complete internal command registry, Acme Edit/address language, external
+- Additional internal command coverage, Acme Edit/address language, external
   command execution, and asynchronous command output belong to M08/M09.
   Directory `Get`, `New`, `Newcol`, `Zerox`, and the other unregistered commands
   are not claimed as working merely because their names are recognized or

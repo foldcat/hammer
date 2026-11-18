@@ -5,6 +5,7 @@ import "core:log"
 import "core:os"
 import "core:strings"
 
+import command "core/command"
 import directory "core/directory"
 import editing "core/editing"
 import errs "core/errs"
@@ -29,12 +30,7 @@ GLOBAL_TAG_BUFFER_ID :: u64(2)
 COLUMN_TAG_BUFFER_BASE :: u64(1000)
 WINDOW_TAG_BUFFER_BASE :: u64(2000)
 
-Text_Kind :: enum u8 {
-	Body,
-	Global_Tag,
-	Column_Tag,
-	Window_Tag,
-}
+Text_Kind :: command.Source_Kind
 
 Buffer_Kind :: enum u8 {
 	File,
@@ -68,7 +64,7 @@ Editor :: struct {
 	next_clipboard_request: u64,
 	mouse_gesture:          mouse.State,
 	scrollbar:              scroll.State,
-	mouse_argument:         Mouse_Argument,
+	mouse_argument:         command.Argument,
 	mouse_chord:            Mouse_Chord_Runtime,
 	mouse_expanded:         bool,
 	mouse_revision:         u64,
