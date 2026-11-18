@@ -162,6 +162,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/input",
 	"tests/unit/mouse",
 	"tests/unit/command",
+	"tests/unit/address",
 	"tests/unit/scroll",
 	"tests/unit/directory",
 	"tests/unit/ime",
