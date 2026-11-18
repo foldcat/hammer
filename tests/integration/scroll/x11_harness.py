@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X11 vertical viewport and scrollbar checks for M07.10."""
+"""Real X11 viewport, scrollbar, and line-number checks for M07.10–M07.11."""
 
 from __future__ import annotations
 
@@ -41,6 +41,21 @@ def track_colors(x11: X11, window: int) -> set[int]:
             for y in range(66, 590)
             for x in range(2, 14)
         }
+    finally:
+        x11.lib.XDestroyImage(image)
+
+
+def line_number_pixels(x11: X11, window: int, y_start: int, y_end: int, scale: float = 1.0) -> int:
+    image = x11.image(window)
+    try:
+        count = 0
+        for y in range(round(y_start * scale), round(y_end * scale)):
+            for x in range(round(14 * scale), round(45 * scale)):
+                color = int(x11.lib.XGetPixel(image, x, y)) & 0xFFFFFF
+                red, green, blue = (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF
+                if red == green == blue and 60 <= red <= 128:
+                    count += 1
+        return count
     finally:
         x11.lib.XDestroyImage(image)
 
@@ -93,6 +108,17 @@ def run_mode(binary: Path, sandbox: Path, mode: str) -> None:
             raise HarnessFailure(f"scrollbar thumb is too bright: {sorted(colors)}")
         print(f"PASS: {mode} scrollbar renders distinct dark-gray track and thumb colors")
 
+        numbered_rows = [
+            line_number_pixels(x11, window, 66, 86),
+            line_number_pixels(x11, window, 88, 109),
+            line_number_pixels(x11, window, 111, 133),
+        ]
+        if mode == "soft" and not (numbered_rows[0] > 0 and numbered_rows[1] == 0 and numbered_rows[2] > 0):
+            raise HarnessFailure(f"soft-wrapped line numbers do not leave continuation rows blank: {numbered_rows}")
+        if mode == "truncate" and not all(value > 0 for value in numbered_rows):
+            raise HarnessFailure(f"truncate rows are missing logical line numbers: {numbered_rows}")
+        print(f"PASS: {mode} gutter numbers logical lines with blank wrapped continuations: {numbered_rows}")
+
         x11.move(window, 60, 100)
         x11.button(5, True)
         x11.button(5, False)
@@ -143,7 +169,7 @@ def run_mode(binary: Path, sandbox: Path, mode: str) -> None:
         x11.button(3, True)
         x11.button(3, False)
         wait_for_count(log_path, f"view: scrollbar relative window=1 line={expected[0]} row={expected[1]}", 3, 20.0)
-        click_button(x11, window, 1, 15, 76)
+        click_button(x11, window, 1, 46, 76)
         x11.tap(ord(";"))
         save(x11)
         wait_for_log(log_path, f"file: saved {source}", 20.0)
@@ -165,9 +191,28 @@ def run_mode(binary: Path, sandbox: Path, mode: str) -> None:
         x11.button(5, True)
         x11.button(5, False)
         wait_for_count(log_path, "view: vertical scroll window=1", 3, 20.0)
-        print(f"PASS: {mode} viewport remains scrollable after resize")
+        if line_number_pixels(x11, window, 66, 86) <= 0:
+            raise HarnessFailure("line numbers disappeared after resize")
+        print(f"PASS: {mode} viewport and line numbers remain correct after resize")
 
         save(x11)
+        x11.tap(0xFF1B)
+        wait_for_exit(process, 20.0, log_path)
+    finally:
+        stop(process, x11)
+
+
+def run_dpi(binary: Path, sandbox: Path) -> None:
+    source = sandbox / "scroll-dpi.txt"
+    source.write_text("alpha\nbeta\n", encoding="utf-8")
+    log_path = sandbox / "scroll-dpi.log"
+    process, x11, window = start(binary, source, sandbox, log_path, "1,1.25,1.5,2")
+    try:
+        wait_for_log(log_path, "wrap=Truncate", 20.0)
+        time.sleep(0.5)
+        if line_number_pixels(x11, window, 66, 86, 2.0) <= 0:
+            raise HarnessFailure("line numbers did not render after the 200% DPI transition")
+        print("PASS: line numbers remain visible after runtime DPI transitions through 200%")
         x11.tap(0xFF1B)
         wait_for_exit(process, 20.0, log_path)
     finally:
@@ -186,6 +231,7 @@ def main() -> int:
     sandbox = Path(tempfile.mkdtemp(prefix="hammer-m07-10-scroll-"))
     run_mode(soft, sandbox, "soft")
     run_mode(truncate, sandbox, "truncate")
+    run_dpi(truncate, sandbox)
     print(f"Viewport/scrollbar X11 smoke passed; sandbox: {sandbox}")
     return 0
 

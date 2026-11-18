@@ -232,7 +232,7 @@ editor_target_rect :: proc(geometry: ^layout.Geometry, target: Mouse_Text_Target
 				if target.kind == .Window_Tag {
 					return tag_content_rect(placed.window.tag, placed.control), true
 				}
-				_, text := scroll.body_rects(placed.window.body)
+				_, _, text := editor_body_parts(target.item, target.doc, placed.window.body)
 				return text, true
 			}
 		}
@@ -276,8 +276,9 @@ editor_scroll :: proc(event: input.Scroll) {
 		log.infof("view: horizontal scroll window=%d offset=%.2f", u64(item.window_id), item.horizontal_offset)
 	}
 	if valid_dy {
-		_, text := scroll.body_rects(win.body)
-		editor_wheel_vertical(item, &editor_buffer_for_view(item).doc, text, event.dy)
+		doc := &editor_buffer_for_view(item).doc
+		_, _, text := editor_body_parts(item, doc, win.body)
+		editor_wheel_vertical(item, doc, text, event.dy)
 	}
 }
 

@@ -74,7 +74,7 @@ def main() -> int:
                 raise HarnessFailure("typing in the window tag changed the body")
             print("PASS: window tag accepts text without editing the body")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("A"))
@@ -91,7 +91,7 @@ def main() -> int:
                 raise HarnessFailure("body undo did not restore the body")
             print("PASS: clean body state removes generated Put without undoing the tag")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("a"))

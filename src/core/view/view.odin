@@ -20,6 +20,7 @@ View :: struct {
 	wheel_remainder:   f32,
 	wrap_mode:         config.Wrap_Mode,
 	horizontal_offset: f32,
+	line_numbers:      bool,
 	tag:               tagstate.State,
 	delayed_paste: editing.Delayed_Paste,
 	delayed_cut:   editing.Delayed_Cut,
@@ -42,7 +43,7 @@ add :: proc(state: ^State, window_id: layout.Window_ID, buffer_id: Buffer_ID) ->
 	}
 	for index in 0 ..< MAX_VIEWS {
 		if state.views[index].window_id == 0 {
-			state.views[index] = {window_id = window_id, buffer_id = buffer_id}
+			state.views[index] = {window_id = window_id, buffer_id = buffer_id, line_numbers = true}
 			state.view_count += 1
 			return {}
 		}
@@ -125,4 +126,14 @@ clamp_origin :: proc(item: ^View, line_count: int) {
 	}
 	item.first_line = clamp(item.first_line, 0, rope.Line_Index(max(0, line_count - 1)))
 	item.first_row = max(0, item.first_row)
+}
+
+line_number_digits :: proc(line_count: int) -> int {
+	remaining := max(1, line_count)
+	digits := 1
+	for remaining >= 10 {
+		remaining /= 10
+		digits += 1
+	}
+	return max(2, digits)
 }

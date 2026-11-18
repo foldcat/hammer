@@ -30,6 +30,7 @@ test_views_own_independent_ui_state :: proc(t: ^testing.T) {
 	first.wheel_remainder = 0.5
 	first.wrap_mode = .Soft
 	first.horizontal_offset = 12
+	first.line_numbers = false
 	second.selection = {anchor = 8, active = 1, affinity = .Left}
 	second.first_line = 9
 	second.first_row = 2
@@ -43,6 +44,7 @@ test_views_own_independent_ui_state :: proc(t: ^testing.T) {
 	testing.expect(t, first.wheel_remainder == 0.5 && second.wheel_remainder == -0.5)
 	testing.expect(t, first.wrap_mode == .Soft && second.wrap_mode == .Truncate)
 	testing.expect(t, first.horizontal_offset == 12 && second.horizontal_offset == 48)
+	testing.expect(t, !first.line_numbers && second.line_numbers)
 	view.clamp_origin(second, 10)
 	view.clamp_origin(first, 4)
 	testing.expect(t, first.first_line == 3 && second.first_line == 9)
@@ -168,4 +170,16 @@ test_edit_and_history_ignore_other_buffers :: proc(t: ^testing.T) {
 	testing.expect(t, third.selection.anchor == 3 && third.selection.active == 10)
 	testing.expect(t, third.first_line == -1)
 	testing.expect(t, first.selection.anchor == 0 && first.selection.active == 0)
+}
+
+
+@(test)
+test_line_number_digits_cover_document_boundaries :: proc(t: ^testing.T) {
+	testing.expect(t, view.line_number_digits(-1) == 2)
+	testing.expect(t, view.line_number_digits(1) == 2)
+	testing.expect(t, view.line_number_digits(9) == 2)
+	testing.expect(t, view.line_number_digits(10) == 2)
+	testing.expect(t, view.line_number_digits(99) == 2)
+	testing.expect(t, view.line_number_digits(100) == 3)
+	testing.expect(t, view.line_number_digits(1000) == 4)
 }

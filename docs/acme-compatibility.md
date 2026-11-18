@@ -34,6 +34,10 @@ Acme behavior, not an implementation to copy mechanically.
   timed repeat, and remains captured outside the track with endpoint clamping.
   Soft-wrapped rows use the same origin for rendering and hit-testing. Covered
   by `scroll-test`.
+- Per-view line-number gutters use a stable two-digit minimum width and widen
+  for larger documents. Numbers are right-aligned and appear only on logical
+  line starts, leaving soft-wrapped continuation rows blank. Covered by
+  `scroll-test`, including resize and runtime DPI transitions.
 - Recoverable editor errors accumulate in a reusable `+Errors` window without
   taking focus. Automatic output uses transactions and cannot silently clean a
   user-edited error buffer.
@@ -64,7 +68,8 @@ Acme behavior, not an implementation to copy mechanically.
   visible in tags.
 - A product command for multiple views of one buffer (Zerox) is deferred; only
   the underlying core view model and tests currently exist.
-- Line-number gutters remain a later M07 task.
+- Per-view gutter toggles are represented in core state; no product command for
+  changing them at runtime currently exists.
 - Persistent layout restoration, filesystem projection, local IPC automation,
   and external event interception are later milestones.
 - Native Windows behavior is source-checked but not runtime-tested here.

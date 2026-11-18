@@ -79,7 +79,7 @@ def main() -> int:
             wait_for_log(log_path, f"directory: opened {sandbox}/ buffer=2", args.timeout)
             print("PASS: requested file and working-directory explorer coexist at startup")
 
-            x11.drag(window, (15, 76), (67, 76))
+            x11.drag(window, (46, 76), (98, 76))
             x11.tap(ord("x"))
             wait_for_log(log_path, 'tag: window 1 generated "source.txt Del Put | "', args.timeout)
             click(x11, window, 2, 175, 52)
@@ -88,7 +88,7 @@ def main() -> int:
                 raise HarnessFailure(f"mouse selection or tag Put produced unexpected bytes: {source.read_bytes()!r}")
             print("PASS: primary selection, editing, dirty tag state, and button-2 Put compose")
 
-            click(x11, window, 3, 420, 76)
+            click(x11, window, 3, 451, 76)
             wait_for_log(log_path, f"look: opened {child} window=3 buffer=3 line=0", args.timeout)
             if source.read_bytes() != b"x\nchild.txt\n" or child.read_bytes() != b"child\n":
                 raise HarnessFailure("opening from the explorer changed an existing file")

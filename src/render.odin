@@ -134,14 +134,20 @@ render_frame :: proc() {
 				text_render_tag(tag_content_rect(placed.window.tag, placed.control), &item.tag.doc, item.tag.selection, window_tag_active, phys, &verts)
 				body_active := editor.active_text_kind == .Body && editor.active_window == placed.id
 				doc := &editor_buffer_for_view(item).doc
-				track, text := scroll.body_rects(placed.window.body)
+				track, gutter, text := editor_body_parts(item, doc, placed.window.body)
 				first_line_rows := editor_normalize_view_origin(item, doc, text)
 				render_append_quad(&verts, track, cfg.Theme.Tag_Bg, phys)
 				thumb := scroll.thumb_rect(track, int(item.first_line), item.first_row, first_line_rows, rope_line_count(doc), editor_visible_rows(text))
 				render_append_quad(&verts, thumb, SCROLLBAR_THUMB_COLOR, phys)
+				if gutter.width > 0 {
+					separator := gutter
+					separator.x += gutter.width - 1
+					separator.width = 1
+					render_append_quad(&verts, separator, cfg.Theme.Tag_Bg, phys)
+				}
 				text_window := placed.window
 				text_window.body = text
-				text_render_document(text_window, doc, item.selection, item.first_line, item.first_row, body_active, 0, item.wrap_mode, &item.horizontal_offset, phys, &verts)
+				text_render_document(text_window, gutter, item.line_numbers, doc, item.selection, item.first_line, item.first_row, body_active, 0, item.wrap_mode, &item.horizontal_offset, phys, &verts)
 			}
 		}
 	}
@@ -169,7 +175,7 @@ tag_content_rect :: proc(tag, control: layout.Rect) -> layout.Rect {
 
 text_render_tag :: proc(rect: layout.Rect, doc: ^txn.Doc, selection: txn.Selection, active: bool, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	win := layout.Window{body = rect}
-	text_render_document(win, doc, selection, 0, 0, active, rect.height, .Truncate, nil, fb, quads)
+	text_render_document(win, {}, false, doc, selection, 0, 0, active, rect.height, .Truncate, nil, fb, quads)
 }
 
 current_layout :: proc() -> (layout.Geometry, coords.Physical_Size, bool) {

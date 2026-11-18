@@ -94,7 +94,7 @@ def main() -> int:
                 raise HarnessFailure("saving a directory entry modified another file")
             print("PASS: directory entry Look resolves relative to the listing and saves independently")
 
-            look(x11, window, 15, 102)
+            look(x11, window, 46, 102)
             wait_for_log(log_path, f"look: opened {sub} window=4 buffer=4 line=0", args.timeout)
             wait_for_log(log_path, f"directory: opened {sub}/ buffer=4 bytes=", args.timeout)
             print("PASS: a slash-marked subdirectory opens another three-lane directory window")

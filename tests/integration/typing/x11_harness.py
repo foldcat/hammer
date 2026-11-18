@@ -134,6 +134,17 @@ class X11:
             ctypes.c_int,
         ]
         lib.XGetImage.restype = ctypes.c_void_p
+        lib.XGetGeometry.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_uint),
+            ctypes.POINTER(ctypes.c_uint),
+            ctypes.POINTER(ctypes.c_uint),
+            ctypes.POINTER(ctypes.c_uint),
+        ]
         lib.XGetPixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
         lib.XGetPixel.restype = ctypes.c_ulong
         lib.XDestroyImage.argtypes = [ctypes.c_void_p]
@@ -220,7 +231,23 @@ class X11:
         self.button(1, False)
 
     def image(self, window: int) -> ctypes.c_void_p:
-        image = self.lib.XGetImage(self.display, window, 0, 0, 800, 600, 0xFFFFFFFFFFFFFFFF, 2)
+        root = ctypes.c_ulong()
+        x, y = ctypes.c_int(), ctypes.c_int()
+        width, height, border, depth = ctypes.c_uint(), ctypes.c_uint(), ctypes.c_uint(), ctypes.c_uint()
+        status = self.lib.XGetGeometry(
+            self.display,
+            window,
+            ctypes.byref(root),
+            ctypes.byref(x),
+            ctypes.byref(y),
+            ctypes.byref(width),
+            ctypes.byref(height),
+            ctypes.byref(border),
+            ctypes.byref(depth),
+        )
+        if not status:
+            raise HarnessFailure("XGetGeometry failed")
+        image = self.lib.XGetImage(self.display, window, 0, 0, width.value, height.value, 0xFFFFFFFFFFFFFFFF, 2)
         if not image:
             raise HarnessFailure("XGetImage failed")
         return image
@@ -428,12 +455,12 @@ def main() -> int:
             time.sleep(0.3)
             if x11.selection_pixels(window) != 0:
                 raise HarnessFailure("unexpected selection highlight before mouse input")
-            x11.drag(window, (15, 76), (60, 104))
+            x11.drag(window, (46, 76), (60, 104))
             time.sleep(0.3)
             selected = x11.selection_pixels(window)
             if selected < 20:
                 raise HarnessFailure(f"mouse drag produced only {selected} selection pixels; log: {log_path}")
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             time.sleep(0.3)

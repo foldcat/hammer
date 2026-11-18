@@ -64,3 +64,29 @@ text_visual_row_count :: proc(doc: ^txn.Doc, line_index: rope.Line_Index, body: 
 	defer delete(rows)
 	return len(rows), true
 }
+
+text_measure_advance :: proc(text: string) -> f32 {
+	selected := fonts.face(&font_set, .Body)
+	if selected == nil {
+		return 0
+	}
+	pixel_size, size_ok := glyph_pixel_size(state.dpi.scale)
+	if !size_ok {
+		return 0
+	}
+	if _, size_err := glyphcache.native_set_pixel_size(selected.native, pixel_size); !errs.ok(size_err) {
+		text_render_error(size_err)
+		return 0
+	}
+	previous_allocator := context.allocator
+	context.allocator = context.temp_allocator
+	defer context.allocator = previous_allocator
+	measurement: shaping.Measurement
+	visible, shape_err := product_shape_visible(text, &measurement, pixel_size)
+	if !errs.ok(shape_err) {
+		text_render_error(shape_err)
+		return 0
+	}
+	defer shaping.destroy(&visible.text)
+	return f32(visible.text.total_advance) / (64 * state.dpi.scale)
+}

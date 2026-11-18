@@ -2,6 +2,7 @@
 
 package main
 
+import "core:fmt"
 import "core:log"
 import "core:math"
 
@@ -69,6 +70,7 @@ MAX_TEXT_GLYPHS_PER_FRAME :: 2048
 MAX_TEXT_QUADS_PER_FRAME :: MAX_QUADS_PER_DRAW - 2
 MAX_VISIBLE_TEXT_LINES :: 4096
 TEXT_PADDING :: f32(4)
+LINE_NUMBER_COLOR :: [4]f32{128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1}
 
 text_shader: sg.Shader
 text_pipeline: sg.Pipeline
@@ -160,7 +162,7 @@ text_render_begin :: proc() {
 	text_draws = make([dynamic]Glyph_Draw, context.temp_allocator)
 }
 
-text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, first_row: int, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbers: bool, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, first_row: int, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	if doc == nil || text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 || first_row < 0 {
 		return
 	}
@@ -220,6 +222,10 @@ text_render_document :: proc(win: layout.Window, doc: ^txn.Doc, selection: txn.S
 		skip_rows := 0
 		if visible_index == 0 {
 			skip_rows = first_row
+		}
+		if line_numbers && (visible_index > 0 || first_row == 0) {
+			text_render_line_number(gutter, line_index, pixel_size, baseline, fb)
+			text_draw_body = win.body
 		}
 		consumed := text_render_line(
 			doc,
@@ -391,7 +397,7 @@ text_render_line :: proc(
 		if !composing {
 			text_render_selection(visible.text, expansion, selection, start, end, body, row_top, line_height, row, x_offset, fb, quads)
 		}
-		text_collect_glyphs(visible.text, font_list, body.x * state.dpi.scale, row_baseline, row, x_offset, fb)
+		text_collect_glyphs(visible.text, font_list, body.x * state.dpi.scale, row_baseline, row, x_offset, fb, cfg.Theme.Body_Fg)
 
 		if composing && preedit_start < preedit_end && preedit_start <= visible.end {
 			preedit_end = min(preedit_end, visible.end)
@@ -526,6 +532,29 @@ measurement_end :: proc(text: shaping.Text) -> int {
 	return end
 }
 
+text_render_line_number :: proc(gutter: layout.Rect, line_index: int, pixel_size: u32, baseline: f32, fb: coords.Physical_Size) {
+	if gutter.width <= 0 || gutter.height <= 0 || line_index < 0 {
+		return
+	}
+	label := fmt.aprintf("%d", line_index + 1, allocator = context.temp_allocator)
+	previous_allocator := context.allocator
+	context.allocator = context.temp_allocator
+	defer context.allocator = previous_allocator
+	measurement: shaping.Measurement
+	visible, shape_err := product_shape_visible(label, &measurement, pixel_size)
+	if !errs.ok(shape_err) {
+		text_render_error(shape_err)
+		return
+	}
+	defer shaping.destroy(&visible.text)
+	advance := f32(visible.text.total_advance) / (64 * state.dpi.scale)
+	origin_x := (gutter.x + gutter.width - GUTTER_PADDING - advance) * state.dpi.scale
+	font_storage: [shaping.MAX_FONTS]shaping.Font
+	font_list := product_shaping_fonts(&font_storage)
+	text_draw_body = gutter
+	text_collect_glyphs(visible.text, font_list, origin_x, baseline, {start = 0, end = advance}, 0, fb, LINE_NUMBER_COLOR)
+}
+
 text_collect_glyphs :: proc(
 	text: shaping.Text,
 	font_list: []shaping.Font,
@@ -533,6 +562,7 @@ text_collect_glyphs :: proc(
 	row: shaping.Wrap_Row,
 	x_offset: f32,
 	fb: coords.Physical_Size,
+	color: [4]f32,
 ) {
 	for run in text.runs {
 		native := text_native_font(font_list, run.font_id)
@@ -569,7 +599,7 @@ text_collect_glyphs :: proc(
 				text_draws[len(text_draws) - 1].body != text_draw_body {
 				append(&text_draws, Glyph_Draw{page = entry.page, start = len(text_vertices), body = text_draw_body})
 			}
-			text_append_glyph(x, y, entry, fb)
+			text_append_glyph(x, y, entry, fb, color)
 			text_draws[len(text_draws) - 1].count += 6
 		}
 	}
@@ -584,7 +614,7 @@ text_native_font :: proc(font_list: []shaping.Font, font_id: u64) -> rawptr {
 	return nil
 }
 
-text_append_glyph :: proc(x, y: f32, entry: glyphcache.Entry, fb: coords.Physical_Size) {
+text_append_glyph :: proc(x, y: f32, entry: glyphcache.Entry, fb: coords.Physical_Size, color: [4]f32) {
 	page := glyph_cache.pages[entry.page]
 	x0 := 2 * x / fb.width - 1
 	x1 := 2 * (x + f32(entry.rect.width)) / fb.width - 1
@@ -594,7 +624,6 @@ text_append_glyph :: proc(x, y: f32, entry: glyphcache.Entry, fb: coords.Physica
 	u1 := f32(entry.rect.x + entry.rect.width) / f32(page.width)
 	v0 := f32(entry.rect.y) / f32(page.height)
 	v1 := f32(entry.rect.y + entry.rect.height) / f32(page.height)
-	color := cfg.Theme.Body_Fg
 	color_mode := f32(0)
 	if page.format == .RGBA {
 		color_mode = 1

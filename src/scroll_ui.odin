@@ -99,7 +99,7 @@ editor_wheel_vertical :: proc(item: ^view.View, doc: ^txn.Doc, body: layout.Rect
 }
 
 editor_scrollbar_pointer_down :: proc(event: input.Pointer_Down, area: layout.Hit, body: layout.Rect) -> bool {
-	track, text := scroll.body_rects(body)
+	track, _ := scroll.body_rects(body)
 	was_active := scroll.active(&editor.scrollbar)
 	if !was_active && (area.kind != .Body || !layout.contains(track, event.pos)) {
 		return false
@@ -112,6 +112,7 @@ editor_scrollbar_pointer_down :: proc(event: input.Pointer_Down, area: layout.Hi
 	on_thumb := false
 	if item, found := view.find(&editor.views, area.window_id); found {
 		doc := &editor_buffer_for_view(item).doc
+		_, _, text := editor_body_parts(item, doc, body)
 		first_line_rows := editor_normalize_view_origin(item, doc, text)
 		thumb := scroll.thumb_rect(track, int(item.first_line), item.first_row, first_line_rows, rope_line_count(doc), editor_visible_rows(text))
 		on_thumb = layout.contains(thumb, event.pos)
@@ -161,7 +162,7 @@ editor_dispatch_scrollbar_action :: proc(action: scroll.Action) {
 		scroll.cancel(&editor.scrollbar)
 		return
 	}
-	_, text := scroll.body_rects(win.body)
+	_, _, text := editor_body_parts(item, doc, win.body)
 	previous_line, previous_row := item.first_line, item.first_row
 	kind := "relative"
 	switch action.kind {

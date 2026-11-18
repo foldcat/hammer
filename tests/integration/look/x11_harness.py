@@ -65,7 +65,7 @@ def main() -> int:
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
 
-            x11.move(window, 60, 76)
+            x11.move(window, 91, 76)
             x11.button(3, True)
             x11.button(3, False)
             wait_for_log(log_path, f"look: opened {target} window=3 buffer=3 line=2", args.timeout)
@@ -80,7 +80,7 @@ def main() -> int:
                 raise HarnessFailure("opening a file changed the source document")
             print("PASS: relative file:line Look opens the target at its line and saves only that buffer")
 
-            x11.move(window, 15, 96)
+            x11.move(window, 46, 96)
             x11.button(3, True)
             x11.button(3, False)
             wait_for_log(log_path, f"look: opened {unicode_target} window=4 buffer=4 line=0", args.timeout)
@@ -93,7 +93,7 @@ def main() -> int:
                 raise HarnessFailure(f"Unicode path saved unexpected bytes: {unicode_target.read_bytes()!r}")
             print("PASS: absolute Unicode paths open as independent editable files")
 
-            x11.move(window, 60, 76)
+            x11.move(window, 91, 76)
             x11.button(3, True)
             x11.button(3, False)
             wait_for_log(log_path, f"look: activated {target} window=3 buffer=3 line=2", args.timeout)
@@ -101,7 +101,7 @@ def main() -> int:
                 raise HarnessFailure("reopening a path created a duplicate buffer or window")
             print("PASS: reopening a normalized path activates its existing buffer and view")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             x11.key(0xFFE3, True)
@@ -121,7 +121,7 @@ def main() -> int:
 
             missing_start = len(f"starget.txt:2\n{unicode_target}\n".encode())
             missing_end = missing_start + len(b"missing-token")
-            x11.move(window, 70, 116)
+            x11.move(window, 101, 116)
             x11.button(3, True)
             x11.button(3, False)
             wait_for_log(
@@ -134,7 +134,7 @@ def main() -> int:
             print("PASS: missing filenames fall back to wrapped literal search")
 
             x11.tap(ord("d"))
-            x11.move(window, 15, 356)
+            x11.move(window, 46, 356)
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(0xFF1B)
@@ -144,7 +144,7 @@ def main() -> int:
             wait_for_log(log_path, "edit: unsaved text; close blocked", args.timeout)
             print("PASS: quitting checks dirty buffers even when another buffer is active")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             x11.key(0xFFE3, True)

@@ -63,24 +63,24 @@ def main() -> int:
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
 
-            x11.move(window, 15, 102)
+            x11.move(window, 46, 102)
             x11.button(3, True)
             x11.button(3, False)
             wait_for_log(log_path, f"look: opened {other} window=3 buffer=3 line=0", args.timeout)
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("X"))
-            x11.drag(window, (15, 76), (55, 76))
+            x11.drag(window, (46, 76), (86, 76))
             time.sleep(0.2)
             if x11.selection_pixels(window, 60, 310) < 20:
                 raise HarnessFailure("the first window did not own its initial selection")
 
-            x11.move(window, 15, 356)
+            x11.move(window, 46, 356)
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("Y"))
-            x11.drag(window, (15, 356), (50, 356))
+            x11.drag(window, (46, 356), (81, 356))
             time.sleep(0.2)
             if x11.selection_pixels(window, 60, 310) < 20:
                 raise HarnessFailure("selecting in the second window cleared the first window's selection")
@@ -88,7 +88,7 @@ def main() -> int:
                 raise HarnessFailure("the second window did not render its own selection")
             print("PASS: independent buffers retain independent visible selections")
 
-            x11.move(window, 15, 356)
+            x11.move(window, 46, 356)
             x11.button(1, True)
             x11.button(1, False)
             time.sleep(0.2)
@@ -98,7 +98,7 @@ def main() -> int:
                 raise HarnessFailure("the second view's selection did not collapse")
             print("PASS: changing the active view preserves the inactive view's selection")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             x11.key(0xFFE3, True)
@@ -109,7 +109,7 @@ def main() -> int:
                 raise HarnessFailure(f"typing leaked between independent buffers: {source.read_bytes()!r}")
             print("PASS: typing in one window does not appear in another window's buffer")
 
-            x11.move(window, 15, 356)
+            x11.move(window, 46, 356)
             x11.button(1, True)
             x11.button(1, False)
             x11.key(0xFFE3, True)

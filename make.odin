@@ -27,7 +27,7 @@
 //     odin run make.odin -file -- directory-test   # M07.07 X11 directory and error windows
 //     odin run make.odin -file -- compatibility-test # M07.08 integrated Acme window behavior
 //     odin run make.odin -file -- wrap-test        # M07.09 X11 soft wrap and horizontal scrolling
-//     odin run make.odin -file -- scroll-test      # M07.10 X11 vertical viewport and scrollbar behavior
+//     odin run make.odin -file -- scroll-test      # M07.10–M07.11 X11 viewport, scrollbar, and line numbers
 //     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering

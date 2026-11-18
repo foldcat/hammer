@@ -70,7 +70,7 @@ def main() -> int:
 
             clipboard_owner.stop()
             clipboard_owner = None
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             for x in (12, 22, 32, 40):
                 x11.move(window, x, 76)
@@ -87,7 +87,7 @@ def main() -> int:
             x11.button(1, False)
             print("PASS: empty clipboard warns without editing and later chords still work")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(3, True)
             x11.button(3, False)
             wait_for_log(log_path, 'mouse: look "alpha" reverse=false match=[11,16)', args.timeout)
@@ -99,9 +99,9 @@ def main() -> int:
             x11.button(1, True)
             x11.button(1, False)
             x11.key(0xFFE3, True)
-            x11.move(window, 74, 76)
+            x11.move(window, 105, 76)
             x11.button(1, True)
-            x11.move(window, 112, 80)
+            x11.move(window, 143, 80)
             x11.button(1, False)
             x11.key(0xFFE3, False)
             wait_for_log(log_path, 'mouse: execute "beta" target=3001 argument_chord=false', args.timeout)
@@ -110,15 +110,15 @@ def main() -> int:
             print("PASS: Ctrl+primary drag executes without starting a primary selection")
 
             x11.key(0xFFE9, True)
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
-            x11.move(window, 62, 78)
+            x11.move(window, 93, 78)
             x11.button(1, False)
             x11.key(0xFFE9, False)
             wait_for_log(log_path, 'mouse: look "alpha" reverse=false match=[11,16)', args.timeout, occurrence=2)
             print("PASS: Alt+primary drag looks up the dragged text")
 
-            x11.move(window, 82, 76)
+            x11.move(window, 113, 76)
             x11.button(1, True)
             x11.button(1, False)
             x11.key(0xFFE3, True)
@@ -129,7 +129,7 @@ def main() -> int:
                 raise HarnessFailure("Ctrl+Enter accidentally changed the primary selection")
             print("PASS: Ctrl+Enter executes the token at the caret through the mouse action layer")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             x11.key(0xFFE9, True)
@@ -155,7 +155,7 @@ def main() -> int:
             x11.button(1, True)
             x11.button(1, False)
             x11.key(0xFFE3, True)
-            x11.move(window, 82, 76)
+            x11.move(window, 113, 76)
             x11.button(1, True)
             x11.tap(0xFFE1)
             x11.button(1, False)
@@ -169,13 +169,13 @@ def main() -> int:
                 raise HarnessFailure("canceled Ctrl+primary gesture left a primary selection")
             print("PASS: non-pointer input cancels a modified gesture without selecting")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
-            for x in (12, 22, 32, 62):
+            for x in (12, 22, 32, 93):
                 x11.move(window, x, 76)
                 time.sleep(0.03)
             x11.button(1, False)
-            x11.move(window, 15, 96)
+            x11.move(window, 46, 96)
             x11.button(2, True)
             x11.button(1, True)
             x11.button(2, False)
@@ -184,7 +184,7 @@ def main() -> int:
             wait_for_log(log_path, 'mouse: look "alpha" reverse=false match=[11,16)', args.timeout, occurrence=4)
             print("PASS: 2-1 supplies the last primary selection as a distinct Look argument")
 
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             x11.button(1, False)
             time.sleep(0.05)
@@ -229,13 +229,13 @@ def main() -> int:
             x11.key(0xFFE3, False)
             print("PASS: Ctrl+V inserts at the caret without selecting the pasted text")
 
-            x11.move(window, 82, 76)
+            x11.move(window, 113, 76)
             x11.button(1, True)
             x11.button(1, False)
             time.sleep(0.05)
             x11.button(1, True)
             x11.button(3, True)
-            x11.move(window, 84, 78)
+            x11.move(window, 115, 78)
             x11.button(3, False)
             x11.button(1, False)
             wait_for_log(log_path, "mouse: chord Paste applied transaction=", args.timeout, occurrence=2)
@@ -246,7 +246,7 @@ def main() -> int:
 
             clipboard_owner.stop()
             clipboard_owner = ClipboardOwner(clipboard_peer, payload, sandbox, args.timeout)
-            x11.move(window, 15, 76)
+            x11.move(window, 46, 76)
             x11.button(1, True)
             for x in (12, 22, 32, 40):
                 x11.move(window, x, 76)
@@ -260,11 +260,11 @@ def main() -> int:
             x11.button(1, False)
             print("PASS: 1-3-2 reverses only the chord paste")
 
-            x11.move(window, 20, 150)
+            x11.move(window, 51, 150)
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("X"))
-            x11.move(window, 15, 116)
+            x11.move(window, 46, 116)
             x11.button(2, True)
             x11.button(2, False)
             wait_for_log(log_path, "file: saved ", args.timeout)
@@ -314,9 +314,9 @@ def main() -> int:
             x11.key(0xFFE3, False)
             print("PASS: window-tag hit testing uses the rendered text origin")
 
-            x11.move(window, 82, 76)
+            x11.move(window, 113, 76)
             x11.button(1, True)
-            for x in (97, 117, 142, 167, 192):
+            for x in (128, 148, 173, 198, 223):
                 x11.move(window, x, 76)
                 time.sleep(0.03)
             x11.button(2, True)
@@ -368,20 +368,20 @@ def main() -> int:
                 x11.lib.XSetInputFocus(x11.display, window, 1, 0)
                 x11.lib.XSync(x11.display, 0)
                 time.sleep(0.3)
-                x11.move(window, 35, 80)
+                x11.move(window, 66, 80)
                 x11.button(1, True)
-                x11.move(window, 188, 89)
+                x11.move(window, 219, 89)
                 x11.button(3, True)
                 x11.button(3, False)
                 x11.button(1, False)
                 wait_for_log(cut_log, "clipboard: selection has no owner or refused UTF-8 conversion", args.timeout)
-                x11.move(window, 133, 117)
+                x11.move(window, 164, 117)
                 x11.button(1, True)
                 x11.button(1, False)
                 for iteration in range(1, 11):
-                    x11.move(window, 82, 76)
+                    x11.move(window, 113, 76)
                     x11.button(1, True)
-                    for x in (97, 117, 142, 167, 192):
+                    for x in (128, 148, 173, 198, 223):
                         x11.move(window, x, 76)
                         time.sleep(0.03)
                     x11.button(2, True)
