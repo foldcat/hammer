@@ -5,11 +5,13 @@ Windows/Wine runtime was not exercised.
 
 ## Independent default buffers
 
-At the user's direction, ordinary windows no longer share a document. The
-startup file belongs to the first window; the other two initial windows start
-as separate untitled buffers. Typing, undo history, selections, dirty state,
-and saves are independent. The core view code still supports multiple views of
-one buffer for a future explicit Zerox-style operation.
+At the user's direction, ordinary windows no longer share a document. M07.06
+initially gave the startup file one window and two other windows independent
+untitled buffers. M07.07 subsequently changed startup to one requested file or
+untitled buffer on the left and an independent working-directory explorer on
+the right. Typing, undo history, selections, dirty state, and saves are
+independent. The core view code still supports multiple views of one buffer for
+a future explicit Zerox-style operation.
 
 `Editor` now owns a fixed-capacity registry of 128 stable buffer slots and a
 monotonically increasing buffer-ID counter. Each slot owns its document, path,

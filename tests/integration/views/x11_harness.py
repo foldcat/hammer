@@ -37,7 +37,9 @@ def main() -> int:
 
     sandbox = Path(tempfile.mkdtemp(prefix="hammer-m07-02-views-"))
     source = sandbox / "source.txt"
-    source.write_bytes(b"alpha\n")
+    other = sandbox / "other.txt"
+    source.write_bytes(b"alpha\nother.txt\n")
+    other.write_bytes(b"beta\n")
     log_path = sandbox / "hammer.log"
     process: subprocess.Popen[bytes] | None = None
     x11: X11 | None = None
@@ -61,6 +63,13 @@ def main() -> int:
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
 
+            x11.move(window, 15, 102)
+            x11.button(3, True)
+            x11.button(3, False)
+            wait_for_log(log_path, f"look: opened {other} window=3 buffer=3 line=0", args.timeout)
+            x11.move(window, 3, 76)
+            x11.button(1, True)
+            x11.button(1, False)
             x11.tap(ord("X"))
             x11.drag(window, (3, 76), (55, 76))
             time.sleep(0.2)
@@ -96,7 +105,7 @@ def main() -> int:
             x11.tap(ord("s"))
             x11.key(0xFFE3, False)
             wait_for_log(log_path, "file: saved ", args.timeout)
-            if source.read_bytes() != b"xalpha\n":
+            if source.read_bytes() != b"xalpha\nother.txt\n":
                 raise HarnessFailure(f"typing leaked between independent buffers: {source.read_bytes()!r}")
             print("PASS: typing in one window does not appear in another window's buffer")
 
@@ -109,7 +118,7 @@ def main() -> int:
             x11.key(0xFFE3, True)
             x11.tap(ord("w"))
             x11.key(0xFFE3, False)
-            wait_for_log(log_path, "view: closed window 2; 2 views remain", args.timeout)
+            wait_for_log(log_path, "view: closed window 3; 2 views remain", args.timeout)
             if process.poll() is not None:
                 raise HarnessFailure("closing one of several views exited the editor")
             print("PASS: closing one view preserves the other independent buffers")

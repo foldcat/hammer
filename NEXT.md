@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M07.07 Implement directory windows and error windows
+## Current task: M07.08 Add compatibility scenarios for window behavior

@@ -16,14 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
 from x11_harness import HarnessFailure, X11, wait_for_exit  # noqa: E402
 
 
-def wait_for_layout_line(log_path: Path, pattern: str, timeout: float) -> re.Match[str]:
+def wait_for_layout_line(log_path: Path, pattern: str, timeout: float, occurrence: int = 1) -> re.Match[str]:
     deadline = time.monotonic() + timeout
     compiled = re.compile(pattern)
     while time.monotonic() < deadline:
         text = log_path.read_text(encoding="utf-8", errors="replace")
         matches = list(compiled.finditer(text))
-        if matches:
-            return matches[-1]
+        if len(matches) >= occurrence:
+            return matches[occurrence - 1]
         time.sleep(0.05)
     raise HarnessFailure(f"timed out waiting for layout log {pattern!r}; log: {log_path}")
 
@@ -71,35 +71,37 @@ def main() -> int:
             # (x>=10) missed it and made this check a false "no change".
             initial_pixels = x11.pixels(window, 2, 220, 66, 130)
 
-            x11.drag(window, (5, 50), (5, 100))
+            x11.drag(window, (5, 50), (600, 100))
+            wait_for_layout_line(log_path, r"layout: window 1 column 2 index 0 weight 1\.0000", args.timeout)
+            time.sleep(0.2)
+            if x11.pixels(window, 2, 220, 66, 130) == initial_pixels:
+                raise HarnessFailure("moving the active window did not change rendered pixels")
+            print("PASS: primary drag moves a window to another column")
+
+            x11.drag(window, (403, 50), (403, 100))
             first_resize = wait_for_layout_line(
                 log_path,
-                r"layout: window 1 column 1 index 0 weight (1\.[0-9]+)",
+                r"layout: window 1 column 2 index 0 weight (1\.[0-9]*[1-9][0-9]*)",
                 args.timeout,
             )
             if float(first_resize.group(1)) <= 1.0:
                 raise HarnessFailure("in-place drag did not grow the first window against its successor")
             print("PASS: in-place drag resizes the first window against its successor")
 
-            x11.drag(window, (5, 50), (600, 100))
-            wait_for_layout_line(log_path, r"layout: window 1 column 2 index 0 weight 1\.1805", args.timeout)
-            if x11.pixels(window, 2, 220, 66, 130) == initial_pixels:
-                raise HarnessFailure("moving the active window did not change rendered pixels")
-            print("PASS: primary drag moves a window to another column")
-
-            x11.drag(window, (403, 50), (600, 590))
-            wait_for_layout_line(log_path, r"layout: window 1 column 2 index 1 weight 1\.1805", args.timeout)
-            print("PASS: vertical drag reorders windows within a column")
-
-            x11.drag(window, (403, 310), (403, 360))
+            x11.drag(window, (403, 50), (403, 25))
             resize = wait_for_layout_line(
                 log_path,
-                r"layout: window 1 column 2 index 1 weight (0\.[0-9]+)",
+                r"layout: window 1 column 2 index 0 weight (0\.[0-9]+|1\.[0-9]+)",
                 args.timeout,
+                occurrence=3,
             )
-            if float(resize.group(1)) >= 1.0:
-                raise HarnessFailure("vertical pair drag did not shrink the dragged lower window")
+            if float(resize.group(1)) >= float(first_resize.group(1)):
+                raise HarnessFailure("vertical pair drag did not shrink the dragged upper window")
             print("PASS: vertical drag resizes the adjacent window pair")
+
+            x11.drag(window, (403, 50), (600, 590))
+            wait_for_layout_line(log_path, r"layout: window 1 column 2 index 1 weight ([0-9.]+)", args.timeout)
+            print("PASS: vertical drag reorders windows within a column")
 
             x11.drag(window, (403, 25), (10, 25))
             crossing_resize = wait_for_layout_line(

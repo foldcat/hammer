@@ -144,16 +144,29 @@ editor_finish_history_jump :: proc(item: ^view.View) {
 editor_window_generated :: proc(item: ^view.View) -> string {
 	name := "New"
 	buffer := editor_buffer_for_view(item)
-	if buffer != nil && buffer.path != "" {
-		name = buffer.path
-		for r, index in buffer.path {
-			if r == '/' || r == '\\' {
-				name = buffer.path[index + 1:]
+	if buffer != nil {
+		switch buffer.kind {
+		case .Errors:
+			name = "+Errors"
+		case .Directory:
+			if buffer.path != "" {
+				name = buffer.path
+			}
+		case .File:
+			if buffer.path != "" {
+				name = buffer.path
+				for r, index in buffer.path {
+					if r == '/' || r == '\\' {
+						name = buffer.path[index + 1:]
+					}
+				}
 			}
 		}
 	}
 	commands := "Del"
-	if buffer != nil && txn.doc_revision(&buffer.doc) != buffer.saved_revision {
+	if buffer != nil && buffer.kind == .Directory {
+		commands = "Del Get"
+	} else if buffer != nil && buffer.kind == .File && txn.doc_revision(&buffer.doc) != buffer.saved_revision {
 		commands = "Del Put"
 	}
 	return fmt.aprintf("%s %s | ", name, commands, allocator = context.temp_allocator)

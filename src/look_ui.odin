@@ -50,6 +50,9 @@ editor_normalized_look_path :: proc(path: string, source: Mouse_Text_Target, all
 		buffer := editor_buffer_for_view(source.item)
 		if buffer != nil && buffer.path != "" {
 			base = os.dir(buffer.path)
+			if buffer.kind == .Directory {
+				base = buffer.path
+			}
 		}
 	}
 	joined, join_err := os.join_path([]string{base, path}, allocator)
@@ -136,6 +139,34 @@ editor_apply_look_line :: proc(item: ^view.View, line: int) {
 	item.first_line = line_index
 }
 
+editor_open_buffer_in_column :: proc(buffer: ^Editor_Buffer, column_id: layout.Column_ID) -> (^view.View, errs.Error) {
+	if buffer == nil {
+		return nil, errs.new(.Invalid_Input, "view: cannot open a nil buffer", allocator = permanent())
+	}
+	if column_id == 0 {
+		editor_destroy_buffer(buffer)
+		return nil, errs.new(.NotFound, "view: no column is available", allocator = permanent())
+	}
+	window_id, layout_err := layout.add_window(&editor.workspace, column_id)
+	if !errs.ok(layout_err) {
+		editor_destroy_buffer(buffer)
+		return nil, layout_err
+	}
+	if add_err := view.add(&editor.views, window_id, buffer.id); !errs.ok(add_err) {
+		layout.remove_window(&editor.workspace, window_id)
+		editor_destroy_buffer(buffer)
+		return nil, add_err
+	}
+	item, _ := view.find(&editor.views, window_id)
+	if tag_err := editor_init_window_tag(item); !errs.ok(tag_err) {
+		view.remove(&editor.views, window_id)
+		layout.remove_window(&editor.workspace, window_id)
+		editor_destroy_buffer(buffer)
+		return nil, tag_err
+	}
+	return item, {}
+}
+
 editor_open_look_file :: proc(target: Mouse_Text_Target, text: string) -> Look_Open_Result {
 	reference := mouse.parse_look_path(text)
 	if reference.path == "" {
@@ -165,7 +196,7 @@ editor_open_look_file :: proc(target: Mouse_Text_Target, text: string) -> Look_O
 		return .Opened
 	}
 
-	buffer, load_err := editor_alloc_buffer(path)
+	buffer, load_err := editor_alloc_path_buffer(path)
 	if !errs.ok(load_err) {
 		if load_err.kind == .NotFound {
 			errs.destroy(&load_err)
@@ -174,39 +205,19 @@ editor_open_look_file :: proc(target: Mouse_Text_Target, text: string) -> Look_O
 		editor_report(load_err)
 		return .Failed
 	}
-	column_id := editor_look_column(target)
-	if column_id == 0 {
-		editor_destroy_buffer(buffer)
-		editor_report(errs.new(.NotFound, "look: no column is available", allocator = context.temp_allocator))
+	item, open_err := editor_open_buffer_in_column(buffer, editor_look_column(target))
+	if !errs.ok(open_err) {
+		editor_report(open_err)
 		return .Failed
 	}
-	window_id, layout_err := layout.add_window(&editor.workspace, column_id)
-	if !errs.ok(layout_err) {
-		editor_destroy_buffer(buffer)
-		editor_report(layout_err)
-		return .Failed
-	}
-	if add_err := view.add(&editor.views, window_id, buffer.id); !errs.ok(add_err) {
-		layout.remove_window(&editor.workspace, window_id)
-		editor_destroy_buffer(buffer)
-		editor_report(add_err)
-		return .Failed
-	}
-	item, _ := view.find(&editor.views, window_id)
-	if tag_err := editor_init_window_tag(item); !errs.ok(tag_err) {
-		view.remove(&editor.views, window_id)
-		layout.remove_window(&editor.workspace, window_id)
-		editor_destroy_buffer(buffer)
-		editor_report(tag_err)
-		return .Failed
-	}
-	editor_activate_window(window_id)
+	editor_activate_window(item.window_id)
 	editor_apply_look_line(item, reference.line)
-	log.infof("look: opened %s window=%d buffer=%d line=%d", path, u64(window_id), u64(buffer.id), reference.line)
+	log.infof("look: opened %s window=%d buffer=%d line=%d", path, u64(item.window_id), u64(buffer.id), reference.line)
 	return .Opened
 }
 
 editor_look_text :: proc(target: Mouse_Text_Target, needle: []byte, reverse: bool) {
+	log.debugf("look: resolving %q", string(needle))
 	if editor_open_look_file(target, string(needle)) != .Not_A_File {
 		return
 	}

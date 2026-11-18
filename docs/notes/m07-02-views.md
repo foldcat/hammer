@@ -15,12 +15,12 @@ bounded set of views (up to the workspace's 8×16 windows). Each view has:
   viewport origin.
 - Its own delayed-paste and delayed-cut request state.
 
-M07.02 initially used three views of one buffer. M07.06 adds a bounded buffer
-registry and changes the product default: the startup file belongs to the first
-window, while the other initial windows are separate untitled buffers. Typing,
-undo history, dirty state, and saves no longer propagate between those windows.
-The view core still supports shared-buffer views for a future explicit
-Zerox-style feature.
+M07.02 initially used three views of one buffer. M07.06 added a bounded buffer
+registry and independent default buffers. M07.07 now starts with the requested
+file or an untitled buffer on the left and a working-directory explorer on the
+right. Typing, undo history, dirty state, and saves do not propagate between
+independent windows. The view core still supports shared-buffer views for a
+future explicit Zerox-style feature.
 
 `src/view_ui.odin` performs stable-ID lookup, active-window transitions, and
 post-edit synchronization. Switching windows ends the typing group and any

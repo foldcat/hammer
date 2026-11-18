@@ -1,8 +1,11 @@
 package main
 
+import "core:fmt"
 import "core:log"
+import "core:os"
 import "core:strings"
 
+import directory "core/directory"
 import editing "core/editing"
 import errs "core/errs"
 import filecodec "core/filecodec"
@@ -32,9 +35,16 @@ Text_Kind :: enum u8 {
 	Window_Tag,
 }
 
+Buffer_Kind :: enum u8 {
+	File,
+	Directory,
+	Errors,
+}
+
 Editor_Buffer :: struct {
 	id:             view.Buffer_ID,
 	generation:     u64,
+	kind:           Buffer_Kind,
 	doc:            txn.Doc,
 	path:           string,
 	capture:        fileload.Capture,
@@ -174,9 +184,70 @@ editor_alloc_buffer :: proc(path: string) -> (^Editor_Buffer, errs.Error) {
 	return nil, errs.new(.Resource_Limit, "file: no buffer slot is available", allocator = permanent())
 }
 
+editor_alloc_buffer_content :: proc(path: string, content: []byte, kind: Buffer_Kind) -> (^Editor_Buffer, errs.Error) {
+	if editor.next_buffer_id == 0 {
+		return nil, errs.new(.Resource_Limit, "file: buffer ID space exhausted", allocator = permanent())
+	}
+	for index in 0 ..< view.MAX_VIEWS {
+		buffer := &editor.buffers[index]
+		if buffer.id != 0 {
+			continue
+		}
+		buffer^ = {id = view.Buffer_ID(editor.next_buffer_id), generation = DEFAULT_BUFFER_GENERATION, kind = kind}
+		if err := txn.doc_init_from_bytes(&buffer.doc, content, {}, permanent()); !errs.ok(err) {
+			buffer^ = {}
+			return nil, err
+		}
+		buffer.path = strings.clone(path, permanent())
+		editor.next_buffer_id += 1
+		editor.buffer_count += 1
+		return buffer, {}
+	}
+	return nil, errs.new(.Resource_Limit, "file: no buffer slot is available", allocator = permanent())
+}
+
+editor_alloc_path_buffer :: proc(path: string) -> (^Editor_Buffer, errs.Error) {
+	if path == "" {
+		return editor_alloc_buffer(path)
+	}
+	info, stat_err := os.stat(path, context.temp_allocator)
+	if stat_err != nil {
+		kind := errs.Kind.IO
+		if stat_err == .Not_Exist {
+			kind = .NotFound
+		}
+		return nil, errs.newf(kind, "file: cannot stat %s: %v", path, stat_err, allocator = permanent())
+	}
+	defer os.file_info_delete(info, context.temp_allocator)
+	if info.type != .Directory {
+		return editor_alloc_buffer(path)
+	}
+	content, read_err := directory.read(path, {}, context.temp_allocator)
+	if !errs.ok(read_err) {
+		owned := errs.new(read_err.kind, read_err.message, allocator = permanent())
+		errs.destroy(&read_err)
+		return nil, owned
+	}
+	defer delete(content, context.temp_allocator)
+	listing_path := path
+	owned_path := ""
+	if !strings.has_suffix(listing_path, os.Path_Separator_String) {
+		owned_path = strings.concatenate({listing_path, os.Path_Separator_String}, context.temp_allocator)
+		listing_path = owned_path
+	}
+	defer if owned_path != "" {
+		delete(owned_path, context.temp_allocator)
+	}
+	buffer, alloc_err := editor_alloc_buffer_content(listing_path, content, .Directory)
+	if errs.ok(alloc_err) {
+		log.infof("directory: opened %s buffer=%d bytes=%d", listing_path, u64(buffer.id), len(content))
+	}
+	return buffer, alloc_err
+}
+
 editor_init :: proc(path := "") -> errs.Error {
 	editor.next_buffer_id = 1
-	buffer, err := editor_alloc_buffer(path)
+	buffer, err := editor_alloc_path_buffer(path)
 	if !errs.ok(err) {
 		return err
 	}
@@ -191,16 +262,21 @@ editor_workspace_init :: proc() -> errs.Error {
 	if err := layout.workspace_init(&editor.workspace); !errs.ok(err) {
 		return err
 	}
-	left := editor.workspace.columns[0].id
 	right, err := layout.add_column(&editor.workspace)
 	if !errs.ok(err) {
 		return err
 	}
-	if _, add_err := layout.add_window(&editor.workspace, left); !errs.ok(add_err) {
-		return add_err
-	}
 	if _, add_err := layout.add_window(&editor.workspace, right); !errs.ok(add_err) {
 		return add_err
+	}
+	working_directory, directory_err := os.get_working_directory(context.temp_allocator)
+	if directory_err != nil {
+		return errs.newf(.IO, "directory: cannot resolve the working directory: %v", directory_err, allocator = permanent())
+	}
+	explorer, explorer_err := editor_alloc_path_buffer(working_directory)
+	delete(working_directory, context.temp_allocator)
+	if !errs.ok(explorer_err) {
+		return explorer_err
 	}
 	first := true
 	for column_index in 0 ..< editor.workspace.column_count {
@@ -208,10 +284,7 @@ editor_workspace_init :: proc() -> errs.Error {
 		for placed in column.windows[:column.window_count] {
 			buffer := editor.buffer
 			if !first {
-				buffer, err = editor_alloc_buffer("")
-				if !errs.ok(err) {
-					return err
-				}
+				buffer = explorer
 			}
 			first = false
 			if add_err := view.add(&editor.views, placed.id, buffer.id); !errs.ok(add_err) {
@@ -553,6 +626,10 @@ editor_dirty :: proc() -> bool {
 }
 
 editor_save :: proc() {
+	if editor.buffer.kind != .File {
+		editor_report(errs.new(.Unsupported, "save: directory and error windows cannot be saved as files", allocator = context.temp_allocator))
+		return
+	}
 	if editor.buffer.path == "" {
 		editor_report(errs.new(
 			.Unsupported,
@@ -688,11 +765,79 @@ editor_close_active_view :: proc() {
 	log.infof("view: closed window %d; %d views remain", u64(window_id), editor.views.view_count)
 }
 
+MAX_ERROR_WINDOW_BYTES :: 256 * 1024
+
+editor_error_buffer :: proc() -> ^Editor_Buffer {
+	for index in 0 ..< view.MAX_VIEWS {
+		buffer := &editor.buffers[index]
+		if buffer.id != 0 && buffer.kind == .Errors {
+			return buffer
+		}
+	}
+	return nil
+}
+
+editor_append_error :: proc(message: string) -> errs.Error {
+	line := fmt.aprintf("%s\n", message, allocator = context.temp_allocator)
+	defer delete(line, context.temp_allocator)
+	if len(line) > MAX_ERROR_WINDOW_BYTES {
+		return errs.newf(.Resource_Limit, "errors: message exceeds the %d-byte window limit", MAX_ERROR_WINDOW_BYTES, allocator = context.temp_allocator)
+	}
+	if buffer := editor_error_buffer(); buffer != nil {
+		item := editor_first_view_for_buffer(buffer.id)
+		if item == nil {
+			return errs.new(.Internal, "errors: buffer has no view", allocator = context.temp_allocator)
+		}
+		start := rope.tree_byte_count(&buffer.doc.tree)
+		if len(line) > MAX_ERROR_WINDOW_BYTES - start {
+			return errs.newf(.Resource_Limit, "errors: window exceeds the %d-byte limit", MAX_ERROR_WINDOW_BYTES, allocator = context.temp_allocator)
+		}
+		was_dirty := txn.doc_revision(&buffer.doc) != buffer.saved_revision
+		end := start + len(line)
+		selection := txn.Selection{anchor = end, active = end, affinity = .Left}
+		ops := []txn.Operation{txn.Insert{pos = start, data = transmute([]byte)line}}
+		transaction := txn.Transaction {
+			source = .Command_Output,
+			base_revision = txn.doc_revision(&buffer.doc),
+			ops = ops,
+			after_selection = selection,
+		}
+		if apply_err := txn.doc_apply(&buffer.doc, &transaction, permanent()); !errs.ok(apply_err) {
+			return apply_err
+		}
+		view.transform_after_edit(&editor.views, item.window_id, buffer.id, transaction.ops, end)
+		item.selection = selection
+		if !was_dirty {
+			buffer.saved_revision = txn.doc_revision(&buffer.doc)
+		}
+		log.infof("errors: appended window=%d buffer=%d bytes=%d", u64(item.window_id), u64(buffer.id), end)
+		return {}
+	}
+	if editor.workspace.column_count == 0 {
+		return errs.new(.NotFound, "errors: no column is available", allocator = context.temp_allocator)
+	}
+	buffer, alloc_err := editor_alloc_buffer_content("", transmute([]byte)line, .Errors)
+	if !errs.ok(alloc_err) {
+		return alloc_err
+	}
+	column_id := editor.workspace.columns[editor.workspace.column_count - 1].id
+	item, open_err := editor_open_buffer_in_column(buffer, column_id)
+	if !errs.ok(open_err) {
+		return open_err
+	}
+	log.infof("errors: opened window=%d buffer=%d bytes=%d", u64(item.window_id), u64(buffer.id), len(line))
+	return {}
+}
+
 editor_report :: proc(err: errs.Error) {
 	if errs.ok(err) {
 		return
 	}
 	log.warnf("edit: %v", errs.describe(err))
+	if display_err := editor_append_error(err.message); !errs.ok(display_err) {
+		log.warnf("errors: cannot display error: %v", errs.describe(display_err))
+		errs.destroy(&display_err)
+	}
 	owned := err
 	errs.destroy(&owned)
 }
