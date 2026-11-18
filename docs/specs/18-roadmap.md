@@ -334,7 +334,11 @@ M08.05  Complete required Edit coverage.
 M08.06  Add cancellable snapshot-based execution for expensive edits.
 M08.07  Implement atomic multi-buffer validation where needed.
 M08.08  Add differential compatibility fixtures.
+M08.09  Implement built-in window/file commands: New, Newcol, Zerox, Delcol, Get, Putall.
 ```
+
+`Send` (selection pipe) is covered by M09; `Dump`/`Load` (session
+serialization) are covered by M16.
 
 ### Acceptance
 
