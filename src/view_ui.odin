@@ -164,7 +164,7 @@ editor_init_window_tag :: proc(item: ^view.View) -> errs.Error {
 }
 
 editor_init_global_and_column_tags :: proc() -> errs.Error {
-	if err := tagstate.init(&editor.global_tag, "New Col | ", permanent()); !errs.ok(err) {
+	if err := tagstate.init(&editor.global_tag, "Newcol | ", permanent()); !errs.ok(err) {
 		return err
 	}
 	for column_index in 0 ..< editor.workspace.column_count {

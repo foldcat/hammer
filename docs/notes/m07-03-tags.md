@@ -39,7 +39,7 @@ on every call, so editing or deleting the generated prefix cannot leave a
 stale boundary that corrupts the suffix. Generated text is bounded to 4096
 bytes and identical refreshes do not create transactions.
 
-Global and column tags currently start as `New Col | ` and `New | `. These
+Global and column tags currently start as `Newcol | ` and `New | `. These
 commands are displayed/editable but not executed here; original mouse
 execution/chords and the internal command registry belong to M07.04/M08.
 
