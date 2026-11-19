@@ -1,0 +1,486 @@
+{
+  "reference": "Plan 9port sam -d; Acme ecmd.c dot overrides; no 9P",
+  "offsets": "UTF-8 byte offsets converted from reference character offsets",
+  "addresses": [
+    {
+      "name": "absolute Unicode line",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        5,
+        14
+      ],
+      "expression": "2",
+      "want": [
+        5,
+        14
+      ]
+    },
+    {
+      "name": "Unicode character offset",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "#8",
+      "want": [
+        13,
+        13
+      ]
+    },
+    {
+      "name": "relative lines",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "1+2",
+      "want": [
+        14,
+        20
+      ]
+    },
+    {
+      "name": "implicit forward characters",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "1#2",
+      "want": [
+        9,
+        9
+      ]
+    },
+    {
+      "name": "comma range",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "2,4",
+      "want": [
+        5,
+        21
+      ]
+    },
+    {
+      "name": "semicolon changes right dot",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "2;+#1",
+      "want": [
+        5,
+        15
+      ]
+    },
+    {
+      "name": "leftmost longest alternative",
+      "input": "alpha\nal\n",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "/a|alpha/",
+      "want": [
+        0,
+        5
+      ]
+    },
+    {
+      "name": "forward regex wraps",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        15,
+        20
+      ],
+      "expression": "/zero/",
+      "want": [
+        0,
+        4
+      ]
+    },
+    {
+      "name": "backward regex",
+      "input": "alpha\nbeta\ngamma\n",
+      "dot": [
+        17,
+        17
+      ],
+      "expression": "?beta?",
+      "want": [
+        6,
+        10
+      ]
+    },
+    {
+      "name": "line start empty match advances",
+      "input": "a\nb\n",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "/^/",
+      "want": [
+        2,
+        2
+      ]
+    },
+    {
+      "name": "line end is zero width",
+      "input": "a\nb\n",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "/$/",
+      "want": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "empty regex match",
+      "input": "bbb",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "/a*/",
+      "want": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "backward empty regex wraps",
+      "input": "bbb",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "?x*?",
+      "want": [
+        3,
+        3
+      ]
+    },
+    {
+      "name": "final unterminated line",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        0,
+        0
+      ],
+      "expression": "5",
+      "want": [
+        21,
+        25
+      ]
+    },
+    {
+      "name": "regex no match",
+      "input": "zero\nαβ🙂\nthird\n\nlast",
+      "dot": [
+        0,
+        0
+      ],
+      "error": "NotFound",
+      "expression": "/missing/",
+      "want": [
+        0,
+        0
+      ]
+    }
+  ],
+  "edits": [
+    {
+      "name": "change with escaped newlines",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "1c/first\\nsecond\\n/",
+      "want_content": "first\nsecond\ntwo\nthree\n",
+      "want": [
+        0,
+        13
+      ]
+    },
+    {
+      "name": "append after line",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "2a/ after/",
+      "want_content": "one\ntwo\n afterthree\n",
+      "want": [
+        8,
+        14
+      ]
+    },
+    {
+      "name": "insert before line",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "2i/before /",
+      "want_content": "one\nbefore two\nthree\n",
+      "want": [
+        4,
+        11
+      ]
+    },
+    {
+      "name": "delete line",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "2d",
+      "want_content": "one\nthree\n",
+      "want": [
+        4,
+        4
+      ]
+    },
+    {
+      "name": "multiline change",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "2c\nX\nY\n.",
+      "want_content": "one\nX\nY\nthree\n",
+      "want": [
+        4,
+        8
+      ]
+    },
+    {
+      "name": "move range to end",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "1,2m$",
+      "want_content": "three\none\ntwo\n",
+      "want": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "move range to start",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        4
+      ],
+      "command": "2,3m0",
+      "want_content": "two\nthree\none\n",
+      "want": [
+        0,
+        4
+      ]
+    },
+    {
+      "name": "copy line to end",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "1t$",
+      "want_content": "one\ntwo\nthree\none\n",
+      "want": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "copy line to start",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        4,
+        8
+      ],
+      "command": "2t0",
+      "want_content": "two\none\ntwo\nthree\n",
+      "want": [
+        4,
+        8
+      ]
+    },
+    {
+      "name": "commands use intermediate text",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "1d\n1c/X/",
+      "want_content": "Xthree\n",
+      "want": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "substitute leftmost longest",
+      "input": "alpha al alpha\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": ",s/a|alpha/X/g",
+      "want_content": "X Xl X\n",
+      "want": [
+        0,
+        7
+      ]
+    },
+    {
+      "name": "substitute second match",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": ",s2/[a-z]+/X/",
+      "want_content": "one\nX\nthree\n",
+      "want": [
+        0,
+        12
+      ]
+    },
+    {
+      "name": "substitute all words",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": ",s/[a-z]+/X/g",
+      "want_content": "X\nX\nX\n",
+      "want": [
+        0,
+        6
+      ]
+    },
+    {
+      "name": "capture and unmatched group",
+      "input": "a al\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": ",s/(a)(l)?/[\\1][\\2]/g",
+      "want_content": "[a][] [a][l]\n",
+      "want": [
+        0,
+        5
+      ]
+    },
+    {
+      "name": "full match replacement",
+      "input": "a b a\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": ",s/a/[&]/g",
+      "want_content": "[a] b [a]\n",
+      "want": [
+        0,
+        6
+      ]
+    },
+    {
+      "name": "empty match substitution",
+      "input": "bbb",
+      "dot": [
+        0,
+        0
+      ],
+      "command": ",s/x*/-/g",
+      "want_content": "-b-b-b-",
+      "want": [
+        0,
+        3
+      ]
+    },
+    {
+      "name": "Unicode substitution",
+      "input": "αβ αβ\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": ",s/β/🙂/g",
+      "want_content": "α🙂 α🙂\n",
+      "want": [
+        0,
+        10
+      ]
+    },
+    {
+      "name": "addressed substitution",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "2s/two/2/",
+      "want_content": "one\n2\nthree\n",
+      "want": [
+        4,
+        8
+      ]
+    },
+    {
+      "name": "substitution no match",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": ",s/zzz/X/",
+      "error": "NotFound",
+      "want_content": "one\ntwo\nthree\n",
+      "want": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "runtime error keeps prefix",
+      "input": "one\ntwo\nthree\n",
+      "dot": [
+        0,
+        0
+      ],
+      "command": "0a/new/\n99d",
+      "error": "NotFound",
+      "want_content": "newone\ntwo\nthree\n",
+      "want": [
+        0,
+        3
+      ]
+    }
+  ]
+}

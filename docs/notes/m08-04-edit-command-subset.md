@@ -25,8 +25,9 @@ mutation goes through `txn.doc_apply` with source `.Edit`. All transactions in
 one invocation share a nonzero undo group, distinct from the preceding group,
 so one Undo reverts the invocation and one Redo reapplies it. A runtime error
 leaves already executed commands in that group, matching Acme's sequential
-behavior; syntax errors are atomic. Dot is set to each command's result,
-including empty deletion results and inserted/moved/copied text.
+behavior; syntax errors are atomic. Dot is set to each command's result for
+address, append/change/insert, and deletion commands. M08.08 corrected move/copy
+to preserve the previous dot, matching Acme rather than Sam's result dot.
 
 Move uses original-snapshot insert/delete operations in both destination
 orders and rejects overlap with its source. Copy reads the source before

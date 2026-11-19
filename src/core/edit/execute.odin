@@ -119,9 +119,18 @@ execute :: proc(
 					allocator = allocator,
 				)
 			}
+			new_total := rope.tree_byte_count(&doc.tree)
+			if command.kind == .Copy {
+				new_total += length
+			}
+			after := txn.Selection{
+				anchor = min(previous_dot.start, new_total),
+				active = min(previous_dot.end, new_total),
+				affinity = .Right,
+			}
 			if command.kind == .Move {
 				if dot.start == destination.start && dot.end == destination.end {
-					set_selection(selection, dot.start, dot.end)
+					selection^ = after
 					continue
 				}
 				if dot.end > destination.start && dot.start < destination.end {
@@ -129,7 +138,7 @@ execute :: proc(
 				}
 			}
 			if length == 0 {
-				set_selection(selection, destination.end, destination.end)
+				selection^ = after
 				continue
 			}
 			text, read_err := rope.tree_read_all(&doc.tree, dot, allocator)
@@ -140,17 +149,11 @@ execute :: proc(
 
 			insert := txn.Operation(txn.Insert{pos = destination.end, data = text})
 			if command.kind == .Copy {
-				after := txn.Selection{anchor = destination.end, active = destination.end + length, affinity = .Right}
 				if apply_err := apply(doc, selection, []txn.Operation{insert}, after, group, allocator); !errs.ok(apply_err) {
 					return apply_err
 				}
 			} else {
 				remove := txn.Operation(txn.Delete{range = dot})
-				position := destination.end
-				if dot.end <= destination.start {
-					position -= length
-				}
-				after := txn.Selection{anchor = position, active = position + length, affinity = .Right}
 				if apply_err := apply(doc, selection, []txn.Operation{insert, remove}, after, group, allocator); !errs.ok(apply_err) {
 					return apply_err
 				}

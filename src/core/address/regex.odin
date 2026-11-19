@@ -163,6 +163,19 @@ regex_address :: proc(
 	if !matcher.valid {
 		return {}, errs.new(.Internal, "address: invalid native regular-expression execution", allocator = allocator)
 	}
+	if found && match.start == match.end && match.start == position {
+		position = regex_next_position(search_text, position, total)
+		if position > total {
+			position = 0
+		}
+		match, found = regex_matcher_run(&matcher, position, total + 1)
+	}
+	if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+		return {}, err
+	}
+	if !matcher.valid {
+		return {}, errs.new(.Internal, "address: invalid native regular-expression execution", allocator = allocator)
+	}
 	if !found && position > 0 {
 		match, found = regex_matcher_run(&matcher, 0, total + 1)
 	}

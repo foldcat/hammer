@@ -45,13 +45,15 @@ Acme behavior, not an implementation to copy mechanically.
   comma, semicolon, and native regular-expression addresses into checked byte
   ranges over chunked ropes. Regex searches wrap, reuse an explicit previous-
   pattern history, and implement Plan 9 longest-match and backward-search
-  semantics. Covered by the address unit tests; product Look address integration
-  is not implied.
+  semantics. Empty matches at the search origin advance by one character before
+  retrying, including backward searches and wraparound. Covered by the address
+  unit tests and reference fixtures; product Look address integration is not implied.
 - `Edit` implements bare addresses and the foundational `a`, `c`, `i`, `d`, `m`,
-  and `t` commands with delimited or multiline text. It also implements `s` with
-  first, nth, and global replacement, `&` and capture-group expansion, and empty
-  matches. Commands run sequentially against intermediate documents and share
-  one undo group per invocation; each substitution is one transaction. The
+  and `t` commands with delimited or multiline text. Move and copy preserve the
+  previous dot as Acme does. It also implements `s` with first, nth, and global
+  replacement, `&` and capture-group expansion, and empty matches. Commands run
+  sequentially against intermediate documents and share one undo group per
+  invocation; each substitution is one transaction. The
   product executes inline or 2-1 chord scripts against the current window body
   and keeps other views' selections transformed. Covered by the Edit unit tests
   and inline-script `edit-test`; the chord path has no dedicated UI scenario.

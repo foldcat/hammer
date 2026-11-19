@@ -190,10 +190,10 @@ test_move_and_copy :: proc(t: ^testing.T) {
 		dot_start: int,
 		dot_end:    int,
 	}{
-		{"#0,#3m#9", "DEFghiabc\n", 6, 9},
-		{"#6,#9m#0", "ghiabcDEF\n", 0, 3},
-		{"#0,#3t#9", "abcDEFghiabc\n", 9, 12},
-		{"#0,#3t#1", "aabcbcDEFghi\n", 1, 4},
+		{"#0,#3m#9", "DEFghiabc\n", 0, 0},
+		{"#6,#9m#0", "ghiabcDEF\n", 0, 0},
+		{"#0,#3t#9", "abcDEFghiabc\n", 0, 0},
+		{"#0,#3t#1", "aabcbcDEFghi\n", 0, 0},
 	}
 	for test in cases {
 		doc: txn.Doc

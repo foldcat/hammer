@@ -150,13 +150,15 @@ test_empty_regex_matches_and_line_end_are_zero_width :: proc(t: ^testing.T) {
 	doc: txn.Doc
 	init_doc(t, &doc, "bbb")
 	defer txn.doc_destroy(&doc)
-	expect_range(t, &doc, "/a*/", {}, {0, 0})
-	expect_range(t, &doc, "/a*/", {1, 1}, {1, 1})
+	expect_range(t, &doc, "/a*/", {}, {1, 1})
+	expect_range(t, &doc, "/a*/", {1, 1}, {2, 2})
+	expect_range(t, &doc, "/a*/", {3, 3}, {0, 0})
+	expect_range(t, &doc, "?x*?", {}, {3, 3})
 
 	lines: txn.Doc
 	init_doc(t, &lines, "a\nb")
 	defer txn.doc_destroy(&lines)
-	expect_range(t, &lines, "/^/", {}, {0, 0})
+	expect_range(t, &lines, "/^/", {}, {2, 2})
 	expect_range(t, &lines, "/$/", {}, {1, 1})
 
 	empty: txn.Doc

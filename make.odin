@@ -166,6 +166,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/command",
 	"tests/unit/address",
 	"tests/unit/edit",
+	"tests/unit/acme",
 	"tests/unit/scroll",
 	"tests/unit/directory",
 	"tests/unit/ime",
