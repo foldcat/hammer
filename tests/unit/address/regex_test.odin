@@ -279,3 +279,56 @@ test_backward_empty_match_and_repeated_postfix_operators :: proc(t: ^testing.T) 
 	expect_range(t, &doc, "?a*?", {3, 3}, {0, 3})
 	expect_range(t, &doc, "/a**/", {}, {0, 3})
 }
+
+
+@(test)
+test_regex_find_matches_captures_and_range_limit :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	init_doc(t, &doc, "aa xa\naa\nya", 1)
+	defer txn.doc_destroy(&doc)
+	history: address.Regex_History
+	matches, err := address.regex_find_matches(&doc.tree, "(a|aa)(z)?", {0, 2}, &history, 2, context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	defer delete(matches, context.allocator)
+	testing.expect(t, len(matches) == 1)
+	testing.expect(t, matches[0].range == rope.Byte_Range{0, 2})
+	testing.expect(t, matches[0].groups[1] == rope.Byte_Range{0, 2})
+	testing.expect(t, matches[0].groups[2].start == -1 && matches[0].groups[2].end == -1)
+
+	limited, find_err := address.regex_find_matches(&doc.tree, "a", {6, 8}, &history, 4, context.allocator)
+	testing.expect(t, errs.ok(find_err))
+	errs.destroy(&find_err)
+	defer delete(limited, context.allocator)
+	testing.expect(t, len(limited) == 2)
+	testing.expect(t, limited[0].range == rope.Byte_Range{6, 7})
+	testing.expect(t, limited[1].range == rope.Byte_Range{7, 8})
+
+	reused, history_err := address.regex_find_matches(&doc.tree, "", {0, 2}, &history, 1, context.allocator)
+	testing.expect(t, errs.ok(history_err))
+	errs.destroy(&history_err)
+	defer delete(reused, context.allocator)
+	testing.expect(t, len(reused) == 1 && reused[0].range == rope.Byte_Range{0, 1})
+}
+
+@(test)
+test_regex_find_matches_empty_match_progress :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	init_doc(t, &doc, "bb aa", 1)
+	defer txn.doc_destroy(&doc)
+	matches, err := address.regex_find_matches(&doc.tree, "a*", {0, 2}, nil, 4, context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	defer delete(matches, context.allocator)
+	testing.expect(t, len(matches) == 3)
+	for match, index in matches {
+		testing.expect(t, match.range == rope.Byte_Range{index, index})
+	}
+
+	nonempty, find_err := address.regex_find_matches(&doc.tree, "a*", {3, 5}, nil, 4, context.allocator)
+	testing.expect(t, errs.ok(find_err))
+	errs.destroy(&find_err)
+	defer delete(nonempty, context.allocator)
+	testing.expect(t, len(nonempty) == 1)
+	testing.expect(t, nonempty[0].range == rope.Byte_Range{3, 5})
+}

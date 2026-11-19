@@ -44,8 +44,8 @@ run :: proc(t: ^testing.T, doc: ^txn.Doc, selection: ^txn.Selection, text: strin
 	return edit.execute(doc, selection, &program, history, 41, context.allocator)
 }
 
-expect_run_error :: proc(t: ^testing.T, doc: ^txn.Doc, selection: ^txn.Selection, text: string, kind: errs.Kind) {
-	err := run(t, doc, selection, text)
+expect_run_error :: proc(t: ^testing.T, doc: ^txn.Doc, selection: ^txn.Selection, text: string, kind: errs.Kind, history: ^address.Regex_History = nil) {
+	err := run(t, doc, selection, text, history)
 	testing.expectf(t, err.kind == kind, "%q returned %v, want %v", text, err.kind, kind)
 	errs.destroy(&err)
 }
@@ -235,10 +235,11 @@ test_parse_errors_are_atomic_and_unsupported_commands_do_not_run :: proc(t: ^tes
 	for text in invalid {
 		expect_run_error(t, &doc, &selection, text, .Invalid_Input)
 	}
-	unsupported := []string{"s/x/y/", "x/a/d", "g/a/d"}
+	unsupported := []string{"x/a/d", "g/a/d"}
 	for text in unsupported {
 		expect_run_error(t, &doc, &selection, text, .Unsupported)
 	}
+	expect_run_error(t, &doc, &selection, ",s/missing/y/", .NotFound)
 	expect_run_error(t, &doc, &selection, "0a/new/\n1d x", .Invalid_Input)
 	expect_content(t, &doc, "one\ntwo\n")
 	testing.expect(t, txn.doc_log_len(&doc) == 0)
@@ -330,4 +331,166 @@ test_open_ranges_and_long_text_after_address_prefix :: proc(t: ^testing.T) {
 	errs.destroy(&read_err)
 	defer delete(got, context.allocator)
 	testing.expect(t, bytes.equal(got, payload))
+}
+
+
+@(test)
+test_substitution_occurrences_global_and_address_range :: proc(t: ^testing.T) {
+	cases := []struct {
+		initial: string,
+		command: string,
+		want:    string,
+	}{
+		{"a a a", ",s/a/X/", "X a a"},
+		{"a a a", ",s2/a/X/", "a X a"},
+		{"a a a", ",s2/a/X/g", "a X X"},
+		{"a a a", ",s/a/X/g", "X X X"},
+		{"a\na\na\n", "2s/a/X/", "a\nX\na\n"},
+		{"a\na\na\n", "2,$s/a/X/g", "a\nX\nX\n"},
+	}
+	for test in cases {
+		doc: txn.Doc
+		init_doc(t, &doc, test.initial)
+		defer txn.doc_destroy(&doc)
+		selection := txn.Selection{}
+		err := run(t, &doc, &selection, test.command)
+		testing.expectf(t, errs.ok(err), "%q failed: %v", test.command, err)
+		errs.destroy(&err)
+		expect_content(t, &doc, test.want)
+		testing.expect(t, txn.doc_log_len(&doc) == 1)
+		check_err := txn.doc_check(&doc, context.allocator)
+		testing.expect(t, errs.ok(check_err))
+		errs.destroy(&check_err)
+	}
+}
+
+@(test)
+test_substitution_captures_and_replacement_escapes :: proc(t: ^testing.T) {
+	cases := []struct {
+		initial: string,
+		command: string,
+		want:    string,
+	}{
+		{"ab ab", ",s/(a)(b)/\\2\\1/", "ba ab"},
+		{"ab ab", ",s/(a)(b)/\\2\\1/g", "ba ba"},
+		{"ab ab", ",s/(a)(b)/[&]-\\1-\\2/", "[ab]-a-b ab"},
+		{"a", ",s/(a)(z)?/<\\2>/", "<>"},
+		{"a", ",s/a/\\&/", "&"},
+		{"a", ",s/a/\\\\/", "\\"},
+		{"a", ",s/a/x\\ny/", "x\ny"},
+		{"a/b a/b", ",s/a\\/b/c\\/d/g", "c/d c/d"},
+		{"aa", ",s/a|aa/X/", "X"},
+	}
+	for test in cases {
+		doc: txn.Doc
+		init_doc(t, &doc, test.initial)
+		defer txn.doc_destroy(&doc)
+		selection := txn.Selection{}
+		err := run(t, &doc, &selection, test.command)
+		testing.expectf(t, errs.ok(err), "%q failed: %v", test.command, err)
+		errs.destroy(&err)
+		expect_content(t, &doc, test.want)
+	}
+}
+
+@(test)
+test_substitution_empty_matches_and_anchors :: proc(t: ^testing.T) {
+	cases := []struct {
+		initial: string,
+		command: string,
+		want:    string,
+	}{
+		{"bb", ",s/a*/X/g", "XbXbX"},
+		{"aa", ",s/a*/X/g", "X"},
+		{"ββ", ",s/α*/X/g", "XβXβX"},
+		{"a\nb\n", "2s/^/X/", "a\nXb\n"},
+		{"a\nb\n", "2s/$/X/", "a\nbX\n"},
+	}
+	for test in cases {
+		doc: txn.Doc
+		init_doc(t, &doc, test.initial)
+		defer txn.doc_destroy(&doc)
+		selection := txn.Selection{}
+		err := run(t, &doc, &selection, test.command)
+		testing.expectf(t, errs.ok(err), "%q failed: %v", test.command, err)
+		errs.destroy(&err)
+		expect_content(t, &doc, test.want)
+	}
+}
+
+@(test)
+test_substitution_history_and_invalid_pattern :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	init_doc(t, &doc, "a a")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{}
+	history: address.Regex_History
+	err := run(t, &doc, &selection, ",s/a/x/", &history)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	expect_content(t, &doc, "x a")
+	err = run(t, &doc, &selection, ",s//y/", &history)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	expect_content(t, &doc, "x y")
+	expect_run_error(t, &doc, &selection, ",s/(/z/", .Invalid_Input, &history)
+	expect_run_error(t, &doc, &selection, ",s//q/", .NotFound, &history)
+	testing.expect(t, string(history.pattern_bytes[:history.pattern_length]) == "a")
+	expect_run_error(t, &doc, &selection, ",s/z/n/", .NotFound, &history)
+	expect_run_error(t, &doc, &selection, ",s//q/", .NotFound, &history)
+	expect_content(t, &doc, "x y")
+	testing.expect(t, string(history.pattern_bytes[:history.pattern_length]) == "z")
+}
+
+@(test)
+test_global_substitution_is_one_undo_transaction :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	init_doc(t, &doc, "a a a")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{}
+	err := run(t, &doc, &selection, ",s/a/X/g")
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	expect_content(t, &doc, "X X X")
+	testing.expect(t, txn.doc_log_len(&doc) == 1)
+	_, undo_err := txn.doc_undo(&doc, context.allocator)
+	testing.expect(t, errs.ok(undo_err))
+	errs.destroy(&undo_err)
+	expect_content(t, &doc, "a a a")
+	_, redo_err := txn.doc_redo(&doc, context.allocator)
+	testing.expect(t, errs.ok(redo_err))
+	errs.destroy(&redo_err)
+	expect_content(t, &doc, "X X X")
+}
+
+@(test)
+test_substitution_parser_and_result_budget :: proc(t: ^testing.T) {
+	program, parse_err := edit.parse("s12/a/b/g", context.allocator)
+	testing.expect(t, errs.ok(parse_err))
+	errs.destroy(&parse_err)
+	defer edit.program_destroy(&program, context.allocator)
+	testing.expect(t, len(program.commands) == 1)
+	command := program.commands[0]
+	testing.expect(t, command.kind == .Substitute && command.count == 12 && command.global)
+	testing.expect(t, edit.command_pattern(&program, command) == "a")
+	testing.expect(t, bytes.equal(edit.command_text(&program, command), transmute([]byte)string("b")))
+
+	doc: txn.Doc
+	init_doc(t, &doc, "a")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{}
+	expect_run_error(t, &doc, &selection, ",s4097/a/X/g", .Resource_Limit)
+	expect_run_error(t, &doc, &selection, "s", .Invalid_Input)
+
+	many := make([]byte, address.MAX_REGEX_MATCHES + 1, context.allocator)
+	defer delete(many, context.allocator)
+	for &c in many {
+		c = 'a'
+	}
+	many_doc: txn.Doc
+	init_doc(t, &many_doc, string(many))
+	defer txn.doc_destroy(&many_doc)
+	expect_run_error(t, &many_doc, &selection, ",s/a/X/g", .Resource_Limit)
+	testing.expect(t, rope.tree_byte_count(&many_doc.tree) == len(many))
+	testing.expect(t, txn.doc_log_len(&many_doc) == 0)
 }

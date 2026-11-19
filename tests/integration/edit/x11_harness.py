@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X11 Edit command dispatch and transaction smoke tests for M08.04."""
+"""Real X11 Edit command dispatch and transaction smoke tests for M08.04–M08.05."""
 
 from __future__ import annotations
 
@@ -79,6 +79,10 @@ def main() -> int:
                         x11.key(0xFFE1, True)
                         x11.tap(ord(character.lower()))
                         x11.key(0xFFE1, False)
+                    elif character == "&":
+                        x11.key(0xFFE1, True)
+                        x11.tap(ord("7"))
+                        x11.key(0xFFE1, False)
                     else:
                         x11.tap(ord(character))
                 x11.key(0xFFE1, True)
@@ -124,6 +128,16 @@ def main() -> int:
             if source.read_bytes() != b"X\nY\ntwo\nthree\n":
                 raise HarnessFailure(f"Undo after move produced {source.read_bytes()!r}")
             print("PASS: move is coherently undoable")
+
+            execute("Edit ,s/(two)/&-[\\1]/g")
+            if source.read_bytes() != b"X\nY\ntwo-[two]\nthree\n":
+                raise HarnessFailure(f"Edit substitution produced {source.read_bytes()!r}")
+            print("PASS: global Edit substitution expands the full match and capture group")
+
+            execute("Undo")
+            if source.read_bytes() != b"X\nY\ntwo\nthree\n":
+                raise HarnessFailure(f"Undo after substitution produced {source.read_bytes()!r}")
+            print("PASS: global substitution is one undoable transaction")
 
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)

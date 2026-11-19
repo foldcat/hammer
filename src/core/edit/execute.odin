@@ -30,8 +30,13 @@ execute :: proc(
 	}
 	for command in program.commands {
 		if command.text_offset < 0 || command.text_length < 0 ||
-			command.text_offset > len(program.text) || command.text_length > len(program.text) - command.text_offset {
+			command.text_offset > len(program.text) || command.text_length > len(program.text) - command.text_offset ||
+			command.pattern_offset < 0 || command.pattern_length < 0 ||
+			command.pattern_offset > len(program.text) || command.pattern_length > len(program.text) - command.pattern_offset {
 			return errs.new(.Invalid_Input, "edit: command text is outside program storage", allocator = allocator)
+		}
+		if command.kind == .Substitute && (command.count <= 0 || command.count > address.MAX_REGEX_MATCHES) {
+			return errs.new(.Invalid_Input, "edit: invalid substitution occurrence", allocator = allocator)
 		}
 	}
 
@@ -89,6 +94,10 @@ execute :: proc(
 			}
 			operation := txn.Operation(txn.Delete{range = dot})
 			if err := apply(doc, selection, []txn.Operation{operation}, selection^, group, allocator); !errs.ok(err) {
+				return err
+			}
+		case .Substitute:
+			if err := execute_substitution(doc, selection, program, &command, dot, history, group, allocator); !errs.ok(err) {
 				return err
 			}
 		case .Move, .Copy:

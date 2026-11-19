@@ -85,11 +85,12 @@ X11 harness. Differential fixtures remain M08.08.
 
 ## Remaining Edit coverage
 
-Substitutions (`s`), loops and conditionals (`x`, `y`, `g`, `v`, braces), display
-and file commands, pipes, and the rest of the documented language remain
-M08.05 and later tasks. Execution is synchronous; expensive-operation snapshot
-execution and cancellation remain M08.06. Atomic multi-buffer validation remains
-M08.07.
+Loops and conditionals (`x`, `y`, `g`, `v`, braces), display and file commands,
+pipes, and the rest of the documented language remain M08.05 and later tasks.
+Substitution (`s`) was subsequently implemented; see
+`docs/notes/m08-05-substitution.md`. Execution is synchronous; expensive-
+operation snapshot execution and cancellation remain M08.06. Atomic multi-buffer
+validation remains M08.07.
 
 ## Next task
 

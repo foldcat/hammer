@@ -18,15 +18,20 @@ Command_Kind :: enum u8 {
 	Delete,
 	Move,
 	Copy,
+	Substitute,
 }
 
 Command :: struct {
-	kind:         Command_Kind,
-	has_address:  bool,
-	expression:   address.Expression,
-	destination:  address.Expression,
-	text_offset:  int,
-	text_length:  int,
+	kind:           Command_Kind,
+	has_address:    bool,
+	expression:     address.Expression,
+	destination:    address.Expression,
+	text_offset:    int,
+	text_length:    int,
+	pattern_offset: int,
+	pattern_length: int,
+	count:          int,
+	global:         bool,
 }
 
 // Program owns its command and decoded-text arrays. Destroy it with the same
@@ -110,6 +115,13 @@ parse :: proc(text: string, allocator := context.allocator) -> (Program, errs.Er
 				command.kind = .Insert
 			}
 			if err := parse_text(&parser, &command, allocator); !errs.ok(err) {
+				program_destroy(&parser.program, allocator)
+				return {}, err
+			}
+		case 's':
+			command.kind = .Substitute
+			command.count = 1
+			if err := parse_substitution(&parser, &command, allocator); !errs.ok(err) {
 				program_destroy(&parser.program, allocator)
 				return {}, err
 			}
@@ -306,4 +318,114 @@ parse_multiline_text :: proc(parser: ^Parser, command: ^Command, allocator := co
 		}
 	}
 	return errs.new(.Invalid_Input, "edit: multiline text is missing its terminating dot", allocator = allocator)
+}
+
+
+command_pattern :: proc(program: ^Program, command: Command) -> string {
+	return string(program.text[command.pattern_offset:command.pattern_offset + command.pattern_length])
+}
+
+parse_substitution :: proc(parser: ^Parser, command: ^Command, allocator := context.allocator) -> errs.Error {
+	command.count = 0
+	for !at_end(parser) {
+		c := parser.text[parser.index]
+		if c < '0' || c > '9' {
+			break
+		}
+		digit := int(c - '0')
+		if command.count > (address.MAX_REGEX_MATCHES - digit) / 10 {
+			return errs.newf(.Resource_Limit, "edit: substitution occurrence exceeds %d", address.MAX_REGEX_MATCHES, allocator = allocator)
+		}
+		command.count = command.count * 10 + digit
+		parser.index += 1
+	}
+	if command.count == 0 {
+		command.count = 1
+	}
+	skip_horizontal(parser)
+	if at_end(parser) || parser.text[parser.index] == '\n' {
+		return errs.new(.Invalid_Input, "edit: substitution requires a delimiter", allocator = allocator)
+	}
+	delimiter, width := utf8.decode_rune_in_string(parser.text[parser.index:])
+	if width == 0 || (delimiter == utf8.RUNE_ERROR && width == 1) ||
+		!unicode.is_print(delimiter) || unicode.is_letter(delimiter) || unicode.is_number(delimiter) || delimiter == '\\' {
+		return errs.newf(.Invalid_Input, "edit: invalid substitution delimiter at offset %d", parser.index, allocator = allocator)
+	}
+	delimiter_text := parser.text[parser.index:parser.index + width]
+	parser.index += width
+
+	command.pattern_offset = len(parser.program.text)
+	closed_pattern := false
+	for !at_end(parser) && parser.text[parser.index] != '\n' {
+		if parser.text[parser.index] == delimiter_text[0] && parser.index + width <= len(parser.text) &&
+			parser.text[parser.index:parser.index + width] == delimiter_text {
+			parser.index += width
+			closed_pattern = true
+			break
+		}
+		if parser.text[parser.index] == '\\' && parser.index + 1 < len(parser.text) {
+			next := parser.text[parser.index + 1]
+			if next == delimiter_text[0] && parser.index + 1 + width <= len(parser.text) &&
+				parser.text[parser.index + 1:parser.index + 1 + width] == delimiter_text {
+				append(&parser.program.text, ..transmute([]byte)delimiter_text)
+				parser.index += 1 + width
+				continue
+			}
+			if next == '\\' {
+				append(&parser.program.text, '\\', '\\')
+				parser.index += 2
+				continue
+			}
+		}
+		append(&parser.program.text, parser.text[parser.index])
+		parser.index += 1
+	}
+	command.pattern_length = len(parser.program.text) - command.pattern_offset
+	command.text_offset = len(parser.program.text)
+	if !closed_pattern {
+		return finish_line(parser, allocator)
+	}
+
+	closed_replacement := false
+	for !at_end(parser) && parser.text[parser.index] != '\n' {
+		if parser.text[parser.index] == delimiter_text[0] && parser.index + width <= len(parser.text) &&
+			parser.text[parser.index:parser.index + width] == delimiter_text {
+			parser.index += width
+			closed_replacement = true
+			break
+		}
+		if parser.text[parser.index] == '\\' {
+			if parser.index + 1 >= len(parser.text) {
+				return errs.new(.Invalid_Input, "edit: trailing backslash in substitution", allocator = allocator)
+			}
+			next := parser.text[parser.index + 1]
+			if next == '\n' {
+				append(&parser.program.text, '\\')
+				parser.index += 1
+				continue
+			}
+			if next == 'n' {
+				append(&parser.program.text, '\n')
+				parser.index += 2
+				continue
+			}
+			if next == delimiter_text[0] && parser.index + 1 + width <= len(parser.text) &&
+				parser.text[parser.index + 1:parser.index + 1 + width] == delimiter_text {
+				append(&parser.program.text, ..transmute([]byte)delimiter_text)
+				parser.index += 1 + width
+				continue
+			}
+			append(&parser.program.text, '\\', next)
+			parser.index += 2
+			continue
+		}
+		append(&parser.program.text, parser.text[parser.index])
+		parser.index += 1
+	}
+	command.text_length = len(parser.program.text) - command.text_offset
+	if closed_replacement && !at_end(parser) && parser.text[parser.index] == 'g' {
+		command.global = true
+		parser.index += 1
+	}
+	return finish_line(parser, allocator)
 }

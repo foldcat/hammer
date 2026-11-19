@@ -16,9 +16,17 @@ MAX_REGEX_GROUP_DEPTH :: 32
 REGEX_SEARCH_WILDCARD_PC :: size_of(regex_vm.Split)
 REGEX_BODY_PC :: size_of(regex_vm.Split) + 1 + size_of(regex_vm.Jump)
 
+REGEX_CAPTURE_GROUPS :: 10
+
+Regex_Match :: struct {
+	range:  rope.Byte_Range,
+	groups: [REGEX_CAPTURE_GROUPS]rope.Byte_Range,
+}
+
 Regex_Thread :: struct {
 	pc:    int,
 	start: int,
+	saved: [2 * REGEX_CAPTURE_GROUPS]int,
 }
 
 Regex_Thread_List :: struct {
@@ -28,12 +36,13 @@ Regex_Thread_List :: struct {
 }
 
 Regex_Matcher :: struct {
-	code:       regex_vm.Program,
-	classes:    []regex_vm.Rune_Class_Data,
-	text:       string,
-	first:      Regex_Thread_List,
-	second:     Regex_Thread_List,
-	valid:      bool,
+	code:          regex_vm.Program,
+	classes:       []regex_vm.Rune_Class_Data,
+	text:          string,
+	first:         Regex_Thread_List,
+	second:        Regex_Thread_List,
+	valid:         bool,
+	with_captures: bool,
 }
 
 regex_address :: proc(
@@ -166,7 +175,7 @@ regex_address :: proc(
 	return match, {}
 }
 
-normalize_regex :: proc(pattern: string, out: []u8, allocator: runtime.Allocator) -> (int, errs.Error) {
+normalize_regex :: proc(pattern: string, out: []u8, allocator: runtime.Allocator, preserve_captures: bool = false) -> (int, errs.Error) {
 	copy(out, "(?:^)?")
 	n := 6
 	in_class := false
@@ -211,11 +220,19 @@ normalize_regex :: proc(pattern: string, out: []u8, allocator: runtime.Allocator
 				if group_depth > MAX_REGEX_GROUP_DEPTH {
 					return 0, errs.new(.Resource_Limit, "address: regular-expression groups are nested too deeply", allocator = allocator)
 				}
-				if n + 3 > len(out) {
-					return 0, errs.new(.Resource_Limit, "address: normalized regular expression is too large", allocator = allocator)
+				if preserve_captures {
+					if n >= len(out) {
+						return 0, errs.new(.Resource_Limit, "address: normalized regular expression is too large", allocator = allocator)
+					}
+					out[n] = '('
+					n += 1
+				} else {
+					if n + 3 > len(out) {
+						return 0, errs.new(.Resource_Limit, "address: normalized regular expression is too large", allocator = allocator)
+					}
+					copy(out[n:], "(?:")
+					n += 3
 				}
-				copy(out[n:], "(?:")
-				n += 3
 				index += 1
 				continue
 			}
@@ -246,6 +263,38 @@ normalize_regex :: proc(pattern: string, out: []u8, allocator: runtime.Allocator
 		return 0, errs.new(.Invalid_Input, "address: unclosed regular-expression group or character class", allocator = allocator)
 	}
 	return n, {}
+}
+
+compile_forward_regex :: proc(
+	pattern: string,
+	allocator: runtime.Allocator,
+	error_allocator: runtime.Allocator,
+	captures: bool,
+) -> (regex.Regular_Expression, errs.Error) {
+	normalized, alloc_err := make([]u8, 3 * len(pattern) + 16, allocator)
+	if alloc_err != .None {
+		return {}, errs.new(.Resource_Limit, "address: could not allocate normalized regular expression", allocator = error_allocator)
+	}
+	length, normalize_err := normalize_regex(pattern, normalized, error_allocator, captures)
+	if !errs.ok(normalize_err) {
+		return {}, normalize_err
+	}
+	flags := regex.Flags{.Unicode, .Multiline, .No_Optimization}
+	if !captures {
+		flags += {.No_Capture}
+	}
+	compiled, compile_err := regex.create(string(normalized[:length]), flags, allocator, allocator)
+	if compile_err != nil {
+		_, is_compiler_error := compile_err.(regex.Compiler_Error)
+		if is_compiler_error {
+			return {}, errs.new(.Resource_Limit, "address: regular expression exceeds the native engine capacity", allocator = error_allocator)
+		}
+		return {}, errs.new(.Invalid_Input, "address: malformed regular expression", allocator = error_allocator)
+	}
+	if !valid_compiled_regex(compiled.program) {
+		return {}, errs.new(.Internal, "address: unexpected native regular-expression program", allocator = error_allocator)
+	}
+	return compiled, {}
 }
 
 compile_reversed_regex :: proc(
@@ -374,12 +423,14 @@ regex_matcher_init :: proc(
 	text: string,
 	allocator: runtime.Allocator,
 	error_allocator: runtime.Allocator,
+	captures: bool = false,
 ) -> (Regex_Matcher, errs.Error) {
 	matcher := Regex_Matcher{
 		code = compiled.program,
 		classes = compiled.class_data,
 		text = text,
 		valid = true,
+		with_captures = captures,
 	}
 	thread_capacity := len(compiled.program) + 1
 	busy_capacity := (len(compiled.program) + 63) / 64
@@ -395,17 +446,29 @@ regex_matcher_init :: proc(
 	return matcher, {}
 }
 
-regex_matcher_run :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: int) -> (rope.Byte_Range, bool) {
+regex_matcher_run :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: int, limit: int = -1) -> (rope.Byte_Range, bool) {
+	match, found := regex_matcher_run_captures(matcher, min_start, max_start, limit)
+	return match.range, found
+}
+
+regex_matcher_run_captures :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: int, limit_value: int) -> (Regex_Match, bool) {
 	matcher.valid = true
+	limit := limit_value
+	if limit < 0 || limit > len(matcher.text) {
+		limit = len(matcher.text)
+	}
 	current := &matcher.first
 	next := &matcher.second
 	regex_clear_thread_list(current)
 	regex_clear_thread_list(next)
 	current_rune, current_size := regex_rune_at(matcher.text, 0)
-	regex_add_thread(matcher, current, {pc = 0, start = -1}, 0, 0, current_rune, min_start, max_start)
+	regex_add_thread(matcher, current, regex_new_thread(0, -1), 0, 0, current_rune, min_start, max_start)
 
 	position := 0
-	best := rope.Byte_Range{start = -1, end = -1}
+	best := Regex_Match{range = {start = -1, end = -1}}
+	for &group in best.groups {
+		group = {start = -1, end = -1}
+	}
 	found := false
 	for current.count > 0 {
 		next.count = 0
@@ -425,18 +488,30 @@ regex_matcher_run :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: in
 					matcher.valid = false
 					return {}, false
 				}
-				if !found || thread.start < best.start || (thread.start == best.start && position > best.end) {
-					best = {start = thread.start, end = position}
+				if !found || thread.start < best.range.start || (thread.start == best.range.start && position > best.range.end) {
+					best.range = {start = thread.start, end = position}
+					best.groups[0] = best.range
+					if matcher.with_captures {
+						for group_index in 1 ..< REGEX_CAPTURE_GROUPS {
+							start := thread.saved[2 * group_index]
+							end := thread.saved[2 * group_index + 1]
+							if start >= 0 && end >= start {
+								best.groups[group_index] = {start = start, end = end}
+							} else {
+								best.groups[group_index] = {start = -1, end = -1}
+							}
+						}
+					}
 					found = true
 				}
 			case .Byte:
-				if current_size > 0 && current_rune == rune(matcher.code[thread.pc + 1]) {
-					regex_add_thread(matcher, next, {pc = thread.pc + 2, start = thread.start}, next_position, current_rune, next_rune, min_start, max_start)
+				if next_position <= limit && current_size > 0 && current_rune == rune(matcher.code[thread.pc + 1]) {
+					regex_add_thread(matcher, next, {pc = thread.pc + 2, start = thread.start, saved = thread.saved}, next_position, current_rune, next_rune, min_start, max_start)
 				}
 			case .Rune:
 				operand := intrinsics.unaligned_load(cast(^rune)&matcher.code[thread.pc + 1])
-				if current_size > 0 && current_rune == operand {
-					regex_add_thread(matcher, next, {pc = thread.pc + 1 + size_of(rune), start = thread.start}, next_position, current_rune, next_rune, min_start, max_start)
+				if next_position <= limit && current_size > 0 && current_rune == operand {
+					regex_add_thread(matcher, next, {pc = thread.pc + 1 + size_of(rune), start = thread.start, saved = thread.saved}, next_position, current_rune, next_rune, min_start, max_start)
 				}
 			case .Rune_Class, .Rune_Class_Negated:
 				class_index := int(matcher.code[thread.pc + 1])
@@ -448,12 +523,12 @@ regex_matcher_run :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: in
 				if opcode == .Rune_Class_Negated {
 					matched = !matched && current_rune != '\n'
 				}
-				if current_size > 0 && matched {
-					regex_add_thread(matcher, next, {pc = thread.pc + 2, start = thread.start}, next_position, current_rune, next_rune, min_start, max_start)
+				if next_position <= limit && current_size > 0 && matched {
+					regex_add_thread(matcher, next, {pc = thread.pc + 2, start = thread.start, saved = thread.saved}, next_position, current_rune, next_rune, min_start, max_start)
 				}
 			case .Wildcard:
-				if current_size > 0 && (thread.pc == REGEX_SEARCH_WILDCARD_PC || current_rune != '\n') {
-					regex_add_thread(matcher, next, {pc = thread.pc + 1, start = thread.start}, next_position, current_rune, next_rune, min_start, max_start)
+				if next_position <= limit && current_size > 0 && (thread.pc == REGEX_SEARCH_WILDCARD_PC || current_rune != '\n') {
+					regex_add_thread(matcher, next, {pc = thread.pc + 1, start = thread.start, saved = thread.saved}, next_position, current_rune, next_rune, min_start, max_start)
 				}
 			case .Jump, .Split, .Save, .Assert_Start, .Assert_Start_Multiline, .Assert_End,
 				.Assert_Word_Boundary, .Assert_Non_Word_Boundary, .Multiline_Open, .Multiline_Close,
@@ -463,7 +538,7 @@ regex_matcher_run :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: in
 				return {}, false
 			}
 		}
-		if next.count == 0 || current_size == 0 {
+		if next.count == 0 || current_size == 0 || position >= limit {
 			break
 		}
 		position = next_position
@@ -472,6 +547,14 @@ regex_matcher_run :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: in
 		current, next = next, current
 	}
 	return best, found
+}
+
+regex_new_thread :: proc(pc, start: int) -> Regex_Thread {
+	thread := Regex_Thread{pc = pc, start = start}
+	for &saved in thread.saved {
+		saved = -1
+	}
+	return thread
 }
 
 regex_add_thread :: proc(
@@ -486,6 +569,7 @@ regex_add_thread :: proc(
 ) {
 	pc := thread.pc
 	start := thread.start
+	saved := thread.saved
 	for {
 		if pc == REGEX_BODY_PC && start < 0 {
 			start = position
@@ -511,9 +595,17 @@ regex_add_thread :: proc(
 		case .Split:
 			left := regex_code_u16(matcher.code, pc + 1)
 			right := regex_code_u16(matcher.code, pc + 3)
-			regex_add_thread(matcher, list, {pc = left, start = start}, position, previous_rune, current_rune, min_start, max_start)
+			regex_add_thread(matcher, list, {pc = left, start = start, saved = saved}, position, previous_rune, current_rune, min_start, max_start)
 			pc = right
 		case .Save:
+			if matcher.with_captures {
+				index := int(matcher.code[pc + 1])
+				if index < 0 || index >= len(saved) {
+					matcher.valid = false
+					return
+				}
+				saved[index] = position
+			}
 			pc += 2
 		case .Assert_Start:
 			if position != 0 {
@@ -543,7 +635,7 @@ regex_add_thread :: proc(
 				matcher.valid = false
 				return
 			}
-			list.threads[list.count] = {pc = pc, start = start}
+			list.threads[list.count] = {pc = pc, start = start, saved = saved}
 			list.count += 1
 			return
 		}

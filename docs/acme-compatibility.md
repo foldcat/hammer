@@ -48,8 +48,10 @@ Acme behavior, not an implementation to copy mechanically.
   semantics. Covered by the address unit tests; product Look address integration
   is not implied.
 - `Edit` implements bare addresses and the foundational `a`, `c`, `i`, `d`, `m`,
-  and `t` commands with delimited or multiline text. Commands run sequentially
-  against intermediate documents and share one undo group per invocation. The
+  and `t` commands with delimited or multiline text. It also implements `s` with
+  first, nth, and global replacement, `&` and capture-group expansion, and empty
+  matches. Commands run sequentially against intermediate documents and share
+  one undo group per invocation; each substitution is one transaction. The
   product executes inline or 2-1 chord scripts against the current window body
   and keeps other views' selections transformed. Covered by the Edit unit tests
   and inline-script `edit-test`; the chord path has no dedicated UI scenario.
@@ -77,10 +79,11 @@ Acme behavior, not an implementation to copy mechanically.
 
 - Additional internal command coverage, the remaining Acme Edit commands,
   product Look address integration, external command execution, and asynchronous
-  command output belong to M08/M09. Edit substitutions, loops, display/file
-  commands, and pipes are not claimed by the initial subset. Directory `Get`,
-  `New`, `Newcol`, `Zerox`, and the other unregistered commands are not claimed
-  as working merely because their names are recognized or visible in tags.
+  command output belong to M08/M09. Edit loops, display/file commands, pipes,
+  and other coverage beyond the implemented primitives and `s` remain deferred.
+  Directory `Get`, `New`, `Newcol`, `Zerox`, and the other unregistered commands
+  are not claimed as working merely because their names are recognized or
+  visible in tags.
 - A product command for multiple views of one buffer (Zerox) is deferred; only
   the underlying core view model and tests currently exist.
 - Per-view gutter toggles are represented in core state; no product command for
