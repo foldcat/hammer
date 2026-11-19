@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:os"
+import "core:time"
 
 report :: proc() -> int {
 	for argument in os.args[2:] {
@@ -64,6 +65,14 @@ flood :: proc() -> int {
 	return 0
 }
 
+ignore_until_killed :: proc() {
+	ignore_termination()
+	fmt.println("ready")
+	for {
+		time.sleep(10 * time.Millisecond)
+	}
+}
+
 wait_for_close :: proc() {
 	fmt.println("ready")
 	buffer: [1]u8
@@ -82,6 +91,8 @@ main :: proc() {
 		code = echo()
 	case "flood":
 		code = flood()
+	case "ignore":
+		ignore_until_killed()
 	case "wait":
 		wait_for_close()
 	case:

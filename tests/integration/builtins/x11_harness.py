@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,7 @@ def append_text(x11: X11, window: int, x: int, y: int, text: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--job-helper", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=20.0)
     args = parser.parse_args()
     if not 1.0 <= args.timeout <= 60.0:
@@ -74,6 +76,9 @@ def main() -> int:
     binary = args.binary.resolve()
     if not binary.is_file():
         parser.error("--binary must name an executable")
+    job_helper = args.job_helper.resolve()
+    if not job_helper.is_file():
+        parser.error("--job-helper must name an executable")
 
     sandbox = Path(tempfile.mkdtemp(prefix="hammer-m08-09-builtins-"))
     source = sandbox / "source.txt"
@@ -92,6 +97,7 @@ def main() -> int:
         environment = os.environ.copy()
         environment["HAMMER_LOG"] = ""
         environment["XDG_STATE_HOME"] = str(sandbox / "state")
+        environment["HAMMER_TEST_IGNORE_JOB"] = str(job_helper)
         with log_path.open("wb") as log:
             process = subprocess.Popen(
                 [str(binary), "source.txt"],
@@ -107,6 +113,11 @@ def main() -> int:
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
             wait_for_log(log_path, "file: opened source.txt", args.timeout)
+            wait_for_log(log_path, "job: test helper started", args.timeout)
+            job_match = re.search(r"job: test helper started id=\d+ process=(\d+)", log_path.read_text(encoding="utf-8"))
+            if job_match is None:
+                raise HarnessFailure("could not determine the test job PID")
+            job_pid = int(job_match.group(1))
 
             def run(command: str, x: int, y: int) -> None:
                 name = command.split()[0]
@@ -171,6 +182,15 @@ def main() -> int:
             wait_for_log(log_path, 'mouse: execute "Delcol"', args.timeout)
             wait_for_log(log_path, "view: deleted column 3; 2 columns and 3 views remain", args.timeout)
             print("PASS: Delcol removes the invoking column after its buffers become clean")
+
+            run("Stop", 10, 10)
+            wait_for_log(log_path, "job: Stop requested for 1 job(s)", args.timeout)
+            stop_deadline = time.monotonic() + args.timeout
+            while Path(f"/proc/{job_pid}").exists() and time.monotonic() < stop_deadline:
+                time.sleep(0.05)
+            if Path(f"/proc/{job_pid}").exists():
+                raise HarnessFailure(f"Stop did not reap test job {job_pid}")
+            print("PASS: Stop terminates and reaps the running job")
 
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)

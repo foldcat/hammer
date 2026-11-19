@@ -11,6 +11,7 @@ PR_SET_PDEATHSIG :: 1
 MAX_FD :: linux.Fd(0x7fffffff)
 
 Platform_Pipe :: struct {}
+Platform_Process :: struct {}
 
 Linux_Pipes :: struct {
 	stdin_read:   linux.Fd,
@@ -376,6 +377,53 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 	return handle, {}
 }
 
+exit_status :: proc(status: u32) -> Exit_Status {
+	result := Exit_Status{success = linux.WIFEXITED(status) && linux.WEXITSTATUS(status) == 0}
+	if linux.WIFEXITED(status) {
+		result.code = int(linux.WEXITSTATUS(status))
+	} else if linux.WIFSIGNALED(status) {
+		result.signal = int(linux.WTERMSIG(status))
+	}
+	return result
+}
+
+platform_try_wait :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_Status, bool, errs.Error) {
+	pid := linux.Pid(handle.process)
+	status: u32
+	for {
+		waited, errno := linux.waitpid(pid, &status, {.WNOHANG}, nil)
+		if errno == .EINTR {
+			continue
+		}
+		if errno != .NONE {
+			return {}, false, linux_error("waitpid", errno, allocator)
+		}
+		if waited == 0 {
+			return {}, false, {}
+		}
+		if waited != pid {
+			return {}, false, errs.new(.IO, "process: waitpid returned an unexpected process", allocator = allocator)
+		}
+		handle.process = 0
+		return exit_status(status), true, {}
+	}
+}
+
+platform_request_stop :: proc(handle: ^Handle, force: bool, allocator := context.allocator) -> errs.Error {
+	signal := linux.Signal.SIGTERM
+	if force {
+		signal = .SIGKILL
+	}
+	errno := linux.kill(-linux.Pid(handle.process), signal)
+	if errno == .ESRCH {
+		return {}
+	}
+	if errno != .NONE {
+		return linux_error("process-group signal", errno, allocator)
+	}
+	return {}
+}
+
 platform_wait :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_Status, errs.Error) {
 	pid := linux.Pid(handle.process)
 	status: u32
@@ -393,13 +441,7 @@ platform_wait :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_
 		break
 	}
 	handle.process = 0
-	result := Exit_Status{success = linux.WIFEXITED(status) && linux.WEXITSTATUS(status) == 0}
-	if linux.WIFEXITED(status) {
-		result.code = int(linux.WEXITSTATUS(status))
-	} else if linux.WIFSIGNALED(status) {
-		result.signal = int(linux.WTERMSIG(status))
-	}
-	return result, {}
+	return exit_status(status), {}
 }
 
 platform_read_pipe :: proc(pipe: ^Pipe, buffer: []byte, allocator := context.allocator) -> (int, IO_Status, errs.Error) {

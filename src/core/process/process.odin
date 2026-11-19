@@ -71,9 +71,10 @@ write_pipe :: proc(pipe: ^Pipe, data: []byte, allocator := context.allocator) ->
 Handle :: struct {
 	id:      Process_ID,
 	process: uintptr,
-	stdin:   Pipe,
-	stdout:  Pipe,
-	stderr:  Pipe,
+	stdin:    Pipe,
+	stdout:    Pipe,
+	stderr:    Pipe,
+	platform: Platform_Process,
 }
 
 Exit_Status :: struct {
@@ -153,6 +154,25 @@ wait :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_Status, e
 		return {}, errs.new(.Invalid_Input, "process: wait requires a live owned process handle", allocator = allocator)
 	}
 	return platform_wait(handle, allocator)
+}
+
+// try_wait never blocks. exited is false while the child is running. A true
+// result has the same reaping and ownership behavior as wait.
+try_wait :: proc(handle: ^Handle, allocator := context.allocator) -> (status: Exit_Status, exited: bool, err: errs.Error) {
+	if handle == nil || handle.process == 0 {
+		return {}, false, errs.new(.Invalid_Input, "process: try_wait requires a live owned process handle", allocator = allocator)
+	}
+	return platform_try_wait(handle, allocator)
+}
+
+// request_stop signals the owned process tree without waiting. force=false is
+// a graceful request; force=true guarantees termination of the process group
+// or Windows job. Calling this after try_wait reaps the child is invalid.
+request_stop :: proc(handle: ^Handle, force: bool, allocator := context.allocator) -> errs.Error {
+	if handle == nil || handle.process == 0 {
+		return errs.new(.Invalid_Input, "process: stop requires a live owned process handle", allocator = allocator)
+	}
+	return platform_request_stop(handle, force, allocator)
 }
 
 // destroy is idempotent after wait and closes any remaining parent pipes.

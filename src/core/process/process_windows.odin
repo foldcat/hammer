@@ -19,6 +19,10 @@ Platform_Pipe :: struct {
 	pending:    bool,
 }
 
+Platform_Process :: struct {
+	job: windows.HANDLE,
+}
+
 next_pipe_id: u64
 
 STARTUPINFOEXW :: struct {
@@ -44,6 +48,9 @@ foreign kernel32 {
 		lpReturnSize: ^windows.SIZE_T,
 	) -> windows.BOOL ---
 	DeleteProcThreadAttributeList :: proc(lpAttributeList: rawptr) ---
+	CreateJobObjectW :: proc(lpJobAttributes: windows.LPSECURITY_ATTRIBUTES, lpName: windows.LPCWSTR) -> windows.HANDLE ---
+	AssignProcessToJobObject :: proc(hJob: windows.HANDLE, hProcess: windows.HANDLE) -> windows.BOOL ---
+	TerminateJobObject :: proc(hJob: windows.HANDLE, uExitCode: windows.UINT) -> windows.BOOL ---
 }
 
 Windows_Pipes :: struct {
@@ -318,6 +325,10 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 		},
 		attribute_list = attribute_list,
 	}
+	job := CreateJobObjectW(nil, nil)
+	if job == nil {
+		return {}, windows_error("job-object creation", windows.GetLastError(), allocator)
+	}
 	process_info: windows.PROCESS_INFORMATION
 	created := windows.CreateProcessW(
 		nil,
@@ -326,23 +337,41 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 		nil,
 		true,
 		windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NEW_PROCESS_GROUP |
-			windows.CREATE_NO_WINDOW | windows.EXTENDED_STARTUPINFO_PRESENT,
+			windows.CREATE_NO_WINDOW | windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_SUSPENDED,
 		environment_block,
 		working_dir_wide,
 		(^windows.STARTUPINFOW)(&startup),
 		&process_info,
 	)
 	if !created {
-		return {}, windows_error("CreateProcessW", windows.GetLastError(), allocator)
+		create_errno := windows.GetLastError()
+		windows.CloseHandle(job)
+		return {}, windows_error("CreateProcessW", create_errno, allocator)
 	}
 	close_raw(&pipes.stdin_read)
 	close_raw(&pipes.stdout_write)
 	close_raw(&pipes.stderr_write)
-	if !windows.CloseHandle(process_info.hThread) {
-		errno := windows.GetLastError()
-		windows.TerminateProcess(process_info.hProcess, 1)
+	reap_failed := proc(process_info: ^windows.PROCESS_INFORMATION, job: windows.HANDLE) {
+		TerminateJobObject(job, 1)
 		windows.WaitForSingleObject(process_info.hProcess, windows.INFINITE)
 		windows.CloseHandle(process_info.hProcess)
+		windows.CloseHandle(job)
+	}
+	if !AssignProcessToJobObject(job, process_info.hProcess) {
+		errno := windows.GetLastError()
+		windows.CloseHandle(process_info.hThread)
+		reap_failed(&process_info, job)
+		return {}, windows_error("job-object assignment", errno, allocator)
+	}
+	if windows.ResumeThread(process_info.hThread) == windows.DWORD(max(windows.DWORD)) {
+		errno := windows.GetLastError()
+		windows.CloseHandle(process_info.hThread)
+		reap_failed(&process_info, job)
+		return {}, windows_error("initial-thread resume", errno, allocator)
+	}
+	if !windows.CloseHandle(process_info.hThread) {
+		errno := windows.GetLastError()
+		reap_failed(&process_info, job)
 		return {}, windows_error("initial-thread cleanup", errno, allocator)
 	}
 
@@ -352,6 +381,7 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 		stdin = {native = uintptr(pipes.stdin_write), open = true},
 		stdout = {native = uintptr(pipes.stdout_read), open = true},
 		stderr = {native = uintptr(pipes.stderr_read), open = true},
+		platform = {job = job},
 	}
 	pipes.stdin_write = nil
 	pipes.stdout_read = nil
@@ -359,26 +389,63 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 	return handle, {}
 }
 
+reap_signaled :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_Status, errs.Error) {
+	process_handle := windows.HANDLE(handle.process)
+	exit_code: windows.DWORD
+	first_errno := windows.DWORD(0)
+	if !windows.GetExitCodeProcess(process_handle, &exit_code) {
+		first_errno = windows.GetLastError()
+	}
+	if handle.platform.job != nil {
+		if !TerminateJobObject(handle.platform.job, 1) && first_errno == 0 {
+			first_errno = windows.GetLastError()
+		}
+		if !windows.CloseHandle(handle.platform.job) && first_errno == 0 {
+			first_errno = windows.GetLastError()
+		}
+	}
+	if !windows.CloseHandle(process_handle) && first_errno == 0 {
+		first_errno = windows.GetLastError()
+	}
+	handle.process = 0
+	handle.platform.job = nil
+	if first_errno != 0 {
+		return {}, windows_error("process cleanup", first_errno, allocator)
+	}
+	return Exit_Status{code = int(exit_code), success = exit_code == 0}, {}
+}
+
+platform_try_wait :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_Status, bool, errs.Error) {
+	result := windows.WaitForSingleObject(windows.HANDLE(handle.process), 0)
+	if result == windows.WAIT_TIMEOUT {
+		return {}, false, {}
+	}
+	if result != windows.WAIT_OBJECT_0 {
+		return {}, false, windows_error("WaitForSingleObject", windows.GetLastError(), allocator)
+	}
+	status, err := reap_signaled(handle, allocator)
+	return status, true, err
+}
+
+platform_request_stop :: proc(handle: ^Handle, force: bool, allocator := context.allocator) -> errs.Error {
+	if force {
+		if !TerminateJobObject(handle.platform.job, 1) {
+			return windows_error("job-object termination", windows.GetLastError(), allocator)
+		}
+		return {}
+	}
+	// CREATE_NO_WINDOW programs commonly have no console to receive this
+	// request. The job service's forced deadline remains the guaranteed path.
+	windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, windows.DWORD(handle.id))
+	return {}
+}
+
 platform_wait :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_Status, errs.Error) {
 	process_handle := windows.HANDLE(handle.process)
 	if result := windows.WaitForSingleObject(process_handle, windows.INFINITE); result != windows.WAIT_OBJECT_0 {
 		return {}, windows_error("WaitForSingleObject", windows.GetLastError(), allocator)
 	}
-	exit_code: windows.DWORD
-	got_exit_code := windows.GetExitCodeProcess(process_handle, &exit_code)
-	exit_error := windows.GetLastError() if !got_exit_code else 0
-	close_error := windows.DWORD(0)
-	if !windows.CloseHandle(process_handle) {
-		close_error = windows.GetLastError()
-	}
-	handle.process = 0
-	if !got_exit_code {
-		return {}, windows_error("GetExitCodeProcess", exit_error, allocator)
-	}
-	if close_error != 0 {
-		return {}, windows_error("process-handle cleanup", close_error, allocator)
-	}
-	return Exit_Status{code = int(exit_code), success = exit_code == 0}, {}
+	return reap_signaled(handle, allocator)
 }
 
 prepare_overlapped :: proc(pipe: ^Pipe, allocator := context.allocator) -> errs.Error {

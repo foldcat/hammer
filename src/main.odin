@@ -10,6 +10,7 @@
 //   HAMMER_TEST_PANIC=1         panic during frame 2 (panic-reporting smoke test)
 //   HAMMER_RENDER_PROBE=1       log rendered pixel colors at frame 5 (render validation)
 //   HAMMER_TEST_DPI_SCALES=...  comma-separated per-frame scales (at most 8)
+//   HAMMER_TEST_IGNORE_JOB=<path>  start the purpose-built ignore helper for Stop integration
 //   HAMMER_LOG=<path>           log file path; empty string disables file logging
 package main
 
@@ -30,6 +31,7 @@ import slog "sokol:log"
 import "core/errs"
 import "core/lifecycle"
 import "core/logging"
+import process "core/process"
 import "platform"
 
 import generated "config/generated"
@@ -219,6 +221,7 @@ frame :: proc "c" () {
 	state.frame_count += 1
 	sync_dpi_changes()
 	editor_poll_edit()
+	process.job_service_poll(&editor.jobs, mouse_now_ms())
 	editor_poll_clipboard()
 	editor_poll_scrollbar()
 

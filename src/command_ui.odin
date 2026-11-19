@@ -9,6 +9,7 @@ import editing "core/editing"
 import errs "core/errs"
 import layout "core/layout"
 import mouse "core/mouse"
+import process "core/process"
 import rope "core/rope"
 import txn "core/txn"
 import view "core/view"
@@ -28,6 +29,7 @@ EDITOR_COMMANDS :: []command.Entry {
 	{name = "Redo", handler = editor_command_redo},
 	{name = "Cut", handler = editor_command_cut},
 	{name = "Snarf", handler = editor_command_snarf},
+	{name = "Stop", handler = editor_command_stop},
 	{name = "Paste", handler = editor_command_paste},
 	{name = "Look", handler = editor_command_look},
 }
@@ -466,6 +468,24 @@ editor_command_snarf :: proc(cmd_context: ^command.Context, invocation: command.
 	} else {
 		log.warn("mouse: Cut/Snarf requires a current button-1 selection")
 	}
+	return {}
+}
+
+editor_command_stop :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	if invocation.argument != "" {
+		return errs.new(.Invalid_Input, "job: Stop takes no arguments", allocator = permanent())
+	}
+	attachment := u64(cmd_context.source.window_id)
+	stopped := 0
+	if attachment == 0 {
+		stopped = process.job_stop_all(&editor.jobs, mouse_now_ms())
+	} else {
+		stopped = process.job_stop_attachment(&editor.jobs, attachment, mouse_now_ms())
+	}
+	if stopped == 0 {
+		return errs.new(.NotFound, "job: no running job matches Stop", allocator = permanent())
+	}
+	log.infof("job: Stop requested for %d job(s) attached to window %d", stopped, attachment)
 	return {}
 }
 

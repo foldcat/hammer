@@ -20,6 +20,7 @@ import layout "core/layout"
 import lifecycle "core/lifecycle"
 import mouse "core/mouse"
 import platform "platform"
+import process "core/process"
 import rope "core/rope"
 import scroll "core/scroll"
 import tagstate "core/tag"
@@ -80,6 +81,7 @@ Editor :: struct {
 	workspace:              layout.Workspace,
 	active_window:          layout.Window_ID,
 	close_guard:            lifecycle.Close_Guard,
+	jobs:                   process.Job_Service,
 }
 
 editor: Editor
@@ -252,6 +254,7 @@ editor_alloc_path_buffer :: proc(path: string) -> (^Editor_Buffer, errs.Error) {
 }
 
 editor_init :: proc(path := "") -> errs.Error {
+	process.job_service_init(&editor.jobs, {}, permanent())
 	editor.next_buffer_id = 1
 	buffer, err := editor_alloc_path_buffer(path)
 	if !errs.ok(err) {
@@ -261,7 +264,26 @@ editor_init :: proc(path := "") -> errs.Error {
 	if close_err := lifecycle.close_guard_init(&editor.close_guard, {}, permanent()); !errs.ok(close_err) {
 		return close_err
 	}
-	return editor_workspace_init()
+	if workspace_err := editor_workspace_init(); !errs.ok(workspace_err) {
+		return workspace_err
+	}
+	if helper, found := os.lookup_env("HAMMER_TEST_IGNORE_JOB", context.temp_allocator); found && helper != "" {
+		id, start_err := process.job_start(
+			&editor.jobs,
+			{command = {helper, "ignore"}},
+			nil,
+			u64(editor.active_window),
+		)
+		if !errs.ok(start_err) {
+			return start_err
+		}
+		job := process.job_find(&editor.jobs, id)
+		if job == nil || job.state != .Running {
+			return errs.new(.Internal, "job: test helper did not start", allocator = permanent())
+		}
+		log.infof("job: test helper started id=%d process=%d attachment=%d", u64(id), u64(job.handle.id), job.attachment)
+	}
+	return {}
 }
 
 editor_workspace_init :: proc() -> errs.Error {
@@ -312,6 +334,9 @@ editor_workspace_init :: proc() -> errs.Error {
 }
 
 editor_destroy :: proc() {
+	if err := process.job_service_destroy(&editor.jobs); !errs.ok(err) {
+		editor_report(err)
+	}
 	edit.runner_destroy(&editor.edit_runner)
 	editor_cancel_pointer_gesture()
 	for index in 0 ..< view.MAX_VIEWS {

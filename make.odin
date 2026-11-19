@@ -27,14 +27,14 @@
 //     odin run make.odin -file -- directory-test   # M07.07 X11 directory and error windows
 //     odin run make.odin -file -- compatibility-test # M07.08 integrated Acme window behavior
 //     odin run make.odin -file -- edit-test        # M08.04–M08.06 X11 Edit commands
-//     odin run make.odin -file -- builtin-test     # M08.09 X11 window/file commands
+//     odin run make.odin -file -- builtin-test     # M08.09/M09.03 X11 built-ins and Stop
 //     odin run make.odin -file -- wrap-test        # M07.09 X11 soft wrap and horizontal scrolling
 //     odin run make.odin -file -- scroll-test      # M07.10–M07.11 X11 viewport, scrollbar, and line numbers
 //     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
-//     odin run make.odin -file -- process-test     # M09.01-02 process spawning and nonblocking flow
+//     odin run make.odin -file -- process-test     # M09.01-03 process spawning, flow, and jobs
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
 // The `windows` target builds hammer.exe for windows_amd64. It uses LLVM and
@@ -708,6 +708,7 @@ main :: proc() {
 
 	if len(args) > 1 && args[1] == "builtin-test" {
 		when ODIN_OS == .Linux {
+			build_process_test_helper()
 			stage_config(args[2:])
 			if !setup_sokol_linux() {
 				os.exit(1)
@@ -728,6 +729,8 @@ main :: proc() {
 				BUILTIN_TEST_HARNESS,
 				"--binary",
 				BINARY_PATH,
+				"--job-helper",
+				PROCESS_TEST_HELPER,
 			}, true)
 		} else {
 			fmt.eprintln("[Test] builtin-test currently requires Linux/X11")
