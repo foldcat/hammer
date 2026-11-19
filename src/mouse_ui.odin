@@ -243,6 +243,56 @@ editor_selection_gesture_active :: proc() -> bool {
 		.Left in editor.mouse_gesture.buttons
 }
 
+// modifier_chord_button maps a modifier key to the Acme chord button it stands
+// in for while a primary selection gesture is held: Ctrl acts as the middle
+// (Cut) button and Alt as the right (Paste) button. Shift and Super do not
+// chord and return ok=false.
+modifier_chord_button :: proc(key: input.Key) -> (input.Mouse_Button, bool) {
+	#partial switch key {
+	case .Left_Control, .Right_Control:
+		return .Middle, true
+	case .Left_Alt, .Right_Alt:
+		return .Right, true
+	case:
+	}
+	return {}, false
+}
+
+// editor_modifier_chord consumes a modifier key press/release as a laptop
+// equivalent of an Acme chord while a primary selection gesture is held. A
+// non-repeat Ctrl press cuts and an Alt press pastes (shared with the button
+// state machine via mouse.modifier_down); releasing either key is a no-op. It
+// returns true only when the key was consumed, so the caller skips the normal
+// cancel-on-non-pointer-input path for these keys. Any other key (or a gesture
+// in Execute/Look mode) returns false and is handled normally.
+editor_modifier_chord :: proc(event: input.Event) -> bool {
+	if !mouse.active(&editor.mouse_gesture) || editor.mouse_gesture.mode != .Select {
+		return false
+	}
+	#partial switch e in event {
+	case input.Key_Down:
+		button, ok := modifier_chord_button(e.key)
+		if !ok {
+			return false
+		}
+		if e.repeat {
+			// Consume a repeated modifier press without re-triggering the
+			// chord; it must not fall through to the cancel path.
+			return true
+		}
+		target := editor_text_target_by_id(editor.mouse_gesture.target)
+		if !editor_mouse_target_current(target) {
+			return false
+		}
+		editor_dispatch_mouse_action(mouse.modifier_down(&editor.mouse_gesture, button))
+		return true
+	case input.Key_Up:
+		_, ok := modifier_chord_button(e.key)
+		return ok
+	}
+	return false
+}
+
 // editor_continue_selection_at re-hits the held selection gesture at a logical
 // position after the viewport moved under the pointer (wheel scroll). It keeps
 // the anchor fixed and extends the active edge to whatever text now sits there.

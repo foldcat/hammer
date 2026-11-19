@@ -355,6 +355,10 @@ editor_consume_input :: proc(event: input.Event) {
 			editor_scroll(e)
 			return
 		}
+	case input.Key_Down, input.Key_Up:
+		if editor_modifier_chord(event) {
+			return
+		}
 	}
 	editor_cancel_pointer_gesture()
 

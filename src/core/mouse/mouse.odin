@@ -194,6 +194,14 @@ down :: proc(
 	}
 
 	state.buttons += {button}
+	return chord_button(state, button)
+}
+
+// chord_button applies a subsequent button press while a gesture is already
+// held. It sets the chorded flag and selects the cut/paste/argument action,
+// or cancels the gesture for a conflicting button. Physical button presses
+// and modifier-driven virtual presses (see modifier_down) share this path.
+chord_button :: proc(state: ^State, button: input.Mouse_Button) -> Action {
 	state.chorded = true
 	if state.canceled {
 		return {}
@@ -232,6 +240,18 @@ down :: proc(
 		state.canceled = true
 	}
 	return {}
+}
+
+// modifier_down applies a modifier-driven virtual button press while a primary
+// selection gesture is held. Ctrl stands in for the middle button (Cut) and
+// Alt for the right button (Paste), letting laptop users chord without a
+// second physical button. It is a no-op outside Select mode (or with no button
+// held), so a bare modifier key never starts a gesture or cancels one.
+modifier_down :: proc(state: ^State, button: input.Mouse_Button) -> Action {
+	if state == nil || state.buttons == {} || state.mode != .Select {
+		return {}
+	}
+	return chord_button(state, button)
 }
 
 move :: proc(state: ^State, offset: int, pos: coords.Logical_Point, buttons: input.Mouse_Buttons) -> Action {

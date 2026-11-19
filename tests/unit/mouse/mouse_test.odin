@@ -142,3 +142,58 @@ test_modified_primary_rejects_altgr_and_cancels_on_lost_capture :: proc(t: ^test
 	action = mouse.up(&state, .Left, 5, point(20), 11)
 	testing.expect(t, action == nil)
 }
+
+@(test)
+test_modifier_chord_cut_and_snarf :: proc(t: ^testing.T) {
+	state: mouse.State
+	mouse.down(&state, .Left, 1, 2, point(), {}, 100)
+	action := mouse.modifier_down(&state, .Middle)
+	_, ok := action.(mouse.Chord_Cut)
+	testing.expect(t, ok)
+	action = mouse.modifier_down(&state, .Right)
+	_, ok = action.(mouse.Undo_Cut)
+	testing.expect(t, ok)
+	action = mouse.up(&state, .Left, 2, point(), 200)
+	finish, finish_ok := action.(mouse.Select_Finish)
+	testing.expect(t, finish_ok && finish.chorded)
+	testing.expect(t, !mouse.active(&state))
+}
+
+@(test)
+test_modifier_chord_paste_reversed_by_cut :: proc(t: ^testing.T) {
+	state: mouse.State
+	mouse.down(&state, .Left, 7, 4, point(), {}, 0)
+	action := mouse.modifier_down(&state, .Right)
+	_, ok := action.(mouse.Chord_Paste)
+	testing.expect(t, ok)
+	action = mouse.modifier_down(&state, .Middle)
+	_, ok = action.(mouse.Undo_Paste)
+	testing.expect(t, ok)
+	mouse.up(&state, .Left, 4, point(), 1)
+	testing.expect(t, !mouse.active(&state))
+}
+
+@(test)
+test_modifier_chord_requires_held_button :: proc(t: ^testing.T) {
+	state: mouse.State
+	testing.expect(t, mouse.modifier_down(&state, .Middle) == nil)
+	testing.expect(t, mouse.modifier_down(&state, .Right) == nil)
+	testing.expect(t, !mouse.active(&state))
+}
+
+@(test)
+test_modifier_chord_ignores_non_select_modes :: proc(t: ^testing.T) {
+	state: mouse.State
+	mouse.down(&state, .Left, 3, 2, point(), {.Ctrl}, 0)
+	testing.expect(t, state.mode == .Execute)
+	testing.expect(t, mouse.modifier_down(&state, .Right) == nil)
+	testing.expect(t, !state.canceled)
+	mouse.up(&state, .Left, 2, point(), 1)
+
+	look: mouse.State
+	mouse.down(&look, .Left, 3, 2, point(), {.Alt}, 10)
+	testing.expect(t, look.mode == .Look)
+	testing.expect(t, mouse.modifier_down(&look, .Middle) == nil)
+	testing.expect(t, !look.canceled)
+	mouse.up(&look, .Left, 2, point(), 11)
+}

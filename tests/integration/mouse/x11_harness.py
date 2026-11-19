@@ -411,6 +411,45 @@ def main() -> int:
                 x11.tap(0xFF1B)
                 wait_for_exit(process, args.timeout, cut_log)
                 process = None
+
+            # Modifier chord: hold button 1 and press Ctrl to Cut (laptop 1-2),
+            # exercising the mod-key chord path end to end.
+            modchord = sandbox / "modchord.txt"
+            modchord.write_bytes(b"alpha beta alpha")
+            modchord_log = sandbox / "modchord.log"
+            with modchord_log.open("wb") as log:
+                process = subprocess.Popen(
+                    [str(binary), str(modchord)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    env=environment,
+                )
+                window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, window)
+                x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                time.sleep(0.3)
+                x11.move(window, 105, 76)
+                x11.button(1, True)
+                x11.move(window, 143, 80)
+                time.sleep(0.05)
+                x11.key(0xFFE3, True)
+                x11.lib.XSync(x11.display, 0)
+                wait_for_log(modchord_log, "mouse: chord Cut applied transaction=", args.timeout)
+                x11.key(0xFFE3, False)
+                x11.lib.XSync(x11.display, 0)
+                x11.button(1, False)
+                x11.key(0xFFE3, True)
+                x11.tap(ord("s"))
+                x11.key(0xFFE3, False)
+                wait_for_log(modchord_log, "file: saved ", args.timeout)
+                if modchord.read_bytes() != b"alpha  alpha":
+                    raise HarnessFailure(f"modifier chord cut wrote unexpected bytes: {modchord.read_bytes()!r}")
+                print("PASS: Ctrl during a held selection cuts (laptop 1-2 chord)")
+                x11.tap(0xFF1B)
+                wait_for_exit(process, args.timeout, modchord_log)
+                process = None
             succeeded = True
             return 0
     finally:
