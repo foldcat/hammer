@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M09.04 Implement contextual environment/cwd
+## Current task: M09.05 Implement output-window batching/backpressure

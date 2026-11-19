@@ -23,6 +23,32 @@ report :: proc() -> int {
 	return 7
 }
 
+context_report :: proc() -> int {
+	working_dir, dir_err := os.get_working_directory(context.allocator)
+	if dir_err != nil {
+		return 2
+	}
+	defer delete(working_dir, context.allocator)
+	fmt.printf("cwd=%s\n", working_dir)
+	variables := []string{
+		"ACME_WINDOW_ID",
+		"ACME_BUFFER_ID",
+		"ACME_FILE",
+		"ACME_ADDRESS",
+		"ACME_PROJECT_ROOT",
+		"ACME_INSTANCE_ROOT",
+		"ACME_ENDPOINT",
+		"CUSTOM",
+		"PATH",
+	}
+	for key in variables {
+		value := os.get_env(key, context.allocator)
+		defer delete(value, context.allocator)
+		fmt.printf("%s=%s\n", key, value)
+	}
+	return 0
+}
+
 echo :: proc() -> int {
 	input := make([dynamic]u8, 0, 1024, context.allocator)
 	defer delete(input)
@@ -85,6 +111,8 @@ main :: proc() {
 	}
 	code := 0
 	switch os.args[1] {
+	case "context":
+		code = context_report()
 	case "report":
 		code = report()
 	case "echo":

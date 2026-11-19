@@ -25,6 +25,7 @@ Job :: struct {
 	state:           Job_State,
 	command:         string,
 	working_dir:     string,
+	environment:     []string,
 	input:           []byte,
 	handle:          Handle,
 	pump:            Pump,
@@ -135,8 +136,21 @@ job_start :: proc(service: ^Job_Service, desc: Description, input: []byte, attac
 	if command_err != nil {
 		return 0, errs.new(.Resource_Limit, "process: cannot allocate job command", allocator = allocator)
 	}
+	environment, environment_err := environment_clone(desc.environment, allocator)
+	if !errs.ok(environment_err) {
+		delete(command, allocator)
+		return 0, environment_err
+	}
+	working_dir, working_dir_err := strings.clone(desc.working_dir, allocator)
+	if working_dir_err != nil {
+		environment_destroy(environment, allocator)
+		delete(command, allocator)
+		return 0, errs.new(.Resource_Limit, "process: cannot allocate job working directory", allocator = allocator)
+	}
 	owned_input, input_err := make([]byte, len(input), allocator)
 	if input_err != nil {
+		delete(working_dir, allocator)
+		environment_destroy(environment, allocator)
 		delete(command, allocator)
 		return 0, errs.new(.Resource_Limit, "process: cannot allocate job input", allocator = allocator)
 	}
@@ -151,7 +165,8 @@ job_start :: proc(service: ^Job_Service, desc: Description, input: []byte, attac
 		attachment = attachment,
 		state = .Queued,
 		command = command,
-		working_dir = strings.clone(desc.working_dir, allocator),
+		working_dir = working_dir,
+		environment = environment,
 		input = owned_input,
 		allocator = allocator,
 	}
@@ -179,6 +194,20 @@ job_start :: proc(service: ^Job_Service, desc: Description, input: []byte, attac
 	}
 	job.state = .Running
 	return id, {}
+}
+
+// job_start_context borrows command and snapshot only for this synchronous
+// start. The retained Job owns independent copies of all context metadata.
+job_start_context :: proc(service: ^Job_Service, command: []string, snapshot: ^Context_Snapshot, input: []byte, attachment: u64) -> (Job_ID, errs.Error) {
+	if snapshot == nil || snapshot.environment == nil || snapshot.working_dir == "" {
+		return 0, errs.new(.Invalid_Input, "process: job context is not initialized")
+	}
+	desc := Description{
+		command = command,
+		working_dir = snapshot.working_dir,
+		environment = snapshot.environment,
+	}
+	return job_start(service, desc, input, attachment)
 }
 
 job_force :: proc(job: ^Job) {
@@ -300,6 +329,7 @@ job_cleanup :: proc(job: ^Job, allocator: runtime.Allocator) -> errs.Error {
 	}
 	delete(job.command, allocator)
 	delete(job.working_dir, allocator)
+	environment_destroy(job.environment, allocator)
 	delete(job.input, allocator)
 	errs.destroy(&job.err)
 	job^ = {}
