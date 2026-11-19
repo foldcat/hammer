@@ -39,6 +39,7 @@ Buffer_Kind :: enum u8 {
 	File,
 	Directory,
 	Errors,
+	Job_Output,
 }
 
 Editor_Buffer :: struct {
@@ -51,6 +52,7 @@ Editor_Buffer :: struct {
 	metadata:       filecodec.Metadata,
 	saved_revision: u64,
 	regex_history:  address.Regex_History,
+	job_name:       string,
 }
 
 Editor :: struct {
@@ -82,6 +84,8 @@ Editor :: struct {
 	active_window:          layout.Window_ID,
 	close_guard:            lifecycle.Close_Guard,
 	jobs:                   process.Job_Service,
+	job_outputs:            [process.MAX_JOBS]Editor_Job_Output,
+	job_output_cursor:      int,
 }
 
 editor: Editor
@@ -109,6 +113,7 @@ editor_destroy_buffer :: proc(buffer: ^Editor_Buffer) {
 	}
 	txn.doc_destroy(&buffer.doc)
 	delete(buffer.path, permanent())
+	delete(buffer.job_name, permanent())
 	buffer^ = {}
 	editor.buffer_count -= 1
 }
@@ -283,6 +288,11 @@ editor_init :: proc(path := "") -> errs.Error {
 		}
 		log.infof("job: test helper started id=%d process=%d attachment=%d", u64(id), u64(job.handle.id), job.attachment)
 	}
+	if helper, found := os.lookup_env("HAMMER_TEST_FLOOD_JOB", context.temp_allocator); found && helper != "" {
+		if flood_err := editor_start_flood_test_job(helper); !errs.ok(flood_err) {
+			return flood_err
+		}
+	}
 	return {}
 }
 
@@ -334,6 +344,10 @@ editor_workspace_init :: proc() -> errs.Error {
 }
 
 editor_destroy :: proc() {
+	for &output in editor.job_outputs {
+		process.output_destroy(&output.output)
+		delete(output.pending_error, permanent())
+	}
 	if err := process.job_service_destroy(&editor.jobs); !errs.ok(err) {
 		editor_report(err)
 	}
@@ -690,7 +704,7 @@ editor_save_buffer :: proc(buffer: ^Editor_Buffer) -> errs.Error {
 		return errs.new(.Invalid_Input, "save: no buffer", allocator = context.temp_allocator)
 	}
 	if buffer.kind != .File {
-		return errs.new(.Unsupported, "save: directory and error windows cannot be saved as files", allocator = context.temp_allocator)
+		return errs.new(.Unsupported, "save: non-file windows cannot be saved as files", allocator = context.temp_allocator)
 	}
 	if buffer.path == "" {
 		return errs.new(
@@ -765,8 +779,8 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 	if buffer == nil {
 		return errs.new(.Internal, "get: window has no buffer", allocator = permanent())
 	}
-	if buffer.kind == .Errors {
-		return errs.new(.Unsupported, "get: error windows cannot be reloaded", allocator = permanent())
+	if buffer.kind == .Errors || buffer.kind == .Job_Output {
+		return errs.new(.Unsupported, "get: output windows cannot be reloaded", allocator = permanent())
 	}
 
 	editor_cancel_close_review()

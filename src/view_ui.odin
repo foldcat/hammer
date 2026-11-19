@@ -144,6 +144,8 @@ editor_window_generated :: proc(item: ^view.View) -> string {
 		switch buffer.kind {
 		case .Errors:
 			name = "+Errors"
+		case .Job_Output:
+			name = buffer.job_name
 		case .Directory:
 			if buffer.path != "" {
 				name = buffer.path
@@ -160,7 +162,9 @@ editor_window_generated :: proc(item: ^view.View) -> string {
 		}
 	}
 	commands := "Del"
-	if buffer != nil && buffer.kind == .Directory {
+	if buffer != nil && buffer.kind == .Job_Output {
+		commands = "Del Stop"
+	} else if buffer != nil && buffer.kind == .Directory {
 		commands = "Del Get"
 	} else if buffer != nil && buffer.kind == .File && txn.doc_revision(&buffer.doc) != buffer.saved_revision {
 		commands = "Del Put"

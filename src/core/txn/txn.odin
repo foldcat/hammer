@@ -250,6 +250,19 @@ doc_log_len :: proc(doc: ^Doc) -> int {
 	return len(doc.log)
 }
 
+// doc_collapse_history makes the current text the empty undo-tree baseline
+// without changing the monotonic document revision. It is intended for bounded
+// machine-generated logs whose old output and undo history are disposable.
+doc_collapse_history :: proc(doc: ^Doc) {
+	for &entry in doc.log {
+		ops_destroy(entry.ops)
+		delete(entry.children)
+	}
+	resize(&doc.log, 0)
+	doc.initial_root = doc.tree.root
+	doc.current = 0
+}
+
 // doc_apply validates `txn` against the current revision and applies
 // its operations, appending one undo-tree node to the log.
 //

@@ -98,6 +98,7 @@ def main() -> int:
         environment["HAMMER_LOG"] = ""
         environment["XDG_STATE_HOME"] = str(sandbox / "state")
         environment["HAMMER_TEST_IGNORE_JOB"] = str(job_helper)
+        environment["HAMMER_TEST_FLOOD_JOB"] = str(job_helper)
         with log_path.open("wb") as log:
             process = subprocess.Popen(
                 [str(binary), "source.txt"],
@@ -118,6 +119,10 @@ def main() -> int:
             if job_match is None:
                 raise HarnessFailure("could not determine the test job PID")
             job_pid = int(job_match.group(1))
+            flood_match = re.search(r"job: flood test helper started id=(\d+) process=(\d+)", log_path.read_text(encoding="utf-8"))
+            if flood_match is None:
+                raise HarnessFailure("could not determine the flood job ID")
+            flood_id = int(flood_match.group(1))
 
             def run(command: str, x: int, y: int) -> None:
                 name = command.split()[0]
@@ -125,19 +130,19 @@ def main() -> int:
                 execute(x11, window, command, x, y, args.timeout, log_path, counts[name])
 
             run("Newcol", 10, 10)
-            wait_for_log(log_path, "view: Newcol column=3 window=3", args.timeout)
+            wait_for_log(log_path, "view: Newcol column=3 window=5", args.timeout)
             print("PASS: Newcol creates a column and an empty window")
 
             click(x11, window, 1, 540, 100)
             run("New second.txt", 10, 10)
-            wait_for_log(log_path, "view: New window=4 buffer=4", args.timeout)
+            wait_for_log(log_path, "view: New window=6 buffer=6", args.timeout)
             click(x11, window, 1, 540, 350)
             run("Zerox", 10, 10)
-            wait_for_log(log_path, "view: Zerox window=5 buffer=4 from=4", args.timeout)
+            wait_for_log(log_path, "view: Zerox window=7 buffer=6 from=6", args.timeout)
             append_text(x11, window, 540, 500, "!")
             click(x11, window, 1, 60, 100)
             run("New", 10, 10)
-            wait_for_log(log_path, "view: New window=6", args.timeout)
+            wait_for_log(log_path, "view: New window=8", args.timeout)
             print("PASS: New creates empty and named-file windows; Zerox shares the named buffer")
 
             click(x11, window, 2, 600, 30)
@@ -180,8 +185,11 @@ def main() -> int:
 
             click(x11, window, 2, 600, 30)
             wait_for_log(log_path, 'mouse: execute "Delcol"', args.timeout)
-            wait_for_log(log_path, "view: deleted column 3; 2 columns and 3 views remain", args.timeout)
+            wait_for_log(log_path, "view: deleted column 3; 2 columns and 5 views remain", args.timeout)
             print("PASS: Delcol removes the invoking column after its buffers become clean")
+
+            wait_for_log(log_path, f"job: released id={flood_id}", args.timeout)
+            print("PASS: flood output drains through the job output window")
 
             run("Stop", 10, 10)
             wait_for_log(log_path, "job: Stop requested for 1 job(s)", args.timeout)
