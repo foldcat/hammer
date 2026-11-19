@@ -406,7 +406,7 @@ text_render_line :: proc(
 					span_start := max(span.start, row.start)
 					span_end := min(span.end, row.end)
 					if span_start < span_end {
-						text_append_quad(quads, body.x + x_offset + span_start, row_top + line_height - 1, span_end - span_start, max(1 / state.dpi.scale, 1), cfg.Theme.Caret, fb)
+						text_append_quad(quads, body.x + x_offset + span_start, row_top + line_height - 1, span_end - span_start, max(1 / state.dpi.scale, 1), body, cfg.Theme.Caret, fb)
 					}
 				}
 			} else {
@@ -421,12 +421,12 @@ text_render_line :: proc(
 			}
 			if caret_x, ok := shaping.caret_position(visible.text, caret_offset, edge, state.dpi.scale); ok {
 				if caret_x >= row.start && (caret_x < row.end || row_index == len(rows) - 1 && caret_x <= row.end) {
-					text_append_quad(quads, body.x + x_offset + caret_x, row_top, max(1 / state.dpi.scale, 1), line_height, cfg.Theme.Caret, fb)
+					text_append_quad(quads, body.x + x_offset + caret_x, row_top, max(1 / state.dpi.scale, 1), line_height, body, cfg.Theme.Caret, fb)
 				}
 			}
 		}
 		if row_index == len(rows) - 1 && (!visible.done || end - start > len(line_bytes) || wrap_mode == .Truncate && content_width > visible_width) {
-			text_append_quad(quads, body.x + body.width - TEXT_PADDING, row_top, TEXT_PADDING, line_height, cfg.Theme.Git_Modified, fb)
+			text_append_quad(quads, body.x + body.width - TEXT_PADDING, row_top, TEXT_PADDING, line_height, body, cfg.Theme.Git_Modified, fb)
 		}
 	}
 	return max(0, len(rows) - skip_rows)
@@ -518,7 +518,7 @@ text_render_selection :: proc(
 		span_start := max(span.start, row.start)
 		span_end := min(span.end, row.end)
 		if span_start < span_end {
-			text_append_quad(quads, body.x + x_offset + span_start, line_top, span_end - span_start, line_height, cfg.Theme.Selection_Bg, fb)
+			text_append_quad(quads, body.x + x_offset + span_start, line_top, span_end - span_start, line_height, body, cfg.Theme.Selection_Bg, fb)
 		}
 	}
 }
@@ -640,15 +640,23 @@ text_append_glyph :: proc(x, y: f32, entry: glyphcache.Entry, fb: coords.Physica
 text_append_quad :: proc(
 	quads: ^[dynamic]Vertex,
 	x, y, width, height: f32,
+	body: layout.Rect,
 	color: [4]f32,
 	fb: coords.Physical_Size,
 ) {
 	if len(quads) >= MAX_TEXT_QUADS_PER_FRAME * 6 || width <= 0 || height <= 0 || fb.width <= 0 || fb.height <= 0 {
 		return
 	}
+	left := max(x, body.x)
+	top := max(y, body.y)
+	right := min(x + width, body.x + body.width)
+	bottom := min(y + height, body.y + body.height)
+	if right <= left || bottom <= top {
+		return
+	}
 	start := len(quads)
 	resize(quads, start + 6)
-	quad_vertices(quads[start:], {x, y, width, height}, color, fb)
+	quad_vertices(quads[start:], {left, top, right - left, bottom - top}, color, fb)
 }
 
 text_render_error :: proc(err: errs.Error) {

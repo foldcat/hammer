@@ -28,6 +28,26 @@ def wait_for_log(log_path: Path, needle: str, timeout: float) -> None:
     raise HarnessFailure(f"timed out waiting for {needle!r}; log: {log_path}")
 
 
+def wait_for_count(log_path: Path, needle: str, count: int, timeout: float = 20.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if log_path.read_text(encoding="utf-8", errors="replace").count(needle) >= count:
+            return
+        time.sleep(0.05)
+    raise HarnessFailure(f"timed out waiting for {needle!r} occurrence {count}; log: {log_path}")
+
+
+def wait_for_cursor_offset(log_path: Path, window: int, expected: float, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    pattern = rf"view: cursor scroll window={window} offset=([0-9.]+)"
+    while time.monotonic() < deadline:
+        matches = re.findall(pattern, log_path.read_text(encoding="utf-8", errors="replace"))
+        if matches and float(matches[-1]) == expected:
+            return
+        time.sleep(0.05)
+    raise HarnessFailure(f"timed out waiting for window {window} cursor offset {expected}; log: {log_path}")
+
+
 def ink(x11: X11, window: int, y_start: int, y_end: int) -> int:
     image = x11.image(window)
     try:
@@ -41,16 +61,53 @@ def ink(x11: X11, window: int, y_start: int, y_end: int) -> int:
         x11.lib.XDestroyImage(image)
 
 
-def click(x11: X11, window: int, x: int, y: int) -> None:
+def click(x11: X11, window: int, x: int, y: int, button: int = 1) -> None:
     x11.move(window, x, y)
-    x11.button(1, True)
-    x11.button(1, False)
+    x11.button(button, True)
+    x11.button(button, False)
 
 
 def save(x11: X11) -> None:
     x11.key(0xFFE3, True)
     x11.tap(ord("s"))
     x11.key(0xFFE3, False)
+
+
+def type_text(x11: X11, text: str) -> None:
+    for character in text:
+        if character.isupper() or character == "_":
+            x11.key(0xFFE1, True)
+            x11.tap(ord("-") if character == "_" else ord(character.lower()))
+            x11.key(0xFFE1, False)
+        else:
+            x11.tap(ord(character))
+
+
+def execute_new(x11: X11, window: int, path: Path, log_path: Path) -> None:
+    click(x11, window, 10, 10)
+    x11.key(0xFFE3, True)
+    x11.tap(ord("a"))
+    x11.key(0xFFE3, False)
+    type_text(x11, f"New {path}")
+    x11.key(0xFFE3, True)
+    x11.tap(ord("a"))
+    x11.key(0xFFE3, False)
+    click(x11, window, 10, 10, button=2)
+    wait_for_log(log_path, 'mouse: execute "New"', 20.0)
+    wait_for_log(log_path, "view: New window=3", 20.0)
+
+
+def left_caret_pixels(x11: X11, window: int) -> int:
+    image = x11.image(window)
+    try:
+        count = 0
+        for y in range(60, 590):
+            for x in range(14, 390):
+                if x11.lib.XGetPixel(image, x, y) & 0xFFFFFF == 0x33B1FF:
+                    count += 1
+        return count
+    finally:
+        x11.lib.XDestroyImage(image)
 
 
 def start(binary: Path, source: Path, sandbox: Path, log_path: Path, dpi_scales: str = "") -> tuple[subprocess.Popen[bytes], X11, int]:
@@ -213,6 +270,53 @@ def run_cursor_reveal(binary: Path, sandbox: Path) -> None:
         stop(process, x11)
 
 
+def run_right_column_cursor_reveal(binary: Path, sandbox: Path) -> None:
+    source = sandbox / "cursor-columns.txt"
+    source.write_text(f"{LONG_TEXT}\nnext\n", encoding="utf-8")
+    log_path = sandbox / "cursor-columns.log"
+    process, x11, window = start(binary, source, sandbox, log_path)
+    try:
+        wait_for_log(log_path, "wrap=Truncate", 20.0)
+        click(x11, window, 600, 100)
+        execute_new(x11, window, source, log_path)
+        x11.tap(0xFF50)
+        for _ in range(len(LONG_TEXT)):
+            x11.tap(0xFF53)
+        wait_for_log(log_path, "view: cursor scroll window=3", 20.0)
+        offsets = re.findall(r"view: cursor scroll window=3 offset=([0-9.]+)", log_path.read_text())
+        if not offsets or float(offsets[-1]) <= 0:
+            raise HarnessFailure("right-column long line did not scroll right")
+        end_offset = float(offsets[-1])
+
+        x11.tap(0xFF53)
+        wait_for_cursor_offset(log_path, 3, 0.0)
+        time.sleep(0.2)
+        if left_caret_pixels(x11, window) != 0:
+            raise HarnessFailure("right-column caret rendered over the left buffer after crossing the line end")
+        x11.tap(ord(";"))
+        save(x11)
+        wait_for_log(log_path, f"file: saved {source}", 20.0)
+        if source.read_bytes() != f"{LONG_TEXT}\n;next\n".encode():
+            raise HarnessFailure("Right at the truncated line end did not edit the current buffer's next line")
+
+        x11.tap(0xFF51)
+        x11.tap(0xFF51)
+        wait_for_cursor_offset(log_path, 3, end_offset)
+        for _ in range(len(LONG_TEXT)):
+            x11.tap(0xFF51)
+        wait_for_cursor_offset(log_path, 3, 0.0)
+        x11.tap(ord(";"))
+        save(x11)
+        wait_for_count(log_path, f"file: saved {source}", 2)
+        if source.read_bytes() != f";{LONG_TEXT}\n;next\n".encode():
+            raise HarnessFailure("Left movement did not reveal the current buffer's long-line start")
+        print("PASS: right-column caret reveal crosses line boundaries, scrolls left, and never paints over the left buffer")
+        x11.tap(0xFF1B)
+        wait_for_exit(process, 20.0, log_path)
+    finally:
+        stop(process, x11)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--soft", required=True, type=Path)
@@ -226,6 +330,7 @@ def main() -> int:
     run_soft(soft, sandbox)
     run_truncate(truncate, sandbox)
     run_cursor_reveal(truncate, sandbox)
+    run_right_column_cursor_reveal(truncate, sandbox)
     print(f"Wrap/scroll X11 smoke passed; sandbox: {sandbox}")
     return 0
 

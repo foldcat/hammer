@@ -626,8 +626,8 @@ editor_perform :: proc(action: editing.Action) {
 	if editor.active_text_kind == .Body {
 		item := editor_active_view()
 		editor_finish_edit(item, previous_revision, err)
-		if movement, is_move := action.(editing.Move); errs.ok(err) && is_move && movement.motion == .Grapheme_Right {
-			editor_reveal_caret_right(item)
+		if _, is_move := action.(editing.Move); errs.ok(err) && is_move {
+			editor_reveal_caret(item)
 		}
 	} else {
 		editor_report(err)

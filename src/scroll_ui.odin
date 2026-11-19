@@ -98,7 +98,7 @@ editor_wheel_vertical :: proc(item: ^view.View, doc: ^txn.Doc, body: layout.Rect
 	}
 }
 
-editor_reveal_caret_right :: proc(item: ^view.View) {
+editor_reveal_caret :: proc(item: ^view.View) {
 	if item == nil || item.wrap_mode == .Soft {
 		return
 	}
@@ -121,7 +121,7 @@ editor_reveal_caret_right :: proc(item: ^view.View) {
 	}
 	previous := item.horizontal_offset
 	viewport_width := max(1, text.width - 2 * TEXT_PADDING)
-	item.horizontal_offset = scroll.reveal_caret_right(item.horizontal_offset, caret_x, viewport_width, MAX_HORIZONTAL_SCROLL_OFFSET)
+	item.horizontal_offset = scroll.reveal_caret(item.horizontal_offset, caret_x, viewport_width, MAX_HORIZONTAL_SCROLL_OFFSET)
 	if item.horizontal_offset != previous {
 		log.infof("view: cursor scroll window=%d offset=%.2f", u64(item.window_id), item.horizontal_offset)
 	}
