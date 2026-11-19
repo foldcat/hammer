@@ -82,6 +82,7 @@ Source :: enum u8 {
 	Command_Output,
 	Format,
 	Recovery,
+	Reload,
 }
 
 // Insert adds `data` at byte offset `pos` of the base snapshot

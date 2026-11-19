@@ -296,3 +296,26 @@ test_invalid_weights_are_errors :: proc(t: ^testing.T) {
 	testing.expect(t, err.kind == .Invalid_Input)
 	errs.destroy(&err)
 }
+
+@(test)
+test_remove_column_preserves_remaining_order_and_windows :: proc(t: ^testing.T) {
+	workspace := make_workspace(t)
+	third_column, err := layout.add_column(&workspace.value)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	fourth, add_err := layout.add_window(&workspace.value, third_column)
+	testing.expect(t, errs.ok(add_err))
+	errs.destroy(&add_err)
+
+	testing.expect(t, layout.remove_column(&workspace.value, workspace.right))
+	testing.expect(t, !layout.remove_column(&workspace.value, workspace.right))
+	testing.expect(t, workspace.value.column_count == 2)
+	testing.expect(t, workspace.value.columns[0].id == workspace.left)
+	testing.expect(t, workspace.value.columns[1].id == third_column)
+	_, _, found := layout.find_window(&workspace.value, workspace.third)
+	testing.expect(t, !found)
+	column, index, fourth_found := layout.find_window(&workspace.value, fourth)
+	testing.expect(t, fourth_found && column == 1 && index == 0)
+	_, _, first_found := layout.find_window(&workspace.value, workspace.first)
+	testing.expect(t, first_found)
+}

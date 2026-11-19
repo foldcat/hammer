@@ -27,6 +27,7 @@
 //     odin run make.odin -file -- directory-test   # M07.07 X11 directory and error windows
 //     odin run make.odin -file -- compatibility-test # M07.08 integrated Acme window behavior
 //     odin run make.odin -file -- edit-test        # M08.04–M08.06 X11 Edit commands
+//     odin run make.odin -file -- builtin-test     # M08.09 X11 window/file commands
 //     odin run make.odin -file -- wrap-test        # M07.09 X11 soft wrap and horizontal scrolling
 //     odin run make.odin -file -- scroll-test      # M07.10–M07.11 X11 viewport, scrollbar, and line numbers
 //     odin run make.odin -file -- autopair-test    # M06.13 X11 enabled/disabled autopair policy
@@ -131,6 +132,7 @@ LOOK_TEST_HARNESS :: #directory + "/tests/integration/look/x11_harness.py"
 DIRECTORY_TEST_HARNESS :: #directory + "/tests/integration/directory/x11_harness.py"
 COMPATIBILITY_TEST_HARNESS :: #directory + "/tests/integration/compatibility/x11_harness.py"
 EDIT_TEST_HARNESS :: #directory + "/tests/integration/edit/x11_harness.py"
+BUILTIN_TEST_HARNESS :: #directory + "/tests/integration/builtins/x11_harness.py"
 WRAP_TEST_HARNESS :: #directory + "/tests/integration/wrap/x11_harness.py"
 SCROLL_TEST_HARNESS :: #directory + "/tests/integration/scroll/x11_harness.py"
 WRAP_SOFT_BINARY :: OUT_DIR + "/hammer-wrap-soft"
@@ -689,6 +691,36 @@ main :: proc() {
 			}, true)
 		} else {
 			fmt.eprintln("[Test] edit-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "builtin-test" {
+		when ODIN_OS == .Linux {
+			stage_config(args[2:])
+			if !setup_sokol_linux() {
+				os.exit(1)
+			}
+			run_odin([]string {
+				"odin",
+				"build",
+				SRC_DIR,
+				SOKOL_COLLECTION,
+				"-vet",
+				"-out:" + BINARY_PATH,
+				"-debug",
+			})
+			run_odin([]string {
+				"xvfb-run",
+				"-a",
+				"python3",
+				BUILTIN_TEST_HARNESS,
+				"--binary",
+				BINARY_PATH,
+			}, true)
+		} else {
+			fmt.eprintln("[Test] builtin-test currently requires Linux/X11")
 			os.exit(1)
 		}
 		return

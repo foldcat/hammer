@@ -18,6 +18,7 @@ Close_Kind :: enum {
 	Quit,
 	Close_View,
 	Close_Buffer,
+	Close_Column,
 }
 
 Close_Origin :: enum {
@@ -200,11 +201,15 @@ close_failure :: proc(guard: ^Close_Guard) -> (^Save_Failure, bool) {
 	return &guard.failure, true
 }
 
+close_targetless :: proc(kind: Close_Kind) -> bool {
+	return kind == .Quit || kind == .Close_Column
+}
+
 close_request_includes :: proc(kind: Close_Kind, buffer: Buffer_Snapshot) -> bool {
 	switch kind {
 	case .Quit:
 		return buffer.dirty
-	case .Close_Buffer:
+	case .Close_Buffer, .Close_Column:
 		return buffer.dirty
 	case .Close_View:
 		return buffer.dirty && buffer.view_count == 1
@@ -214,8 +219,8 @@ close_request_includes :: proc(kind: Close_Kind, buffer: Buffer_Snapshot) -> boo
 
 // close_request captures and validates the dirty-buffer set synchronously.
 // Closing one of several views is immediately Ready even when the shared buffer
-// is dirty. Closing its last view, closing the buffer, or quitting with dirty
-// named/untitled buffers reaches Await_Decision. Clean requests are Ready.
+// is dirty. Closing its last view, closing a buffer or column, or quitting with
+// dirty named/untitled buffers reaches Await_Decision. Clean requests are Ready.
 // No editor state is mutated, and a failed request leaves the guard Idle.
 close_request :: proc(
 	guard: ^Close_Guard,
@@ -232,9 +237,9 @@ close_request :: proc(
 	if request.origin < .Keyboard || request.origin > .Filesystem {
 		return errs.newf(.Invalid_Input, "lifecycle: invalid close origin", allocator = guard.allocator)
 	}
-	if request.kind == .Quit {
+	if close_targetless(request.kind) {
 		if request.buffer_id != 0 || request.buffer_generation != 0 {
-			return errs.newf(.Invalid_Input, "lifecycle: quit request has a buffer target", allocator = guard.allocator)
+			return errs.newf(.Invalid_Input, "lifecycle: targetless close request has a buffer target", allocator = guard.allocator)
 		}
 	} else if request.kind == .Close_View || request.kind == .Close_Buffer {
 		if request.buffer_id == 0 {
@@ -247,7 +252,7 @@ close_request :: proc(
 		return errs.newf(.Resource_Limit, "lifecycle: close inspection exceeds the %d-buffer limit", guard.max_buffers, allocator = guard.allocator)
 	}
 
-	target_found := request.kind == .Quit
+	target_found := close_targetless(request.kind)
 	required := 0
 	for buffer, index in buffers {
 		if buffer.id == 0 || buffer.view_count < 0 {
@@ -258,7 +263,7 @@ close_request :: proc(
 				return errs.newf(.Invalid_Input, "lifecycle: duplicate buffer ID %d", buffer.id, allocator = guard.allocator)
 			}
 		}
-		if request.kind != .Quit && request.buffer_id == buffer.id {
+		if !close_targetless(request.kind) && request.buffer_id == buffer.id {
 			if target_found {
 				return errs.newf(.Invalid_Input, "lifecycle: duplicate close target", allocator = guard.allocator)
 			}
@@ -270,7 +275,7 @@ close_request :: proc(
 			}
 			target_found = true
 		}
-		if request.kind != .Quit && request.buffer_id != buffer.id {
+		if !close_targetless(request.kind) && request.buffer_id != buffer.id {
 			continue
 		}
 		if close_request_includes(request.kind, buffer) {
@@ -289,7 +294,7 @@ close_request :: proc(
 
 	guard.request = request
 	for buffer in buffers {
-		if request.kind != .Quit && request.buffer_id != buffer.id {
+		if !close_targetless(request.kind) && request.buffer_id != buffer.id {
 			continue
 		}
 		if buffer.dirty && (request.kind != .Close_View || buffer.view_count == 1) {

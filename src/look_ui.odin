@@ -105,14 +105,14 @@ editor_look_column :: proc(target: Mouse_Text_Target) -> layout.Column_ID {
 			return editor.workspace.columns[column].id
 		}
 	}
-	if editor.active_column != 0 {
-		if _, ok := layout.find_column(&editor.workspace, editor.active_column); ok {
-			return editor.active_column
-		}
-	}
 	if editor.active_window != 0 {
 		if column, _, ok := layout.find_window(&editor.workspace, editor.active_window); ok {
 			return editor.workspace.columns[column].id
+		}
+	}
+	if editor.active_column != 0 {
+		if _, ok := layout.find_column(&editor.workspace, editor.active_column); ok {
+			return editor.active_column
 		}
 	}
 	if editor.workspace.column_count > 0 {
@@ -141,22 +141,30 @@ editor_apply_look_line :: proc(item: ^view.View, line: int) {
 	item.wheel_remainder = 0
 }
 
-editor_open_buffer_in_column :: proc(buffer: ^Editor_Buffer, column_id: layout.Column_ID) -> (^view.View, errs.Error) {
+// On failure, destroy_on_error controls ownership of buffer. Zerox passes false
+// because its buffer remains owned by existing views.
+editor_open_buffer_in_column :: proc(buffer: ^Editor_Buffer, column_id: layout.Column_ID, destroy_on_error := true) -> (^view.View, errs.Error) {
 	if buffer == nil {
 		return nil, errs.new(.Invalid_Input, "view: cannot open a nil buffer", allocator = permanent())
 	}
 	if column_id == 0 {
-		editor_destroy_buffer(buffer)
+		if destroy_on_error {
+			editor_destroy_buffer(buffer)
+		}
 		return nil, errs.new(.NotFound, "view: no column is available", allocator = permanent())
 	}
 	window_id, layout_err := layout.add_window(&editor.workspace, column_id)
 	if !errs.ok(layout_err) {
-		editor_destroy_buffer(buffer)
+		if destroy_on_error {
+			editor_destroy_buffer(buffer)
+		}
 		return nil, layout_err
 	}
 	if add_err := view.add(&editor.views, window_id, buffer.id); !errs.ok(add_err) {
 		layout.remove_window(&editor.workspace, window_id)
-		editor_destroy_buffer(buffer)
+		if destroy_on_error {
+			editor_destroy_buffer(buffer)
+		}
 		return nil, add_err
 	}
 	item, _ := view.find(&editor.views, window_id)
@@ -164,7 +172,9 @@ editor_open_buffer_in_column :: proc(buffer: ^Editor_Buffer, column_id: layout.C
 	if tag_err := editor_init_window_tag(item); !errs.ok(tag_err) {
 		view.remove(&editor.views, window_id)
 		layout.remove_window(&editor.workspace, window_id)
-		editor_destroy_buffer(buffer)
+		if destroy_on_error {
+			editor_destroy_buffer(buffer)
+		}
 		return nil, tag_err
 	}
 	return item, {}

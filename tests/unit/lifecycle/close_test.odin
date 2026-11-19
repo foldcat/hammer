@@ -284,3 +284,31 @@ test_close_allocation_failure_is_atomic :: proc(t: ^testing.T) {
 	testing.expect(t, guard.phase == .Await_Decision)
 	close_expect_ok(t, lifecycle.close_decision(&guard, .Cancel))
 }
+
+@(test)
+test_close_column_reviews_every_dirty_buffer_before_ready :: proc(t: ^testing.T) {
+	guard: lifecycle.Close_Guard
+	close_init(t, &guard)
+	defer lifecycle.close_guard_destroy(&guard)
+	request := lifecycle.Close_Request{kind = .Close_Column, origin = .Tag_Command}
+	first := close_buffer(1, 5, 1, true)
+	shared := close_buffer(2, 7, 2, true)
+	clean := close_buffer(3, 9, 1, false)
+	buffers := []lifecycle.Buffer_Snapshot{first, shared, clean}
+
+	close_expect_ok(t, lifecycle.close_request(&guard, request, buffers))
+	testing.expect(t, guard.phase == .Await_Decision)
+	pending := lifecycle.close_pending(&guard)
+	testing.expect(t, len(pending) == 2)
+	testing.expect(t, pending[0].id == first.id && pending[1].id == shared.id)
+	close_expect_ok(t, lifecycle.close_decision(&guard, .Cancel))
+	testing.expect(t, guard.phase == .Idle)
+
+	close_expect_ok(t, lifecycle.close_request(&guard, request, {clean}))
+	testing.expect(t, lifecycle.close_guard_ready(&guard))
+	close_expect_ok(t, lifecycle.close_finish(&guard))
+
+	invalid := request
+	invalid.buffer_id = 1
+	close_expect_kind(t, lifecycle.close_request(&guard, invalid, buffers), .Invalid_Input)
+}

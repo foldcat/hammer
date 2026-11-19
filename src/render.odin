@@ -118,7 +118,8 @@ render_frame :: proc() {
 		render_append_quad(&verts, column.tag, cfg.Theme.Tag_Bg, phys)
 		render_append_quad(&verts, column.control, cfg.Theme.Git_Modified, phys)
 		column_active := editor.active_text_kind == .Column_Tag && editor.active_column == column.id
-		text_render_tag(tag_content_rect(column.tag, column.control), &editor.column_tags[column_index].doc, editor.column_tags[column_index].selection, column_active, phys, &verts)
+		column_tag := editor_column_tag(column.id)
+		text_render_tag(tag_content_rect(column.tag, column.control), &column_tag.doc, column_tag.selection, column_active, phys, &verts)
 		for window_index in 0 ..< column.window_count {
 			placed := column.windows[window_index]
 			render_append_quad(&verts, placed.window.tag, cfg.Theme.Tag_Bg, phys)

@@ -634,6 +634,22 @@ resize_weights :: proc(previous, current: ^f32, delta, available: f32) -> bool {
 	return true
 }
 
+remove_column :: proc(workspace: ^Workspace, id: Column_ID) -> bool {
+	column_index, ok := find_column(workspace, id)
+	if !ok {
+		return false
+	}
+	for index := column_index; index + 1 < workspace.column_count; index += 1 {
+		workspace.columns[index] = workspace.columns[index + 1]
+	}
+	workspace.column_count -= 1
+	workspace.columns[workspace.column_count] = {}
+	if workspace.drag.column_id == id {
+		drag_cancel(workspace)
+	}
+	return true
+}
+
 remove_window :: proc(workspace: ^Workspace, id: Window_ID) -> bool {
 	column_index, window_index, ok := find_window(workspace, id)
 	if !ok {

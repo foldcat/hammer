@@ -51,11 +51,7 @@ editor_active_tag :: proc() -> ^tagstate.State {
 	case .Global_Tag:
 		return &editor.global_tag
 	case .Column_Tag:
-		index, ok := layout.find_column(&editor.workspace, editor.active_column)
-		if !ok {
-			return nil
-		}
-		return &editor.column_tags[index]
+		return editor_column_tag(editor.active_column)
 	case .Window_Tag:
 		item := editor_active_view()
 		if item == nil {
@@ -176,12 +172,53 @@ editor_init_window_tag :: proc(item: ^view.View) -> errs.Error {
 	return tagstate.init(&item.tag, editor_window_generated(item), permanent())
 }
 
+editor_column_tag :: proc(column_id: layout.Column_ID) -> ^tagstate.State {
+	if column_id == 0 {
+		return nil
+	}
+	for index in 0 ..< layout.MAX_COLUMNS {
+		if editor.column_tag_ids[index] == column_id {
+			return &editor.column_tags[index]
+		}
+	}
+	return nil
+}
+
+editor_init_column_tag :: proc(column_id: layout.Column_ID) -> errs.Error {
+	if column_id == 0 || editor_column_tag(column_id) != nil {
+		return errs.new(.Invalid_Input, "tag: invalid or duplicate column", allocator = permanent())
+	}
+	for index in 0 ..< layout.MAX_COLUMNS {
+		if editor.column_tag_ids[index] != 0 {
+			continue
+		}
+		if err := tagstate.init(&editor.column_tags[index], "New Delcol | ", permanent()); !errs.ok(err) {
+			return err
+		}
+		editor.column_tag_ids[index] = column_id
+		return {}
+	}
+	return errs.new(.Resource_Limit, "tag: no column tag slot is available", allocator = permanent())
+}
+
+editor_destroy_column_tag :: proc(column_id: layout.Column_ID) {
+	for index in 0 ..< layout.MAX_COLUMNS {
+		if editor.column_tag_ids[index] != column_id {
+			continue
+		}
+		editor_cancel_tag_requests(&editor.column_tags[index])
+		tagstate.destroy(&editor.column_tags[index])
+		editor.column_tag_ids[index] = 0
+		return
+	}
+}
+
 editor_init_global_and_column_tags :: proc() -> errs.Error {
-	if err := tagstate.init(&editor.global_tag, "Newcol | ", permanent()); !errs.ok(err) {
+	if err := tagstate.init(&editor.global_tag, "Newcol Putall | ", permanent()); !errs.ok(err) {
 		return err
 	}
 	for column_index in 0 ..< editor.workspace.column_count {
-		if err := tagstate.init(&editor.column_tags[column_index], "New | ", permanent()); !errs.ok(err) {
+		if err := editor_init_column_tag(editor.workspace.columns[column_index].id); !errs.ok(err) {
 			return err
 		}
 	}

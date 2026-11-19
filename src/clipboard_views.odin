@@ -4,6 +4,7 @@ import "core:log"
 
 import editing "core/editing"
 import errs "core/errs"
+import layout "core/layout"
 import mouse "core/mouse"
 import platform "platform"
 import tagstate "core/tag"
@@ -26,9 +27,9 @@ editor_poll_view_clipboards :: proc(result: ^platform.Clipboard_Result) {
 	if editor_poll_tag_clipboard(&editor.global_tag, GLOBAL_TAG_BUFFER_ID, result) {
 		return
 	}
-	for column_index in 0 ..< editor.workspace.column_count {
-		column := editor.workspace.columns[column_index]
-		if editor_poll_tag_clipboard(&editor.column_tags[column_index], COLUMN_TAG_BUFFER_BASE + u64(column.id), result) {
+	for column_index in 0 ..< layout.MAX_COLUMNS {
+		column_id := editor.column_tag_ids[column_index]
+		if column_id != 0 && editor_poll_tag_clipboard(&editor.column_tags[column_index], COLUMN_TAG_BUFFER_BASE + u64(column_id), result) {
 			return
 		}
 	}

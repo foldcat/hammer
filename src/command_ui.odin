@@ -7,6 +7,7 @@ import command "core/command"
 import edit "core/edit"
 import editing "core/editing"
 import errs "core/errs"
+import layout "core/layout"
 import mouse "core/mouse"
 import rope "core/rope"
 import txn "core/txn"
@@ -14,8 +15,14 @@ import view "core/view"
 
 EDITOR_COMMANDS :: []command.Entry {
 	{name = "Del", handler = editor_command_del},
+	{name = "Delcol", handler = editor_command_delcol},
 	{name = "Exit", handler = editor_command_exit},
+	{name = "Get", handler = editor_command_get},
+	{name = "New", handler = editor_command_new},
+	{name = "Newcol", handler = editor_command_newcol},
 	{name = "Put", handler = editor_command_put},
+	{name = "Putall", handler = editor_command_putall},
+	{name = "Zerox", handler = editor_command_zerox},
 	{name = "Edit", handler = editor_command_edit},
 	{name = "Undo", handler = editor_command_undo},
 	{name = "Redo", handler = editor_command_redo},
@@ -138,6 +145,145 @@ editor_command_del :: proc(cmd_context: ^command.Context, invocation: command.In
 
 editor_command_exit :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
 	editor_request_close(.Quit, .Tag_Command)
+	return {}
+}
+
+editor_command_new :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	target := editor_command_source_target(cmd_context.source)
+	column_id := editor_look_column(target)
+	if column_id == 0 {
+		return errs.new(.NotFound, "view: no column is available for New", allocator = permanent())
+	}
+	remaining := invocation.argument
+	for {
+		path_argument, ok := strings.fields_iterator(&remaining)
+		if !ok {
+			break
+		}
+		path, path_err := editor_normalized_look_path(path_argument, target, context.temp_allocator)
+		if !errs.ok(path_err) {
+			return path_err
+		}
+		defer delete(path, context.temp_allocator)
+		buffer, alloc_err := editor_alloc_path_buffer(path)
+		if !errs.ok(alloc_err) {
+			return alloc_err
+		}
+		item, open_err := editor_open_buffer_in_column(buffer, column_id)
+		if !errs.ok(open_err) {
+			return open_err
+		}
+		editor_activate_window(item.window_id)
+		log.infof("view: New window=%d buffer=%d path=%q", u64(item.window_id), u64(buffer.id), path)
+	}
+	if strings.trim_space(invocation.argument) == "" {
+		buffer, alloc_err := editor_alloc_buffer("")
+		if !errs.ok(alloc_err) {
+			return alloc_err
+		}
+		item, open_err := editor_open_buffer_in_column(buffer, column_id)
+		if !errs.ok(open_err) {
+			return open_err
+		}
+		editor_activate_window(item.window_id)
+		log.infof("view: New window=%d buffer=%d", u64(item.window_id), u64(buffer.id))
+	}
+	return {}
+}
+
+editor_command_newcol :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	column_id, column_err := layout.add_column(&editor.workspace)
+	if !errs.ok(column_err) {
+		return column_err
+	}
+	buffer, alloc_err := editor_alloc_buffer("")
+	if !errs.ok(alloc_err) {
+		layout.remove_column(&editor.workspace, column_id)
+		return alloc_err
+	}
+	if tag_err := editor_init_column_tag(column_id); !errs.ok(tag_err) {
+		editor_destroy_buffer(buffer)
+		layout.remove_column(&editor.workspace, column_id)
+		return tag_err
+	}
+	item, open_err := editor_open_buffer_in_column(buffer, column_id)
+	if !errs.ok(open_err) {
+		editor_destroy_column_tag(column_id)
+		layout.remove_column(&editor.workspace, column_id)
+		return open_err
+	}
+	editor_activate_window(item.window_id)
+	log.infof("view: Newcol column=%d window=%d buffer=%d", u64(column_id), u64(item.window_id), u64(buffer.id))
+	return {}
+}
+
+editor_command_zerox :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	target := editor_command_source_target(cmd_context.source)
+	body := editor_target_body(target)
+	source_item := body.item
+	if source_item == nil {
+		source_item = editor_active_view()
+	}
+	if source_item == nil {
+		return errs.new(.Invalid_Input, "view: Zerox requires a window body", allocator = permanent())
+	}
+	buffer := editor_buffer_for_view(source_item)
+	if buffer == nil {
+		return errs.new(.Internal, "view: Zerox window has no buffer", allocator = permanent())
+	}
+	if buffer.kind == .Directory {
+		return errs.new(.Unsupported, "view: directory windows cannot be Zeroxed", allocator = permanent())
+	}
+	column_id := editor_look_column(target)
+	item, open_err := editor_open_buffer_in_column(buffer, column_id, false)
+	if !errs.ok(open_err) {
+		return open_err
+	}
+	item.selection = source_item.selection
+	item.first_line = source_item.first_line
+	item.first_row = source_item.first_row
+	item.wheel_remainder = source_item.wheel_remainder
+	item.wrap_mode = source_item.wrap_mode
+	item.horizontal_offset = source_item.horizontal_offset
+	item.line_numbers = source_item.line_numbers
+	editor_activate_window(item.window_id)
+	log.infof("view: Zerox window=%d buffer=%d from=%d", u64(item.window_id), u64(buffer.id), u64(source_item.window_id))
+	return {}
+}
+
+editor_command_delcol :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	target := editor_command_source_target(cmd_context.source)
+	column_id := editor_look_column(target)
+	if column_id == 0 {
+		return errs.new(.NotFound, "view: no column is available for Delcol", allocator = permanent())
+	}
+	return editor_request_close_column(column_id)
+}
+
+editor_command_get :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	target := editor_command_source_target(cmd_context.source)
+	body := editor_target_body(target)
+	if body.item == nil {
+		return errs.new(.Invalid_Input, "get: no current window", allocator = permanent())
+	}
+	buffer := editor_buffer_for_view(body.item)
+	if buffer == nil {
+		return errs.new(.Internal, "get: current window has no buffer", allocator = permanent())
+	}
+	path := buffer.path
+	if invocation.argument != "" {
+		resolved, path_err := editor_normalized_look_path(invocation.argument, target, context.temp_allocator)
+		if !errs.ok(path_err) {
+			return path_err
+		}
+		defer delete(resolved, context.temp_allocator)
+		path = resolved
+	}
+	return editor_reload_buffer(body.item, path)
+}
+
+editor_command_putall :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	editor_putall()
 	return {}
 }
 

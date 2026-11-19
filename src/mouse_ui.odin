@@ -83,11 +83,10 @@ editor_active_text_target :: proc() -> Mouse_Text_Target {
 		target.buffer_id = GLOBAL_TAG_BUFFER_ID
 		target.tag = &editor.global_tag
 	case .Column_Tag:
-		index, ok := layout.find_column(&editor.workspace, editor.active_column)
-		if !ok {
+		tag := editor_column_tag(editor.active_column)
+		if tag == nil {
 			return {}
 		}
-		tag := &editor.column_tags[index]
 		target.id = mouse.Target_ID(COLUMN_TAG_BUFFER_BASE + u64(editor.active_column))
 		target.column_id = editor.active_column
 		target.doc = &tag.doc
@@ -170,11 +169,13 @@ editor_text_target_by_id :: proc(id: mouse.Target_ID) -> Mouse_Text_Target {
 	}
 	if u64(id) > COLUMN_TAG_BUFFER_BASE && u64(id) < WINDOW_TAG_BUFFER_BASE {
 		column_id := layout.Column_ID(u64(id) - COLUMN_TAG_BUFFER_BASE)
-		index, found := layout.find_column(&editor.workspace, column_id)
-		if !found {
+		if _, found := layout.find_column(&editor.workspace, column_id); !found {
 			return {}
 		}
-		tag := &editor.column_tags[index]
+		tag := editor_column_tag(column_id)
+		if tag == nil {
+			return {}
+		}
 		return Mouse_Text_Target{
 			id = id,
 			kind = .Column_Tag,

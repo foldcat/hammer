@@ -60,6 +60,7 @@ Editor :: struct {
 	views:                  view.State,
 	global_tag:             tagstate.State,
 	column_tags:            [layout.MAX_COLUMNS]tagstate.State,
+	column_tag_ids:         [layout.MAX_COLUMNS]layout.Column_ID,
 	active_text_kind:       Text_Kind,
 	active_column:          layout.Column_ID,
 	typing_group:           u64,
@@ -325,9 +326,10 @@ editor_destroy :: proc() {
 	}
 	editor_cancel_tag_requests(&editor.global_tag)
 	tagstate.destroy(&editor.global_tag)
-	for column_index in 0 ..< editor.workspace.column_count {
-		editor_cancel_tag_requests(&editor.column_tags[column_index])
-		tagstate.destroy(&editor.column_tags[column_index])
+	for column_index in 0 ..< layout.MAX_COLUMNS {
+		if editor.column_tag_ids[column_index] != 0 {
+			editor_destroy_column_tag(editor.column_tag_ids[column_index])
+		}
 	}
 	lifecycle.close_guard_destroy(&editor.close_guard)
 	for index in 0 ..< view.MAX_VIEWS {
@@ -650,51 +652,175 @@ editor_dirty :: proc() -> bool {
 	return txn.doc_revision(&editor.buffer.doc) != editor.buffer.saved_revision
 }
 
-editor_save :: proc() {
-	if editor.buffer.kind != .File {
-		editor_report(errs.new(.Unsupported, "save: directory and error windows cannot be saved as files", allocator = context.temp_allocator))
-		return
+editor_save_buffer :: proc(buffer: ^Editor_Buffer) -> errs.Error {
+	if buffer == nil {
+		return errs.new(.Invalid_Input, "save: no buffer", allocator = context.temp_allocator)
 	}
-	if editor.buffer.path == "" {
-		editor_report(errs.new(
+	if buffer.kind != .File {
+		return errs.new(.Unsupported, "save: directory and error windows cannot be saved as files", allocator = context.temp_allocator)
+	}
+	if buffer.path == "" {
+		return errs.new(
 			.Unsupported,
 			"save: no file path; Save As requires a destination from tag commands",
 			allocator = context.temp_allocator,
-		))
-		return
+		)
 	}
-	if !editor_dirty() {
-		log.debugf("file: %s is already saved", editor.buffer.path)
-		return
+	revision := txn.doc_revision(&buffer.doc)
+	if revision == buffer.saved_revision {
+		log.debugf("file: %s is already saved", buffer.path)
+		return {}
 	}
 
-	revision := txn.doc_revision(&editor.buffer.doc)
 	result, err := filesave.save_tree(
-		{tree = &editor.buffer.doc.tree, root = editor.buffer.doc.tree.root, revision = revision},
-		editor.buffer.path,
-		editor.buffer.metadata,
-		{disk_check = .Unchanged, expected = editor.buffer.capture},
+		{tree = &buffer.doc.tree, root = buffer.doc.tree.root, revision = revision},
+		buffer.path,
+		buffer.metadata,
+		{disk_check = .Unchanged, expected = buffer.capture},
 		context.temp_allocator,
 	)
 	if !errs.ok(err) {
 		if result.replaced {
 			log.error("file: save published the destination but did not complete; buffer remains dirty and must not be blindly retried")
 		}
-		editor_report(err)
-		return
+		return err
 	}
-	if result.revision != txn.doc_revision(&editor.buffer.doc) {
-		editor_report(errs.new(
+	if result.revision != txn.doc_revision(&buffer.doc) {
+		return errs.new(
 			.Conflict,
 			"file: saved revision no longer matches the current buffer",
 			allocator = context.temp_allocator,
-		))
-		return
+		)
 	}
-	editor.buffer.saved_revision = result.revision
-	editor.buffer.capture = result.capture
+	buffer.saved_revision = result.revision
+	buffer.capture = result.capture
 	editor_refresh_window_tags()
-	log.infof("file: saved %s (revision %d)", editor.buffer.path, result.revision)
+	log.infof("file: saved %s (revision %d)", buffer.path, result.revision)
+	return {}
+}
+
+editor_save :: proc() {
+	editor_report(editor_save_buffer(editor.buffer))
+}
+
+editor_putall :: proc() {
+	for index in 0 ..< view.MAX_VIEWS {
+		buffer := &editor.buffers[index]
+		if buffer.id == 0 || buffer.kind != .File || buffer.path == "" ||
+			txn.doc_revision(&buffer.doc) == buffer.saved_revision {
+			continue
+		}
+		info, stat_err := os.stat(buffer.path, context.temp_allocator)
+		if stat_err != nil {
+			log.warnf("file: no automatic Put of %s: %v", buffer.path, stat_err)
+			continue
+		}
+		regular := info.type == .Regular
+		os.file_info_delete(info, context.temp_allocator)
+		if !regular {
+			continue
+		}
+		editor_report(editor_save_buffer(buffer))
+	}
+}
+
+editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
+	if item == nil || path == "" {
+		return errs.new(.Invalid_Input, "get: no window or file name", allocator = permanent())
+	}
+	buffer := editor_buffer_for_view(item)
+	if buffer == nil {
+		return errs.new(.Internal, "get: window has no buffer", allocator = permanent())
+	}
+	if buffer.kind == .Errors {
+		return errs.new(.Unsupported, "get: error windows cannot be reloaded", allocator = permanent())
+	}
+
+	editor_cancel_close_review()
+	snapshot := lifecycle.Buffer_Snapshot{
+		id = u64(buffer.id),
+		generation = buffer.generation,
+		revision = txn.doc_revision(&buffer.doc),
+		view_count = view.buffer_view_count(&editor.views, buffer.id),
+		dirty = txn.doc_revision(&buffer.doc) != buffer.saved_revision,
+	}
+	request := lifecycle.Close_Request{
+		kind = .Close_Buffer,
+		origin = .Tag_Command,
+		buffer_id = snapshot.id,
+		buffer_generation = snapshot.generation,
+	}
+	if err := lifecycle.close_request(&editor.close_guard, request, []lifecycle.Buffer_Snapshot{snapshot}); !errs.ok(err) {
+		return err
+	}
+	if !lifecycle.close_guard_ready(&editor.close_guard) {
+		log.warnf("get: %s has unsaved text; reload blocked", buffer.path)
+		return {}
+	}
+	lifecycle.close_guard_reset(&editor.close_guard)
+
+	loaded: Editor_Buffer
+	if buffer.kind == .File {
+		if err := editor_buffer_init(&loaded, 0, path); !errs.ok(err) {
+			return err
+		}
+	} else {
+		content, err := directory.read(path, {}, context.temp_allocator)
+		if !errs.ok(err) {
+			owned := errs.new(err.kind, err.message, allocator = permanent())
+			errs.destroy(&err)
+			return owned
+		}
+		defer delete(content, context.temp_allocator)
+		if init_err := txn.doc_init_from_bytes(&loaded.doc, content, {}, permanent()); !errs.ok(init_err) {
+			return init_err
+		}
+	}
+	defer txn.doc_destroy(&loaded.doc)
+	defer delete(loaded.path, permanent())
+
+	content, read_err := rope.tree_read_all(&loaded.doc.tree, {0, rope.tree_byte_count(&loaded.doc.tree)}, context.temp_allocator)
+	if !errs.ok(read_err) {
+		owned := errs.new(read_err.kind, read_err.message, allocator = permanent())
+		errs.destroy(&read_err)
+		return owned
+	}
+	defer delete(content, context.temp_allocator)
+	new_total := len(content)
+	after := txn.Selection{
+		anchor = min(item.selection.anchor, new_total),
+		active = min(item.selection.active, new_total),
+		affinity = item.selection.affinity,
+	}
+	transaction := txn.Transaction{
+		source = .Reload,
+		base_revision = txn.doc_revision(&buffer.doc),
+		ops = []txn.Operation{txn.Replace{range = {0, rope.tree_byte_count(&buffer.doc.tree)}, data = content}},
+		after_selection = after,
+	}
+	if err := txn.doc_apply(&buffer.doc, &transaction, permanent()); !errs.ok(err) {
+		return err
+	}
+	item.selection = after
+	view.transform_after_edit(&editor.views, item.window_id, buffer.id, transaction.ops, new_total)
+	for index in 0 ..< view.MAX_VIEWS {
+		other := &editor.views.views[index]
+		if other.window_id != 0 && other.buffer_id == buffer.id {
+			other.first_line = 0
+			other.first_row = 0
+			other.wheel_remainder = 0
+			other.horizontal_offset = 0
+		}
+	}
+	buffer.regex_history = {}
+	if path == buffer.path {
+		buffer.capture = loaded.capture
+		buffer.metadata = loaded.metadata
+		buffer.saved_revision = txn.doc_revision(&buffer.doc)
+	}
+	editor_refresh_window_tags()
+	log.infof("file: reloaded %s window=%d buffer=%d revision=%d", path, u64(item.window_id), u64(buffer.id), txn.doc_revision(&buffer.doc))
+	return {}
 }
 
 editor_cancel_close_review :: proc() {
@@ -788,6 +914,96 @@ editor_close_active_view :: proc() {
 	editor_cancel_pointer_gesture()
 	lifecycle.close_guard_reset(&editor.close_guard)
 	log.infof("view: closed window %d; %d views remain", u64(window_id), editor.views.view_count)
+}
+
+editor_request_close_column :: proc(column_id: layout.Column_ID) -> errs.Error {
+	column_index, found := layout.find_column(&editor.workspace, column_id)
+	if !found {
+		return errs.new(.NotFound, "view: cannot delete a missing column", allocator = permanent())
+	}
+	editor_cancel_close_review()
+	snapshots: [view.MAX_VIEWS]lifecycle.Buffer_Snapshot
+	snapshot_count := 0
+	for index in 0 ..< view.MAX_VIEWS {
+		item := &editor.views.views[index]
+		if item.window_id == 0 {
+			continue
+		}
+		item_column, _, item_found := layout.find_window(&editor.workspace, item.window_id)
+		if !item_found || item_column != column_index {
+			continue
+		}
+		buffer := editor_buffer_for_view(item)
+		if buffer == nil {
+			return errs.new(.Internal, "view: column window has no buffer", allocator = permanent())
+		}
+		duplicate := false
+		for previous in snapshots[:snapshot_count] {
+			if previous.id == u64(buffer.id) {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		snapshots[snapshot_count] = {
+			id = u64(buffer.id),
+			generation = buffer.generation,
+			revision = txn.doc_revision(&buffer.doc),
+			view_count = view.buffer_view_count(&editor.views, buffer.id),
+			dirty = txn.doc_revision(&buffer.doc) != buffer.saved_revision,
+		}
+		snapshot_count += 1
+	}
+	request := lifecycle.Close_Request{kind = .Close_Column, origin = .Tag_Command}
+	if err := lifecycle.close_request(&editor.close_guard, request, snapshots[:snapshot_count]); !errs.ok(err) {
+		return err
+	}
+	if !lifecycle.close_guard_ready(&editor.close_guard) {
+		log.warn("view: column has unsaved text; deletion blocked until it is saved or explicitly discarded")
+		return {}
+	}
+
+	for index in 0 ..< view.MAX_VIEWS {
+		item := &editor.views.views[index]
+		if item.window_id == 0 {
+			continue
+		}
+		item_column, _, item_found := layout.find_window(&editor.workspace, item.window_id)
+		if !item_found || item_column != column_index {
+			continue
+		}
+		buffer_id := item.buffer_id
+		editor_cancel_delayed_paste(&item.delayed_paste)
+		editor_cancel_delayed_cut(&item.delayed_cut)
+		editor_cancel_tag_requests(&item.tag)
+		tagstate.destroy(&item.tag)
+		view.remove(&editor.views, item.window_id)
+		if view.buffer_view_count(&editor.views, buffer_id) == 0 {
+			editor_destroy_buffer(editor_buffer_by_id(buffer_id))
+		}
+	}
+	editor_destroy_column_tag(column_id)
+	layout.remove_column(&editor.workspace, column_id)
+	lifecycle.close_guard_reset(&editor.close_guard)
+	editor_cancel_pointer_gesture()
+	editor.active_column = 0
+	editor.active_text_kind = .Body
+	if editor.active_window != 0 {
+		if _, _, active_found := layout.find_window(&editor.workspace, editor.active_window); !active_found {
+			editor.active_window = 0
+			editor.buffer = nil
+		}
+	}
+	if first := editor_first_view(); first != nil {
+		editor_activate_window(first.window_id)
+	}
+	log.infof("view: deleted column %d; %d columns and %d views remain", u64(column_id), editor.workspace.column_count, editor.views.view_count)
+	if editor.views.view_count == 0 {
+		request_quit(.User_Request, "editor-close-last-column")
+	}
+	return {}
 }
 
 MAX_ERROR_WINDOW_BYTES :: 256 * 1024

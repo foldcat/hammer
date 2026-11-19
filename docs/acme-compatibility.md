@@ -11,8 +11,8 @@ Acme behavior, not an implementation to copy mechanically.
 - Columns contain independently sized windows. Window and column controls
   support dragging, moving, resizing, and reordering. Covered by `layout-test`.
 - Buffers and views are separate. Ordinary windows own independent buffers;
-  views have independent selections and viewport state. The core supports
-  multiple views of one buffer, although no product Zerox command exists yet.
+  views have independent selections and viewport state. Zerox creates another
+  product view of the same non-directory buffer with independent UI state.
 - Global, column, and window tags are editable. Window tags regenerate `Put`
   for dirty file buffers without overwriting the user's command suffix.
   Covered by `tag-test`.
@@ -57,12 +57,15 @@ Acme behavior, not an implementation to copy mechanically.
   product executes inline or 2-1 chord scripts against the current window body
   and keeps other views' selections transformed. Covered by the Edit unit tests
   and inline-script `edit-test`; the chord path has no dedicated UI scenario.
-- `Del`, `Put`, `Undo`, `Redo`, `Look`, and the implemented clipboard commands
-  operate through their ordinary editor paths. A bounded parser and exact-name
-  registry dispatch them with revalidated source and argument snapshots;
-  unknown text never falls through to a shell. The integrated
-  `compatibility-test` exercises these behaviors together rather than treating
-  each window feature as an isolated callback.
+- `Del`, `Delcol`, `Get`, `New`, `Newcol`, `Put`, `Putall`, `Zerox`, `Undo`,
+  `Redo`, `Look`, and the implemented clipboard commands operate through their
+  ordinary editor paths. Get loads into temporary storage before a transactional
+  replacement and blocks dirty data loss; Delcol validates all buffers before
+  removing any view; Putall saves each dirty named regular-file buffer once.
+  A bounded parser and exact-name registry dispatch commands with revalidated
+  source and argument snapshots; unknown text never falls through to a shell.
+  `builtin-test` covers the window/file commands, while `compatibility-test`
+  exercises their neighbors in integrated window workflows.
 
 ## Intentional modernization
 
@@ -83,11 +86,8 @@ Acme behavior, not an implementation to copy mechanically.
   product Look address integration, external command execution, and asynchronous
   command output belong to M08/M09. Edit loops, display/file commands, pipes,
   and other coverage beyond the implemented primitives and `s` remain deferred.
-  Directory `Get`, `New`, `Newcol`, `Zerox`, and the other unregistered commands
-  are not claimed as working merely because their names are recognized or
-  visible in tags.
-- A product command for multiple views of one buffer (Zerox) is deferred; only
-  the underlying core view model and tests currently exist.
+  Other unregistered command names are not claimed as working merely because
+  they are recognized or visible in tags.
 - Per-view gutter toggles are represented in core state; no product command for
   changing them at runtime currently exists.
 - Persistent layout restoration, filesystem projection, local IPC automation,
