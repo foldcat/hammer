@@ -680,3 +680,174 @@ test_async_runtime_error_replays_successful_prefix :: proc(t: ^testing.T) {
 	errs.destroy(&undo_err)
 	expect_content(t, &doc, "one\n")
 }
+
+@(test)
+test_multi_buffer_results_apply_after_shared_validation :: proc(t: ^testing.T) {
+	first_doc, second_doc: txn.Doc
+	init_doc(t, &first_doc, "first")
+	init_doc(t, &second_doc, "second")
+	defer txn.doc_destroy(&first_doc)
+	defer txn.doc_destroy(&second_doc)
+	first_selection, second_selection: txn.Selection
+	first_history, second_history: address.Regex_History
+
+	first_result := edit.Result{
+		target_id = 1,
+		target_generation = 10,
+		source_revision = 0,
+		request_id = 100,
+		grouping_key = 41,
+		batches = []edit.Transaction_Batch{{
+			ops = []txn.Operation{txn.Insert{pos = 0, data = transmute([]byte)string("A")}},
+			after_selection = {anchor = 0, active = 1, affinity = .Right},
+		}},
+		selection = {anchor = 0, active = 1, affinity = .Right},
+	}
+	second_result := edit.Result{
+		target_id = 2,
+		target_generation = 20,
+		source_revision = 0,
+		request_id = 100,
+		grouping_key = 41,
+		batches = []edit.Transaction_Batch{{
+			ops = []txn.Operation{txn.Insert{pos = 6, data = transmute([]byte)string("B")}},
+			after_selection = {anchor = 6, active = 7, affinity = .Right},
+		}},
+		selection = {anchor = 6, active = 7, affinity = .Right},
+	}
+	targets := []edit.Result_Target{
+		{
+			doc = &first_doc,
+			selection = &first_selection,
+			history = &first_history,
+			result = &first_result,
+			target_id = 1,
+			target_generation = 10,
+			request_id = 100,
+		},
+		{
+			doc = &second_doc,
+			selection = &second_selection,
+			history = &second_history,
+			result = &second_result,
+			target_id = 2,
+			target_generation = 20,
+			request_id = 100,
+		},
+	}
+
+	apply_err := edit.apply_results(targets, context.allocator)
+	testing.expect(t, errs.ok(apply_err))
+	errs.destroy(&apply_err)
+	expect_content(t, &first_doc, "Afirst")
+	expect_content(t, &second_doc, "secondB")
+	expect_selection(t, first_selection, 0, 1)
+	expect_selection(t, second_selection, 6, 7)
+	testing.expect(t, txn.doc_log_len(&first_doc) == 1)
+	testing.expect(t, txn.doc_log_len(&second_doc) == 1)
+	testing.expect(t, first_doc.log[0].grouping_key == 41 && second_doc.log[0].grouping_key == 41)
+}
+
+@(test)
+test_multi_buffer_stale_generation_applies_nothing :: proc(t: ^testing.T) {
+	first_doc, second_doc: txn.Doc
+	init_doc(t, &first_doc, "first")
+	init_doc(t, &second_doc, "second")
+	defer txn.doc_destroy(&first_doc)
+	defer txn.doc_destroy(&second_doc)
+	first_selection, second_selection: txn.Selection
+	first_history, second_history: address.Regex_History
+	first_result := edit.Result{
+		target_id = 1,
+		target_generation = 10,
+		request_id = 100,
+		grouping_key = 41,
+		batches = []edit.Transaction_Batch{{
+			ops = []txn.Operation{txn.Insert{pos = 0, data = transmute([]byte)string("A")}},
+			after_selection = {anchor = 0, active = 1, affinity = .Right},
+		}},
+		selection = {anchor = 0, active = 1, affinity = .Right},
+	}
+	second_result := edit.Result{
+		target_id = 2,
+		target_generation = 20,
+		request_id = 100,
+		grouping_key = 41,
+		batches = []edit.Transaction_Batch{{
+			ops = []txn.Operation{txn.Insert{pos = 6, data = transmute([]byte)string("B")}},
+			after_selection = {anchor = 6, active = 7, affinity = .Right},
+		}},
+		selection = {anchor = 6, active = 7, affinity = .Right},
+	}
+	targets := []edit.Result_Target{
+		{doc = &first_doc, selection = &first_selection, history = &first_history, result = &first_result, target_id = 1, target_generation = 10, request_id = 100},
+		{doc = &second_doc, selection = &second_selection, history = &second_history, result = &second_result, target_id = 2, target_generation = 21, request_id = 100},
+	}
+
+	apply_err := edit.apply_results(targets, context.allocator)
+	testing.expect(t, apply_err.kind == .Conflict)
+	errs.destroy(&apply_err)
+	expect_content(t, &first_doc, "first")
+	expect_content(t, &second_doc, "second")
+	expect_selection(t, first_selection, 0, 0)
+	expect_selection(t, second_selection, 0, 0)
+	testing.expect(t, txn.doc_log_len(&first_doc) == 0)
+	testing.expect(t, txn.doc_log_len(&second_doc) == 0)
+}
+
+@(test)
+test_multi_buffer_stale_revision_applies_nothing :: proc(t: ^testing.T) {
+	first_doc, second_doc: txn.Doc
+	init_doc(t, &first_doc, "first")
+	init_doc(t, &second_doc, "second")
+	defer txn.doc_destroy(&first_doc)
+	defer txn.doc_destroy(&second_doc)
+	first_selection, second_selection: txn.Selection
+	first_history, second_history: address.Regex_History
+
+	local_transaction := txn.Transaction{
+		source = .Typing,
+		base_revision = 0,
+		ops = []txn.Operation{txn.Insert{pos = 0, data = transmute([]byte)string("!")}},
+	}
+	local_err := txn.doc_apply(&second_doc, &local_transaction, context.allocator)
+	testing.expect(t, errs.ok(local_err))
+	errs.destroy(&local_err)
+
+	first_result := edit.Result{
+		target_id = 1,
+		target_generation = 10,
+		request_id = 100,
+		grouping_key = 41,
+		batches = []edit.Transaction_Batch{{
+			ops = []txn.Operation{txn.Insert{pos = 0, data = transmute([]byte)string("A")}},
+			after_selection = {anchor = 0, active = 1, affinity = .Right},
+		}},
+		selection = {anchor = 0, active = 1, affinity = .Right},
+	}
+	second_result := edit.Result{
+		target_id = 2,
+		target_generation = 20,
+		request_id = 100,
+		grouping_key = 41,
+		batches = []edit.Transaction_Batch{{
+			ops = []txn.Operation{txn.Insert{pos = 7, data = transmute([]byte)string("B")}},
+			after_selection = {anchor = 7, active = 8, affinity = .Right},
+		}},
+		selection = {anchor = 7, active = 8, affinity = .Right},
+	}
+	targets := []edit.Result_Target{
+		{doc = &first_doc, selection = &first_selection, history = &first_history, result = &first_result, target_id = 1, target_generation = 10, request_id = 100},
+		{doc = &second_doc, selection = &second_selection, history = &second_history, result = &second_result, target_id = 2, target_generation = 20, request_id = 100},
+	}
+
+	apply_err := edit.apply_results(targets, context.allocator)
+	testing.expect(t, apply_err.kind == .Conflict)
+	errs.destroy(&apply_err)
+	expect_content(t, &first_doc, "first")
+	expect_content(t, &second_doc, "!second")
+	expect_selection(t, first_selection, 0, 0)
+	expect_selection(t, second_selection, 0, 0)
+	testing.expect(t, txn.doc_log_len(&first_doc) == 0)
+	testing.expect(t, txn.doc_log_len(&second_doc) == 1)
+}

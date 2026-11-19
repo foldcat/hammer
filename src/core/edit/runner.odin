@@ -236,9 +236,18 @@ runner_reset :: proc(runner: ^Runner) {
 	runner^ = {}
 }
 
-// apply_result validates all revision metadata before changing live state.
-// Successful command prefixes are replayed in order through the transaction
-// engine. Cancellation and stale results apply nothing.
+// Result_Target borrows one result and its live destination state until
+// apply_results returns. Each document may occur only once in a target list.
+Result_Target :: struct {
+	doc:               ^txn.Doc,
+	selection:         ^txn.Selection,
+	history:           ^address.Regex_History,
+	result:            ^Result,
+	target_id:         u64,
+	target_generation: u64,
+	request_id:        Request_ID,
+}
+
 apply_result :: proc(
 	doc: ^txn.Doc,
 	selection: ^txn.Selection,
@@ -249,46 +258,80 @@ apply_result :: proc(
 	request_id: Request_ID,
 	allocator := context.allocator,
 ) -> errs.Error {
-	if doc == nil || selection == nil || history == nil || result == nil {
-		return errs.new(.Invalid_Input, "edit: nil result application input", allocator = allocator)
-	}
-	if result.target_id != target_id || result.target_generation != target_generation || result.request_id != request_id {
-		return errs.new(.Conflict, "edit: result target or request is stale", allocator = allocator)
-	}
-	if result.source_revision != txn.doc_revision(doc) {
-		return errs.newf(
-			.Conflict,
-			"edit: source revision %d is stale; current revision is %d",
-			result.source_revision,
-			txn.doc_revision(doc),
-			allocator = allocator,
-		)
-	}
-	if result.err.kind == .Cancelled {
-		return errs.new(.Cancelled, result.err.message, allocator = allocator)
-	}
-	if len(result.batches) > MAX_COMMANDS {
-		return errs.new(.Invalid_Input, "edit: result contains too many transactions", allocator = allocator)
-	}
-	for batch in result.batches {
-		transaction := txn.Transaction{
-			source = .Edit,
-			base_revision = txn.doc_revision(doc),
-			grouping_key = result.grouping_key,
-			ops = batch.ops,
-			after_selection = batch.after_selection,
+	targets := []Result_Target{{
+		doc = doc,
+		selection = selection,
+		history = history,
+		result = result,
+		target_id = target_id,
+		target_generation = target_generation,
+		request_id = request_id,
+	}}
+	return apply_results(targets, allocator)
+}
+
+// apply_results validates every target's identity, generation, request, and
+// source revision before applying any transaction. A stale target therefore
+// changes no document, selection, or regex history. Application errors retain
+// the existing successful-prefix semantics; this is not multi-document
+// rollback.
+apply_results :: proc(targets: []Result_Target, allocator := context.allocator) -> errs.Error {
+	for target, index in targets {
+		if target.doc == nil || target.selection == nil || target.history == nil || target.result == nil {
+			return errs.newf(.Invalid_Input, "edit: nil result application input at target %d", index, allocator = allocator)
 		}
-		if err := txn.doc_apply(doc, &transaction, allocator); !errs.ok(err) {
-			return err
+		for previous in targets[:index] {
+			if previous.doc == target.doc {
+				return errs.newf(.Invalid_Input, "edit: duplicate document at target %d", index, allocator = allocator)
+			}
 		}
 	}
-	if !txn.selection_in_bounds(result.selection, rope.tree_byte_count(&doc.tree)) {
-		return errs.new(.Internal, "edit: worker returned an out-of-bounds selection", allocator = allocator)
+	for target in targets {
+		result := target.result
+		if result.target_id != target.target_id || result.target_generation != target.target_generation ||
+			result.request_id != target.request_id {
+			return errs.new(.Conflict, "edit: result target or request is stale", allocator = allocator)
+		}
+		if result.source_revision != txn.doc_revision(target.doc) {
+			return errs.newf(
+				.Conflict,
+				"edit: source revision %d is stale; current revision is %d",
+				result.source_revision,
+				txn.doc_revision(target.doc),
+				allocator = allocator,
+			)
+		}
 	}
-	selection^ = result.selection
-	history^ = result.history
-	if !errs.ok(result.err) {
-		return errs.new(result.err.kind, result.err.message, allocator = allocator)
+	for target in targets {
+		if target.result.err.kind == .Cancelled {
+			return errs.new(.Cancelled, target.result.err.message, allocator = allocator)
+		}
+		if len(target.result.batches) > MAX_COMMANDS {
+			return errs.new(.Invalid_Input, "edit: result contains too many transactions", allocator = allocator)
+		}
+	}
+	for target in targets {
+		result := target.result
+		for batch in result.batches {
+			transaction := txn.Transaction{
+				source = .Edit,
+				base_revision = txn.doc_revision(target.doc),
+				grouping_key = result.grouping_key,
+				ops = batch.ops,
+				after_selection = batch.after_selection,
+			}
+			if err := txn.doc_apply(target.doc, &transaction, allocator); !errs.ok(err) {
+				return err
+			}
+		}
+		if !txn.selection_in_bounds(result.selection, rope.tree_byte_count(&target.doc.tree)) {
+			return errs.new(.Internal, "edit: worker returned an out-of-bounds selection", allocator = allocator)
+		}
+		target.selection^ = result.selection
+		target.history^ = result.history
+		if !errs.ok(result.err) {
+			return errs.new(result.err.kind, result.err.message, allocator = allocator)
+		}
 	}
 	return {}
 }
