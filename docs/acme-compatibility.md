@@ -45,8 +45,14 @@ Acme behavior, not an implementation to copy mechanically.
   comma, semicolon, and native regular-expression addresses into checked byte
   ranges over chunked ropes. Regex searches wrap, reuse an explicit previous-
   pattern history, and implement Plan 9 longest-match and backward-search
-  semantics. Covered by the address unit tests; product Look and Edit
-  integration are not implied.
+  semantics. Covered by the address unit tests; product Look address integration
+  is not implied.
+- `Edit` implements bare addresses and the foundational `a`, `c`, `i`, `d`, `m`,
+  and `t` commands with delimited or multiline text. Commands run sequentially
+  against intermediate documents and share one undo group per invocation. The
+  product executes inline or 2-1 chord scripts against the current window body
+  and keeps other views' selections transformed. Covered by the Edit unit tests
+  and inline-script `edit-test`; the chord path has no dedicated UI scenario.
 - `Del`, `Put`, `Undo`, `Redo`, `Look`, and the implemented clipboard commands
   operate through their ordinary editor paths. A bounded parser and exact-name
   registry dispatch them with revalidated source and argument snapshots;
@@ -69,11 +75,12 @@ Acme behavior, not an implementation to copy mechanically.
 
 ## Unsupported or deferred behavior
 
-- Additional internal command coverage, Acme Edit, product address integration,
-  external command execution, and asynchronous command output belong to M08/M09.
-  Directory `Get`, `New`, `Newcol`, `Zerox`, and the other unregistered commands
-  are not claimed as working merely because their names are recognized or
-  visible in tags.
+- Additional internal command coverage, the remaining Acme Edit commands,
+  product Look address integration, external command execution, and asynchronous
+  command output belong to M08/M09. Edit substitutions, loops, display/file
+  commands, and pipes are not claimed by the initial subset. Directory `Get`,
+  `New`, `Newcol`, `Zerox`, and the other unregistered commands are not claimed
+  as working merely because their names are recognized or visible in tags.
 - A product command for multiple views of one buffer (Zerox) is deferred; only
   the underlying core view model and tests currently exist.
 - Per-view gutter toggles are represented in core state; no product command for

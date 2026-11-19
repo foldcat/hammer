@@ -83,27 +83,47 @@ parse :: proc(text: string, allocator := context.allocator) -> (Expression, errs
 			allocator = allocator,
 		)
 	}
-	parser := Parser{text = text, allocator = allocator}
-	skip_blanks(&parser)
-	if at_end(&parser) {
-		return {}, errs.new(.Invalid_Input, "address: empty address", allocator = allocator)
-	}
-	root, err := parse_compound(&parser, 0, false)
+	expression, consumed, err := parse_prefix(text, allocator)
 	if !errs.ok(err) {
 		return {}, err
 	}
-	skip_blanks(&parser)
-	if !at_end(&parser) {
+	if consumed != len(text) {
 		return {}, errs.newf(
 			.Invalid_Input,
 			"address: unexpected byte %q at offset %d",
-			parser.text[parser.index],
-			parser.index,
+			text[consumed],
+			consumed,
+			allocator = allocator,
+		)
+	}
+	return expression, {}
+}
+
+// parse_prefix parses one address at the start of text and returns the byte
+// offset immediately after it and any trailing horizontal blanks. Text after
+// the address is borrowed only for the call and does not count toward the
+// address budget.
+parse_prefix :: proc(text: string, allocator := context.allocator) -> (Expression, int, errs.Error) {
+	parser := Parser{text = text, allocator = allocator}
+	skip_blanks(&parser)
+	if at_end(&parser) {
+		return {}, 0, errs.new(.Invalid_Input, "address: empty address", allocator = allocator)
+	}
+	root, err := parse_compound(&parser, 0, false)
+	if !errs.ok(err) {
+		return {}, 0, err
+	}
+	skip_blanks(&parser)
+	if parser.index > MAX_ADDRESS_BYTES {
+		return {}, 0, errs.newf(
+			.Resource_Limit,
+			"address: address exceeds the %d-byte budget",
+			MAX_ADDRESS_BYTES,
 			allocator = allocator,
 		)
 	}
 	parser.result.root = root
-	return parser.result, {}
+	return parser.result, parser.index, {}
 }
 
 at_end :: proc(parser: ^Parser) -> bool {
@@ -311,7 +331,7 @@ parse_compound :: proc(parser: ^Parser, depth: int, allow_empty: bool) -> (int, 
 		)
 	}
 	skip_blanks(parser)
-	if at_end(parser) {
+	if at_end(parser) || (allow_empty && !simple_start(parser.text[parser.index])) {
 		if allow_empty {
 			return -1, {}
 		}

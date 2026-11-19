@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M08.04 Implement documented Edit command subset in dependency order
+## Current task: M08.05 Complete required Edit coverage

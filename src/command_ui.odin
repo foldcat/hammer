@@ -4,16 +4,19 @@ import "core:log"
 import "core:strings"
 
 import command "core/command"
+import edit "core/edit"
 import editing "core/editing"
 import errs "core/errs"
 import mouse "core/mouse"
 import rope "core/rope"
 import txn "core/txn"
+import view "core/view"
 
 EDITOR_COMMANDS :: []command.Entry {
 	{name = "Del", handler = editor_command_del},
 	{name = "Exit", handler = editor_command_exit},
 	{name = "Put", handler = editor_command_put},
+	{name = "Edit", handler = editor_command_edit},
 	{name = "Undo", handler = editor_command_undo},
 	{name = "Redo", handler = editor_command_redo},
 	{name = "Cut", handler = editor_command_cut},
@@ -147,6 +150,70 @@ editor_command_put :: proc(cmd_context: ^command.Context, invocation: command.In
 		editor_save()
 	}
 	return {}
+}
+
+editor_command_edit :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	target := editor_command_source_target(cmd_context.source)
+	body := editor_target_body(target)
+	if body.doc == nil || body.selection == nil || body.item == nil {
+		return errs.new(.Invalid_Input, "edit: no current window", allocator = permanent())
+	}
+	buffer := editor_buffer_for_view(body.item)
+	if buffer == nil {
+		return errs.new(.Internal, "edit: current window has no buffer", allocator = permanent())
+	}
+
+	script := invocation.argument
+	owned: []byte
+	if cmd_context.argument_chord {
+		selected, ok := editor_command_argument_target(&cmd_context.argument)
+		if !ok {
+			return errs.new(.Conflict, "edit: chord argument is no longer current", allocator = permanent())
+		}
+		data, err := mouse.read_action_text(selected.doc, editing.selection_range(selected.selection^), context.temp_allocator)
+		if !errs.ok(err) {
+			return err
+		}
+		owned = data
+		script = string(data)
+	}
+	if owned != nil {
+		defer delete(owned, context.temp_allocator)
+	}
+	if strings.trim_space(script) == "" {
+		return {}
+	}
+
+	program, parse_err := edit.parse(script, permanent())
+	if !errs.ok(parse_err) {
+		return parse_err
+	}
+	defer edit.program_destroy(&program, permanent())
+
+	first_log := len(buffer.doc.log)
+	previous_revision := txn.doc_revision(&buffer.doc)
+	editor.typing_group = 0
+	editor.next_group += 1
+	if editor.next_group == 0 {
+		editor.next_group = 1
+	}
+	execute_err := edit.execute(body.doc, body.selection, &program, &buffer.regex_history, editor.next_group, permanent())
+	for index in first_log ..< len(buffer.doc.log) {
+		entry := &buffer.doc.log[index]
+		byte_count := 0 if entry.after_root == nil else entry.after_root.metrics.byte_count
+		view.transform_after_edit(&editor.views, body.item.window_id, body.item.buffer_id, entry.ops, byte_count)
+	}
+	if txn.doc_revision(&buffer.doc) != previous_revision {
+		editor_refresh_window_tags()
+	}
+	log.infof(
+		"edit: window=%d commands=%d transactions=%d revision=%d",
+		u64(body.window_id),
+		len(program.commands),
+		len(buffer.doc.log) - first_log,
+		txn.doc_revision(&buffer.doc),
+	)
+	return execute_err
 }
 
 editor_command_undo :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {

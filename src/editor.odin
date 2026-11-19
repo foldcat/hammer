@@ -5,6 +5,7 @@ import "core:log"
 import "core:os"
 import "core:strings"
 
+import address "core/address"
 import command "core/command"
 import directory "core/directory"
 import editing "core/editing"
@@ -47,6 +48,7 @@ Editor_Buffer :: struct {
 	capture:        fileload.Capture,
 	metadata:       filecodec.Metadata,
 	saved_revision: u64,
+	regex_history:  address.Regex_History,
 }
 
 Editor :: struct {
