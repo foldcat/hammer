@@ -12,6 +12,7 @@
 //   HAMMER_TEST_DPI_SCALES=...  comma-separated per-frame scales (at most 8)
 //   HAMMER_TEST_IGNORE_JOB=<path>  start the purpose-built ignore helper for Stop integration
 //   HAMMER_TEST_FLOOD_JOB=<path>  start the purpose-built flood helper for output integration
+//   HAMMER_TEST_PIPE_JOB=<path>   start the purpose-built selection pipe helper for replacement integration
 //   HAMMER_LOG=<path>           log file path; empty string disables file logging
 package main
 

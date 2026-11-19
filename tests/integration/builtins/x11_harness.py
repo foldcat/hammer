@@ -84,6 +84,7 @@ def main() -> int:
     source = sandbox / "source.txt"
     second = sandbox / "second.txt"
     other = sandbox / "other.txt"
+    pipe_source = sandbox / "pipe.txt"
     source.write_bytes(b"alpha\n")
     second.write_bytes(b"second\n")
     other.write_bytes(b"other\n")
@@ -203,6 +204,37 @@ def main() -> int:
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)
             process = None
+
+            pipe_source.write_bytes("pipe α β\n".encode("utf-8"))
+            pipe_log_path = sandbox / "pipe-hammer.log"
+            pipe_environment = environment.copy()
+            pipe_environment.pop("HAMMER_TEST_IGNORE_JOB")
+            pipe_environment.pop("HAMMER_TEST_FLOOD_JOB")
+            pipe_environment["HAMMER_TEST_PIPE_JOB"] = str(job_helper)
+            pipe_environment["XDG_STATE_HOME"] = str(sandbox / "pipe-state")
+            with pipe_log_path.open("wb") as pipe_log:
+                process = subprocess.Popen(
+                    [str(binary), "pipe.txt"],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=pipe_log,
+                    stderr=subprocess.STDOUT,
+                    env=pipe_environment,
+                )
+                pipe_window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, pipe_window)
+                x11.lib.XSetInputFocus(x11.display, pipe_window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                wait_for_log(pipe_log_path, "job: selection test helper started", args.timeout)
+                wait_for_log(pipe_log_path, "job: selection replaced", args.timeout)
+                execute(x11, pipe_window, "Putall", 10, 10, args.timeout, pipe_log_path, 1)
+                wait_for_log(pipe_log_path, "file: saved pipe.txt", args.timeout)
+                if pipe_source.read_bytes() != "filtered:pipe α β\n".encode("utf-8"):
+                    raise HarnessFailure(f"selection pipe wrote unexpected bytes: {pipe_source.read_bytes()!r}")
+                print("PASS: selection stdin is filtered and stdout replaces the selection in the real editor")
+                x11.tap(0xFF1B)
+                wait_for_exit(process, args.timeout, pipe_log_path)
+                process = None
             succeeded = True
             return 0
     finally:

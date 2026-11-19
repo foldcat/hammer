@@ -70,6 +70,27 @@ echo :: proc() -> int {
 	return 0
 }
 
+pipe :: proc() -> int {
+	input := make([dynamic]u8, 0, 1024, context.allocator)
+	defer delete(input)
+	buffer: [1024]u8
+	for {
+		count, err := os.read(os.stdin, buffer[:])
+		if count > 0 {
+			if len(input) + count > 64 * 1024 {
+				return 2
+			}
+			append(&input, ..buffer[:count])
+		}
+		if err != nil {
+			break
+		}
+	}
+	fmt.printf("filtered:%s", string(input[:]))
+	fmt.eprintln("pipe diagnostic")
+	return 0
+}
+
 flood :: proc() -> int {
 	total := 0
 	buffer: [4096]u8
@@ -117,6 +138,8 @@ main :: proc() {
 		code = report()
 	case "echo":
 		code = echo()
+	case "pipe":
+		code = pipe()
 	case "flood":
 		code = flood()
 	case "ignore":

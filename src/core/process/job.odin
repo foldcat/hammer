@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:strings"
 
 import errs "../errs"
+import txn "../txn"
 
 MAX_JOBS :: 32
 DEFAULT_STOP_GRACE_MS :: u64(500)
@@ -27,6 +28,8 @@ Job :: struct {
 	working_dir:     string,
 	environment:     []string,
 	input:           []byte,
+	selection_pipe:  Selection_Pipe,
+	has_selection_pipe: bool,
 	handle:          Handle,
 	pump:            Pump,
 	exit_status:     Exit_Status,
@@ -196,6 +199,44 @@ job_start :: proc(service: ^Job_Service, desc: Description, input: []byte, attac
 	return id, {}
 }
 
+job_start_selection :: proc(
+	service: ^Job_Service,
+	desc: Description,
+	doc: ^txn.Doc,
+	selection: txn.Selection,
+	target_id: u64,
+	target_generation: u64,
+	attachment: u64,
+	options: Selection_Pipe_Options = {},
+) -> (Job_ID, errs.Error) {
+	if service == nil || !service.initialized {
+		return 0, errs.new(.Invalid_Input, "process: job service is not initialized")
+	}
+	pipe: Selection_Pipe
+	if err := selection_pipe_init(
+		&pipe,
+		doc,
+		selection,
+		target_id,
+		target_generation,
+		u64(service.next_id),
+		options,
+		service.allocator,
+	); !errs.ok(err) {
+		return 0, err
+	}
+	pipe.target.window_id = attachment
+	id, start_err := job_start(service, desc, pipe.input, attachment)
+	if !errs.ok(start_err) {
+		selection_pipe_destroy(&pipe)
+		return 0, start_err
+	}
+	job := job_find(service, id)
+	job.selection_pipe = pipe
+	job.has_selection_pipe = true
+	return id, {}
+}
+
 // job_start_context borrows command and snapshot only for this synchronous
 // start. The retained Job owns independent copies of all context metadata.
 job_start_context :: proc(service: ^Job_Service, command: []string, snapshot: ^Context_Snapshot, input: []byte, attachment: u64) -> (Job_ID, errs.Error) {
@@ -331,6 +372,7 @@ job_cleanup :: proc(job: ^Job, allocator: runtime.Allocator) -> errs.Error {
 	delete(job.working_dir, allocator)
 	environment_destroy(job.environment, allocator)
 	delete(job.input, allocator)
+	selection_pipe_destroy(&job.selection_pipe)
 	errs.destroy(&job.err)
 	job^ = {}
 	return first

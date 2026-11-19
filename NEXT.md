@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M09.06 Implement selection stdin/output replacement
+## Current task: M09.07 Implement stale-target conflict behavior

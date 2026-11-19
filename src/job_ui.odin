@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:log"
 
 import errs "core/errs"
+import layout "core/layout"
 import process "core/process"
 import rope "core/rope"
 import txn "core/txn"
@@ -128,6 +129,45 @@ editor_job_flush_error :: proc(state: ^Editor_Job_Output, remaining: ^int) -> bo
 	return true
 }
 
+editor_job_drain_records :: proc(job: ^process.Job) {
+	for {
+		_, ok := process.pump_next(&job.pump)
+		if !ok {
+			break
+		}
+		process.pump_release(&job.pump)
+	}
+}
+
+editor_job_apply_selection :: proc(job: ^process.Job) -> errs.Error {
+	pipe := &job.selection_pipe
+	item, found := view.find(&editor.views, layout.Window_ID(pipe.target.window_id))
+	if !found || u64(item.buffer_id) != pipe.target.id {
+		process.selection_pipe_reject(pipe)
+		return errs.new(.Conflict, "job: selection source view is no longer available", allocator = permanent())
+	}
+	buffer := editor_buffer_by_id(item.buffer_id)
+	if buffer == nil || buffer.generation != pipe.target.generation {
+		process.selection_pipe_reject(pipe)
+		return errs.new(.Conflict, "job: selection target buffer is no longer available", allocator = permanent())
+	}
+	previous_revision := txn.doc_revision(&buffer.doc)
+	if err := process.selection_pipe_apply(pipe, &buffer.doc, u64(buffer.id), buffer.generation, u64(job.id)); !errs.ok(err) {
+		return err
+	}
+	item.selection = pipe.transaction.after_selection
+	editor_finish_edit(item, previous_revision, {})
+	log.infof(
+		"job: selection replaced id=%d window=%d buffer=%d revision=%d bytes=%d",
+		u64(job.id),
+		u64(item.window_id),
+		u64(buffer.id),
+		txn.doc_revision(&buffer.doc),
+		pipe.output_len,
+	)
+	return {}
+}
+
 editor_poll_jobs :: proc() {
 	process.job_service_poll(&editor.jobs, mouse_now_ms())
 	remaining := JOB_FRAME_OUTPUT_BUDGET
@@ -139,12 +179,9 @@ editor_poll_jobs :: proc() {
 			continue
 		}
 		if state.failed_id == job.id {
-			for {
-				_, ok := process.pump_next(&job.pump)
-				if !ok {
-					break
-				}
-				process.pump_release(&job.pump)
+			editor_job_drain_records(job)
+			if job.has_selection_pipe {
+				process.selection_pipe_abort(&job.selection_pipe)
 			}
 		} else {
 			if state.id != job.id {
@@ -156,14 +193,58 @@ editor_poll_jobs :: proc() {
 					editor_report(stop_err)
 				}
 			}
-			if state.id == job.id && remaining > 0 {
-				was_dirty, follow := editor_job_output_snapshot(state)
-				consumed, consume_err := process.output_consume(&state.output, &job.pump, min(remaining, process.DEFAULT_OUTPUT_BATCH_BYTES))
-				remaining -= consumed
-				editor_job_output_apply(state, was_dirty, follow)
-				if !errs.ok(consume_err) {
-					editor_job_queue_error(state, consume_err.message)
-					errs.destroy(&consume_err)
+			if state.id == job.id {
+				if job.has_selection_pipe {
+					pipe := &job.selection_pipe
+					if pipe.state == .Collecting && remaining > 0 {
+						was_dirty, follow := editor_job_output_snapshot(state)
+						consumed, consume_err := process.selection_pipe_consume(pipe, &job.pump, &state.output, remaining)
+						remaining -= consumed
+						editor_job_output_apply(state, was_dirty, follow)
+						if !errs.ok(consume_err) {
+							editor_job_queue_error(state, consume_err.message)
+							errs.destroy(&consume_err)
+							if process.job_active(job) {
+								_, stop_err := process.job_stop(&editor.jobs, job.id, mouse_now_ms())
+								editor_report(stop_err)
+							}
+						}
+					}
+					output_done := process.pump_drained(&job.pump)
+					if pipe.state == .Collecting && ((job.state == .Exited && output_done) || job.state == .FailedToStart) {
+						if job.state == .Exited && job.exit_status.success && job.err.kind == .None {
+							process.selection_pipe_ready(pipe)
+						} else {
+							process.selection_pipe_abort(pipe)
+						}
+					}
+					if pipe.state == .Ready {
+						apply_err := editor_job_apply_selection(job)
+						if !errs.ok(apply_err) {
+							log.warnf("job: selection apply failed id=%d kind=%v message=%s", u64(job.id), apply_err.kind, apply_err.message)
+							editor_job_queue_error(state, apply_err.message)
+							errs.destroy(&apply_err)
+						}
+					}
+					if (pipe.state == .Conflict || pipe.state == .Failed) && remaining > 0 && !process.selection_pipe_replay_done(pipe) {
+						was_dirty, follow := editor_job_output_snapshot(state)
+						replayed, replay_err := process.selection_pipe_replay(pipe, &state.output, remaining)
+						remaining -= replayed
+						editor_job_output_apply(state, was_dirty, follow)
+						if !errs.ok(replay_err) {
+							editor_report(replay_err)
+							pipe.replay_offset = pipe.output_len
+						}
+					}
+				} else if remaining > 0 {
+					was_dirty, follow := editor_job_output_snapshot(state)
+					consumed, consume_err := process.output_consume(&state.output, &job.pump, min(remaining, process.DEFAULT_OUTPUT_BATCH_BYTES))
+					remaining -= consumed
+					editor_job_output_apply(state, was_dirty, follow)
+					if !errs.ok(consume_err) {
+						editor_job_queue_error(state, consume_err.message)
+						errs.destroy(&consume_err)
+					}
 				}
 				editor_job_flush_error(state, &remaining)
 			}
@@ -180,6 +261,12 @@ editor_poll_jobs :: proc() {
 			}
 			if state.failed_id != job.id {
 				can_release = editor_job_flush_error(state, &remaining)
+				if job.has_selection_pipe {
+					pipe := &job.selection_pipe
+					if (pipe.state == .Conflict || pipe.state == .Failed) && !process.selection_pipe_replay_done(pipe) {
+						can_release = false
+					}
+				}
 			}
 			if can_release {
 				id := job.id
@@ -203,5 +290,33 @@ editor_start_flood_test_job :: proc(helper: string) -> errs.Error {
 		return errs.new(.Internal, "job: flood test helper did not start", allocator = permanent())
 	}
 	log.infof("job: flood test helper started id=%d process=%d", u64(id), u64(job.handle.id))
+	return {}
+}
+
+editor_start_selection_test_job :: proc(helper: string) -> errs.Error {
+	item := editor_active_view()
+	buffer := editor_buffer_for_view(item)
+	if item == nil || buffer == nil {
+		return errs.new(.NotFound, "job: selection test has no source view", allocator = permanent())
+	}
+	end := rope.tree_byte_count(&buffer.doc.tree)
+	item.selection = {anchor = end, active = 0, affinity = .Right}
+	id, start_err := process.job_start_selection(
+		&editor.jobs,
+		{command = {helper, "pipe"}},
+		&buffer.doc,
+		item.selection,
+		u64(buffer.id),
+		buffer.generation,
+		u64(item.window_id),
+	)
+	if !errs.ok(start_err) {
+		return start_err
+	}
+	job := process.job_find(&editor.jobs, id)
+	if job == nil || job.state != .Running {
+		return errs.new(.Internal, "job: selection test helper did not start", allocator = permanent())
+	}
+	log.infof("job: selection test helper started id=%d process=%d bytes=%d", u64(id), u64(job.handle.id), len(job.input))
 	return {}
 }

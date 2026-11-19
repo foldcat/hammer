@@ -293,6 +293,11 @@ editor_init :: proc(path := "") -> errs.Error {
 			return flood_err
 		}
 	}
+	if helper, found := os.lookup_env("HAMMER_TEST_PIPE_JOB", context.temp_allocator); found && helper != "" {
+		if pipe_err := editor_start_selection_test_job(helper); !errs.ok(pipe_err) {
+			return pipe_err
+		}
+	}
 	return {}
 }
 
