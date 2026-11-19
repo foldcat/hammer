@@ -13,6 +13,10 @@ text_visual_row_count :: proc(doc: ^txn.Doc, line_index: rope.Line_Index, body: 
 	return 1, true
 }
 
+text_caret_x :: proc(doc: ^txn.Doc, selection: txn.Selection, body: layout.Rect) -> (f32, bool) {
+	return 0, false
+}
+
 text_measure_advance :: proc(text: string) -> f32 {
 	return coords.points_to_logical_px(state.dpi.points) * 0.6
 }

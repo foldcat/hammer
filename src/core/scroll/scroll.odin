@@ -65,6 +65,19 @@ absolute_line :: proc(fraction: f32, line_count: int) -> int {
 	return clamp(int(clamp(fraction, 0, 1) * f32(line_count - 1) + 0.5), 0, line_count - 1)
 }
 
+reveal_caret_right :: proc(offset, caret_x, viewport_width, max_offset: f32) -> f32 {
+	if math.is_nan(offset) || math.is_inf(offset) || math.is_nan(caret_x) || math.is_inf(caret_x) ||
+		math.is_nan(viewport_width) || math.is_inf(viewport_width) || math.is_nan(max_offset) || math.is_inf(max_offset) {
+		return 0
+	}
+	limit := max(0, max_offset)
+	bounded := clamp(offset, 0, limit)
+	if viewport_width <= 0 {
+		return bounded
+	}
+	return clamp(max(bounded, caret_x - viewport_width), 0, limit)
+}
+
 active :: proc(state: ^State) -> bool {
 	return state != nil && state.window_id != 0 && state.buttons != {}
 }

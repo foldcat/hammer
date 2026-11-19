@@ -98,6 +98,35 @@ editor_wheel_vertical :: proc(item: ^view.View, doc: ^txn.Doc, body: layout.Rect
 	}
 }
 
+editor_reveal_caret_right :: proc(item: ^view.View) {
+	if item == nil || item.wrap_mode == .Soft {
+		return
+	}
+	buffer := editor_buffer_for_view(item)
+	if buffer == nil {
+		return
+	}
+	geometry, _, ok := current_layout()
+	if !ok {
+		return
+	}
+	win, found := window_for_id(&geometry, item.window_id)
+	if !found {
+		return
+	}
+	_, _, text := editor_body_parts(item, &buffer.doc, win.body)
+	caret_x, caret_ok := text_caret_x(&buffer.doc, item.selection, text)
+	if !caret_ok {
+		return
+	}
+	previous := item.horizontal_offset
+	viewport_width := max(1, text.width - 2 * TEXT_PADDING)
+	item.horizontal_offset = scroll.reveal_caret_right(item.horizontal_offset, caret_x, viewport_width, MAX_HORIZONTAL_SCROLL_OFFSET)
+	if item.horizontal_offset != previous {
+		log.infof("view: cursor scroll window=%d offset=%.2f", u64(item.window_id), item.horizontal_offset)
+	}
+}
+
 editor_scrollbar_pointer_down :: proc(event: input.Pointer_Down, area: layout.Hit, body: layout.Rect) -> bool {
 	track, _ := scroll.body_rects(body)
 	was_active := scroll.active(&editor.scrollbar)

@@ -624,7 +624,11 @@ editor_perform :: proc(action: editing.Action) {
 		{autopair = cfg.Autopair, auto_indent = true, indent = {style = .Tabs}},
 	)
 	if editor.active_text_kind == .Body {
-		editor_finish_edit(editor_active_view(), previous_revision, err)
+		item := editor_active_view()
+		editor_finish_edit(item, previous_revision, err)
+		if movement, is_move := action.(editing.Move); errs.ok(err) && is_move && movement.motion == .Grapheme_Right {
+			editor_reveal_caret_right(item)
+		}
 	} else {
 		editor_report(err)
 	}

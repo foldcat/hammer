@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M08.detour-1 Implement scrolling the buffer if right arrow key moved the cursor into a truncated area
+## Current task: M09.01 Implement process spawning and handle ownership

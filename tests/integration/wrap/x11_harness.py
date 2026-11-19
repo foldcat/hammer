@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -180,6 +181,38 @@ def run_truncate(binary: Path, sandbox: Path) -> None:
         stop(process, x11)
 
 
+def run_cursor_reveal(binary: Path, sandbox: Path) -> None:
+    source = sandbox / "cursor-reveal.txt"
+    source.write_text(f"{LONG_TEXT}\nnext\n", encoding="utf-8")
+    log_path = sandbox / "cursor-reveal.log"
+    process, x11, window = start(binary, source, sandbox, log_path)
+    try:
+        wait_for_log(log_path, "wrap=Truncate", 20.0)
+        time.sleep(0.2)
+        initial = x11.pixels(window, 45, 390, 66, 86)
+        x11.tap(0xFF50)
+        for _ in range(len(LONG_TEXT)):
+            x11.tap(0xFF53)
+        wait_for_log(log_path, "view: cursor scroll window=1", 20.0)
+        offsets = re.findall(r"view: cursor scroll window=1 offset=([0-9.]+)", log_path.read_text())
+        if not offsets or float(offsets[-1]) <= 0:
+            raise HarnessFailure(f"right-arrow movement did not produce a positive horizontal offset: {offsets}")
+        time.sleep(0.2)
+        if x11.pixels(window, 45, 390, 66, 86) == initial:
+            raise HarnessFailure("right-arrow caret reveal did not change the truncated rendering")
+        x11.tap(ord(";"))
+        save(x11)
+        wait_for_log(log_path, f"file: saved {source}", 20.0)
+        expected = f"{LONG_TEXT};\nnext\n".encode()
+        if source.read_bytes() != expected:
+            raise HarnessFailure("caret was not at the long-line end after right-arrow scrolling")
+        print(f"PASS: right-arrow movement reveals the truncated caret at offset {offsets[-1]}")
+        x11.tap(0xFF1B)
+        wait_for_exit(process, 20.0, log_path)
+    finally:
+        stop(process, x11)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--soft", required=True, type=Path)
@@ -192,6 +225,7 @@ def main() -> int:
     sandbox = Path(tempfile.mkdtemp(prefix="hammer-m07-09-wrap-"))
     run_soft(soft, sandbox)
     run_truncate(truncate, sandbox)
+    run_cursor_reveal(truncate, sandbox)
     print(f"Wrap/scroll X11 smoke passed; sandbox: {sandbox}")
     return 0
 

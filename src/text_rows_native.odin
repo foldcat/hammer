@@ -65,6 +65,65 @@ text_visual_row_count :: proc(doc: ^txn.Doc, line_index: rope.Line_Index, body: 
 	return len(rows), true
 }
 
+text_caret_x :: proc(doc: ^txn.Doc, selection: txn.Selection, body: layout.Rect) -> (f32, bool) {
+	if doc == nil || body.width <= 0 || !txn.selection_in_bounds(selection, rope.tree_byte_count(&doc.tree)) {
+		return 0, false
+	}
+	selected := fonts.face(&font_set, .Body)
+	if selected == nil {
+		return 0, false
+	}
+	pixel_size, size_ok := glyph_pixel_size(state.dpi.scale)
+	if !size_ok {
+		return 0, false
+	}
+	if _, size_err := glyphcache.native_set_pixel_size(selected.native, pixel_size); !errs.ok(size_err) {
+		text_render_error(size_err)
+		return 0, false
+	}
+	caret_line, line_err := rope.tree_byte_to_line(&doc.tree, selection.active)
+	if !errs.ok(line_err) {
+		text_render_error(line_err)
+		return 0, false
+	}
+	start, end, range_err := text_line_range(doc, caret_line)
+	if !errs.ok(range_err) {
+		text_render_error(range_err)
+		return 0, false
+	}
+	read_length := min(end - start, shaping.DEFAULT_VISIBLE_BYTES + shaping.VISIBLE_LOOKAHEAD_BYTES)
+	line_bytes, read_err := rope.tree_read_all(&doc.tree, {start, start + read_length}, context.temp_allocator)
+	if !errs.ok(read_err) {
+		text_render_error(read_err)
+		return 0, false
+	}
+	expansion, tab_err := shaping.expand_tabs(string(line_bytes), shaping.DEFAULT_TAB_WIDTH, context.temp_allocator)
+	if !errs.ok(tab_err) {
+		text_render_error(tab_err)
+		return 0, false
+	}
+	defer shaping.tab_expansion_destroy(&expansion)
+	caret_offset, mapped := shaping.tab_display_offset(expansion, selection.active - start)
+	if !mapped {
+		return 0, false
+	}
+	previous_allocator := context.allocator
+	context.allocator = context.temp_allocator
+	defer context.allocator = previous_allocator
+	measurement: shaping.Measurement
+	visible, shape_err := product_shape_visible(string(expansion.text[:]), &measurement, pixel_size)
+	if !errs.ok(shape_err) {
+		text_render_error(shape_err)
+		return 0, false
+	}
+	defer shaping.destroy(&visible.text)
+	edge := shaping.Edge.Leading
+	if selection.affinity == .Right {
+		edge = .Trailing
+	}
+	return shaping.caret_position(visible.text, caret_offset, edge, state.dpi.scale)
+}
+
 text_measure_advance :: proc(text: string) -> f32 {
 	selected := fonts.face(&font_set, .Body)
 	if selected == nil {

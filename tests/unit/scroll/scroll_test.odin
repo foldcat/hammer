@@ -96,6 +96,15 @@ test_holding_lower_repeats_faster_and_outside_drag_continues :: proc(t: ^testing
 }
 
 @(test)
+test_right_motion_reveals_caret_past_right_edge :: proc(t: ^testing.T) {
+	testing.expect(t, scroll.reveal_caret_right(12, 50, 100, 1024) == 12)
+	testing.expect(t, scroll.reveal_caret_right(0, 100, 40, 1024) == 60)
+	testing.expect(t, scroll.reveal_caret_right(80, 100, 40, 1024) == 80)
+	testing.expect(t, scroll.reveal_caret_right(0, 200, 40, 100) == 100)
+	testing.expect(t, scroll.reveal_caret_right(20, 100, 0, 1024) == 20)
+}
+
+@(test)
 test_invalid_geometry_and_second_button_do_not_start_gestures :: proc(t: ^testing.T) {
 	state: scroll.State
 	track := track_fixture()
