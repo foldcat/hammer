@@ -34,7 +34,7 @@
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
-//     odin run make.odin -file -- process-test     # M09.01 process spawning and handle ownership
+//     odin run make.odin -file -- process-test     # M09.01-02 process spawning and nonblocking flow
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
 // The `windows` target builds hammer.exe for windows_amd64. It uses LLVM and

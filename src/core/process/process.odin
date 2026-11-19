@@ -21,12 +21,47 @@ Description :: struct {
 	environment: []string,
 }
 
-// Pipe is an owned parent-side pipe endpoint. Use pipe_handle for platform
-// I/O, and close_pipe or Handle.destroy for cleanup; never close the native
-// handle separately. The open flag distinguishes a valid zero descriptor.
+// Pipe is an owned, fixed-location parent-side pipe endpoint. Use read_pipe
+// and write_pipe for I/O and close_pipe or Handle.destroy for cleanup; never
+// close the native handle separately. The open flag distinguishes a valid zero
+// descriptor. A Pipe must not be copied while an overlapped operation is pending.
 Pipe :: struct {
-	native: uintptr,
-	open:   bool,
+	native:   uintptr,
+	open:     bool,
+	platform: Platform_Pipe,
+}
+
+IO_Status :: enum u8 {
+	Data,
+	Would_Block,
+	End,
+	Closed,
+}
+
+// read_pipe performs at most one nonblocking read. On .Would_Block, buffer
+// must remain valid and unchanged until the operation completes on this Pipe.
+// .End reports EOF. No bytes are retained by the caller on an error.
+read_pipe :: proc(pipe: ^Pipe, buffer: []byte, allocator := context.allocator) -> (int, IO_Status, errs.Error) {
+	if pipe == nil || !pipe.open {
+		return 0, .Closed, {}
+	}
+	if len(buffer) == 0 {
+		return 0, .Closed, errs.new(.Invalid_Input, "process: read buffer must not be empty", allocator = allocator)
+	}
+	return platform_read_pipe(pipe, buffer, allocator)
+}
+
+// write_pipe performs at most one nonblocking write and reports a partial
+// count. On .Would_Block, data must remain valid and unchanged until the
+// operation completes. .End reports that the child closed its input.
+write_pipe :: proc(pipe: ^Pipe, data: []byte, allocator := context.allocator) -> (int, IO_Status, errs.Error) {
+	if pipe == nil || !pipe.open {
+		return 0, .Closed, {}
+	}
+	if len(data) == 0 {
+		return 0, .Data, {}
+	}
+	return platform_write_pipe(pipe, data, allocator)
 }
 
 // Handle has unique ownership and must not be copied after a successful

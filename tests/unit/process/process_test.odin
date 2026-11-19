@@ -51,7 +51,7 @@ read_exact :: proc(t: ^testing.T, pipe: ^process.Pipe, expected: int) -> []byte 
 	result := make([]byte, expected, context.allocator)
 	total := 0
 	for total < expected {
-		count, ok := read_some(pipe, result[total:])
+		count, ok := read_some(t, pipe, result[total:])
 		if !ok || count == 0 {
 			testing.expectf(t, false, "short pipe read: %d/%d", total, expected)
 			break
@@ -65,7 +65,7 @@ read_all :: proc(t: ^testing.T, pipe: ^process.Pipe) -> []byte {
 	result := make([dynamic]byte, 0, 1024, context.allocator)
 	buffer: [1024]byte
 	for {
-		count, ok := read_some(pipe, buffer[:])
+		count, ok := read_some(t, pipe, buffer[:])
 		if count > 0 {
 			if len(result) + count > 64 * 1024 {
 				testing.expect(t, false, "test output exceeded 64 KiB")
@@ -208,4 +208,153 @@ test_spawn_failure_and_invalid_inputs_return_no_handle :: proc(t: ^testing.T) {
 	defer delete(oversized, context.allocator)
 	_, err = process.spawn({command = {HELPER, oversized}}, context.allocator)
 	expect_kind(t, err, .Resource_Limit)
+}
+
+@(test)
+test_pump_flow_is_bounded_and_ordered :: proc(t: ^testing.T) {
+	handle, spawn_err := process.spawn({command = {HELPER, "flood"}}, context.allocator)
+	if !expect_ok(t, spawn_err) {
+		return
+	}
+	defer cleanup(t, &handle)
+	input := make([]byte, 256 * 1024, context.allocator)
+	defer delete(input, context.allocator)
+	for _, index in input {
+		input[index] = byte(index % 251)
+	}
+	pump: process.Pump
+	init_err := process.pump_init(
+		&pump,
+		&handle,
+		input,
+		{record_capacity = 2, chunk_bytes = 64},
+		context.allocator,
+	)
+	if !expect_ok(t, init_err) {
+		return
+	}
+	defer expect_ok(t, process.pump_destroy(&pump))
+
+	stdout := make([dynamic]byte, 0, 256 * 1024, context.allocator)
+	defer delete(stdout)
+	stderr := make([dynamic]byte, 0, 256 * 1024, context.allocator)
+	defer delete(stderr)
+	expected_stdout, stdout_builder_err := strings.builder_make(0, 256 * 1024, context.allocator)
+	if stdout_builder_err != nil {
+		testing.expect(t, false, "cannot allocate expected stdout")
+		return
+	}
+	defer strings.builder_destroy(&expected_stdout)
+	expected_stderr, stderr_builder_err := strings.builder_make(0, 256 * 1024, context.allocator)
+	if stderr_builder_err != nil {
+		testing.expect(t, false, "cannot allocate expected stderr")
+		return
+	}
+	defer strings.builder_destroy(&expected_stderr)
+	for index in 0 ..< 4096 {
+		fmt.sbprintf(&expected_stdout, "O%04d:abcdefghijklmnopqrstuvwxyz\n", index)
+		fmt.sbprintf(&expected_stderr, "E%04d:ABCDEFGHIJKLMNOPQRSTUVWXYZ\n", index)
+	}
+	fmt.sbprintf(&expected_stdout, "input=%d\n", len(input))
+
+	stdout_end := false
+	stderr_end := false
+	filled_queue := false
+	next_sequence := u64(0)
+	for iteration in 0 ..< 200000 {
+		if process.pump_drained(&pump) {
+			break
+		}
+		expect_ok(t, process.pump_poll(&pump))
+		testing.expect(t, process.pump_record_count(&pump) <= 2)
+		testing.expect(t, process.pump_buffered_bytes(&pump) <= 128)
+		if !filled_queue && process.pump_backpressured(&pump) {
+			filled_queue = true
+			for _ in 0 ..< 16 {
+				expect_ok(t, process.pump_poll(&pump))
+				testing.expect(t, process.pump_record_count(&pump) == 2)
+				testing.expect(t, process.pump_buffered_bytes(&pump) <= 128)
+			}
+		}
+		if record, ok := process.pump_next(&pump); ok {
+			testing.expect(t, record.sequence == next_sequence)
+			next_sequence += 1
+			switch record.kind {
+			case .Data:
+				testing.expect(t, len(record.data) > 0 && len(record.data) <= 64)
+				if record.stream == .Stdout {
+					testing.expect(t, len(stdout) + len(record.data) <= 256 * 1024)
+					append(&stdout, ..record.data)
+				} else {
+					testing.expect(t, record.stream == .Stderr)
+					testing.expect(t, len(stderr) + len(record.data) <= 256 * 1024)
+					append(&stderr, ..record.data)
+				}
+			case .End:
+				if record.stream == .Stdout {
+					stdout_end = true
+				} else {
+					testing.expect(t, record.stream == .Stderr)
+					stderr_end = true
+				}
+			case .Error:
+				description := errs.describe(record.err, context.allocator)
+				testing.expectf(t, false, "pump stream error: %s", description)
+				delete(description, context.allocator)
+			}
+			process.pump_release(&pump)
+		}
+		if iteration == 199999 {
+			testing.expect(t, false, "pump did not drain within the iteration budget")
+		}
+	}
+	testing.expect(t, filled_queue && process.pump_input_done(&pump) && process.pump_drained(&pump))
+	testing.expect(t, stdout_end && stderr_end)
+	testing.expect(t, next_sequence >= 3)
+	status, wait_err := process.wait(&handle, context.allocator)
+	expect_ok(t, wait_err)
+	testing.expect(t, status.success)
+	testing.expect(t, string(stdout[:]) == strings.to_string(expected_stdout))
+	testing.expect(t, string(stderr[:]) == strings.to_string(expected_stderr))
+}
+
+@(test)
+test_pump_cancel_closes_flow_and_preserves_queued_records :: proc(t: ^testing.T) {
+	handle, spawn_err := process.spawn({command = {HELPER, "wait"}}, context.allocator)
+	if !expect_ok(t, spawn_err) {
+		return
+	}
+	defer cleanup(t, &handle)
+	pump: process.Pump
+	init_err := process.pump_init(&pump, &handle, transmute([]byte)string("unused"), {}, context.allocator)
+	if !expect_ok(t, init_err) {
+		return
+	}
+	defer expect_ok(t, process.pump_destroy(&pump))
+	for iteration in 0 ..< 10000 {
+		if process.pump_record_count(&pump) > 0 {
+			break
+		}
+		expect_ok(t, process.pump_poll(&pump))
+		testing.expect(t, iteration < 9999, "pump did not observe ready output")
+	}
+	record, ok := process.pump_next(&pump)
+	testing.expect(t, ok && record.kind == .Data && record.stream == .Stdout && string(record.data) == "ready\n")
+	expect_ok(t, process.pump_cancel(&pump))
+	expect_ok(t, process.pump_cancel(&pump))
+	testing.expect(t, process.pump_input_done(&pump))
+	testing.expect(t, !handle.stdin.open && !handle.stdout.open && !handle.stderr.open)
+	queued, still_queued := process.pump_next(&pump)
+	testing.expect(t, still_queued && queued == record && string(queued.data) == "ready\n")
+	for {
+		_, more := process.pump_next(&pump)
+		if !more {
+			break
+		}
+		process.pump_release(&pump)
+	}
+	testing.expect(t, process.pump_drained(&pump))
+	status, wait_err := process.wait(&handle, context.allocator)
+	expect_ok(t, wait_err)
+	testing.expect(t, status.success)
 }

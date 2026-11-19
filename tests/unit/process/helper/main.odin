@@ -43,6 +43,27 @@ echo :: proc() -> int {
 	return 0
 }
 
+flood :: proc() -> int {
+	total := 0
+	buffer: [4096]u8
+	for {
+		count, err := os.read(os.stdin, buffer[:])
+		total += count
+		if total > 1024 * 1024 {
+			return 2
+		}
+		if err != nil {
+			break
+		}
+	}
+	for index in 0 ..< 4096 {
+		fmt.printf("O%04d:abcdefghijklmnopqrstuvwxyz\n", index)
+		fmt.eprintf("E%04d:ABCDEFGHIJKLMNOPQRSTUVWXYZ\n", index)
+	}
+	fmt.printf("input=%d\n", total)
+	return 0
+}
+
 wait_for_close :: proc() {
 	fmt.println("ready")
 	buffer: [1]u8
@@ -59,6 +80,8 @@ main :: proc() {
 		code = report()
 	case "echo":
 		code = echo()
+	case "flood":
+		code = flood()
 	case "wait":
 		wait_for_close()
 	case:

@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M09.02 Implement nonblocking stdin/stdout/stderr flow
+## Current task: M09.03 Implement job lifecycle and Stop command

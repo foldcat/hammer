@@ -1,6 +1,8 @@
 package process
 
+import "core:fmt"
 import "core:strings"
+import "core:sync"
 import "core:sys/windows"
 import mem_virtual "core:mem/virtual"
 
@@ -9,6 +11,15 @@ import errs "../errs"
 foreign import kernel32 "system:Kernel32.lib"
 
 PROC_THREAD_ATTRIBUTE_HANDLE_LIST :: 0x00020002
+ERROR_IO_INCOMPLETE :: windows.DWORD(996)
+PIPE_BUFFER_BYTES :: 64 * 1024
+
+Platform_Pipe :: struct {
+	overlapped: windows.OVERLAPPED,
+	pending:    bool,
+}
+
+next_pipe_id: u64
 
 STARTUPINFOEXW :: struct {
 	startup:        windows.STARTUPINFOW,
@@ -66,36 +77,86 @@ close_all :: proc(pipes: ^Windows_Pipes) {
 	}
 }
 
-open_pipe :: proc(parent_reads: bool) -> (read_end, write_end: windows.HANDLE, errno: windows.DWORD) {
+open_pipe :: proc(parent_reads: bool, allocator := context.allocator) -> (read_end, write_end: windows.HANDLE, errno: windows.DWORD) {
+	pipe_id := sync.atomic_add(&next_pipe_id, 1)
+	name := fmt.aprintf(`\\.\pipe\hammer-process-%d-%d`, windows.GetCurrentProcessId(), pipe_id, allocator = allocator)
+	if name == "" {
+		return nil, nil, windows.ERROR_NOT_ENOUGH_MEMORY
+	}
+	name_wide := windows.utf8_to_wstring(name, allocator)
+	if name_wide == nil {
+		return nil, nil, windows.ERROR_NOT_ENOUGH_MEMORY
+	}
+
+	direction := windows.PIPE_ACCESS_OUTBOUND
+	child_access := windows.GENERIC_READ
+	if parent_reads {
+		direction = windows.PIPE_ACCESS_INBOUND
+		child_access = windows.GENERIC_WRITE
+	}
+	parent := windows.CreateNamedPipeW(
+		name_wide,
+		direction | windows.FILE_FLAG_OVERLAPPED,
+		windows.PIPE_TYPE_BYTE | windows.PIPE_READMODE_BYTE | windows.PIPE_REJECT_REMOTE_CLIENTS,
+		1,
+		PIPE_BUFFER_BYTES,
+		PIPE_BUFFER_BYTES,
+		0,
+		nil,
+	)
+	if parent == windows.INVALID_HANDLE {
+		return nil, nil, windows.GetLastError()
+	}
 	attributes := windows.SECURITY_ATTRIBUTES{
 		nLength = size_of(windows.SECURITY_ATTRIBUTES),
 		bInheritHandle = true,
 	}
-	if !windows.CreatePipe(&read_end, &write_end, &attributes, 0) {
-		return nil, nil, windows.GetLastError()
-	}
-	parent := read_end if parent_reads else write_end
-	if !windows.SetHandleInformation(parent, windows.HANDLE_FLAG_INHERIT, 0) {
+	child := windows.CreateFileW(
+		name_wide,
+		child_access,
+		0,
+		&attributes,
+		windows.OPEN_EXISTING,
+		0,
+		nil,
+	)
+	if child == windows.INVALID_HANDLE {
 		errno = windows.GetLastError()
-		windows.CloseHandle(read_end)
-		windows.CloseHandle(write_end)
+		windows.CloseHandle(parent)
 		return nil, nil, errno
 	}
-	return
+	if !windows.ConnectNamedPipe(parent, nil) {
+		connect_errno := windows.GetLastError()
+		if connect_errno != windows.ERROR_PIPE_CONNECTED {
+			windows.CloseHandle(parent)
+			windows.CloseHandle(child)
+			return nil, nil, connect_errno
+		}
+	}
+	if !windows.SetHandleInformation(parent, windows.HANDLE_FLAG_INHERIT, 0) {
+		errno = windows.GetLastError()
+		windows.CloseHandle(parent)
+		windows.CloseHandle(child)
+		return nil, nil, errno
+	}
+	if parent_reads {
+		return parent, child, 0
+	}
+	return child, parent, 0
 }
 
-open_all :: proc(pipes: ^Windows_Pipes) -> windows.DWORD {
+open_all :: proc(pipes: ^Windows_Pipes, allocator := context.allocator) -> windows.DWORD {
 	pipes^ = {}
 	errno := windows.DWORD(0)
-	pipes.stdin_read, pipes.stdin_write, errno = open_pipe(false)
+	pipes.stdin_read, pipes.stdin_write, errno = open_pipe(false, allocator)
 	if errno != 0 {
 		return errno
 	}
-	pipes.stdout_read, pipes.stdout_write, errno = open_pipe(true)
+	pipes.stdout_read, pipes.stdout_write, errno = open_pipe(true, allocator)
 	if errno != 0 {
 		return errno
 	}
-	pipes.stderr_read, pipes.stderr_write, errno = open_pipe(true)
+	pipes.stderr_read, pipes.stderr_write, errno = open_pipe(true, allocator)
 	return errno
 }
 
@@ -212,7 +273,7 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 	}
 
 	pipes: Windows_Pipes
-	if errno := open_all(&pipes); errno != 0 {
+	if errno := open_all(&pipes, scratch); errno != 0 {
 		close_all(&pipes)
 		return {}, windows_error("pipe creation", errno, allocator)
 	}
@@ -320,14 +381,135 @@ platform_wait :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_
 	return Exit_Status{code = int(exit_code), success = exit_code == 0}, {}
 }
 
+prepare_overlapped :: proc(pipe: ^Pipe, allocator := context.allocator) -> errs.Error {
+	if pipe.platform.overlapped.hEvent == nil {
+		event := windows.CreateEventW(nil, false, false, nil)
+		if event == nil {
+			return windows_error("pipe-event creation", windows.GetLastError(), allocator)
+		}
+		pipe.platform.overlapped.hEvent = event
+	}
+	if !windows.ResetEvent(pipe.platform.overlapped.hEvent) {
+		return windows_error("pipe-event reset", windows.GetLastError(), allocator)
+	}
+	pipe.platform.overlapped.Internal = nil
+	pipe.platform.overlapped.InternalHigh = nil
+	pipe.platform.overlapped.OffsetFull = 0
+	return {}
+}
+
+complete_overlapped :: proc(pipe: ^Pipe, action: string, allocator := context.allocator) -> (int, IO_Status, errs.Error) {
+	transferred: windows.DWORD
+	if windows.GetOverlappedResult(windows.HANDLE(pipe.native), &pipe.platform.overlapped, &transferred, false) {
+		pipe.platform.pending = false
+		if transferred == 0 {
+			return 0, .End, {}
+		}
+		return int(transferred), .Data, {}
+	}
+	errno := windows.GetLastError()
+	if errno == windows.ERROR_IO_PENDING || errno == ERROR_IO_INCOMPLETE {
+		return 0, .Would_Block, {}
+	}
+	pipe.platform.pending = false
+	if errno == windows.ERROR_BROKEN_PIPE || errno == windows.ERROR_NO_DATA {
+		return 0, .End, {}
+	}
+	if errno == windows.ERROR_OPERATION_ABORTED {
+		return 0, .Closed, {}
+	}
+	return 0, .Closed, windows_error(action, errno, allocator)
+}
+
+platform_read_pipe :: proc(pipe: ^Pipe, buffer: []byte, allocator := context.allocator) -> (int, IO_Status, errs.Error) {
+	if len(buffer) > int(max(windows.DWORD)) {
+		return 0, .Closed, errs.new(.Resource_Limit, "process: read buffer exceeds Windows I/O limits", allocator = allocator)
+	}
+	if pipe.platform.pending {
+		return complete_overlapped(pipe, "overlapped read", allocator)
+	}
+	if err := prepare_overlapped(pipe, allocator); !errs.ok(err) {
+		return 0, .Closed, err
+	}
+	transferred: windows.DWORD
+	if windows.ReadFile(windows.HANDLE(pipe.native), raw_data(buffer), windows.DWORD(len(buffer)), &transferred, &pipe.platform.overlapped) {
+		if transferred == 0 {
+			return 0, .End, {}
+		}
+		return int(transferred), .Data, {}
+	}
+	errno := windows.GetLastError()
+	if errno == windows.ERROR_IO_PENDING {
+		pipe.platform.pending = true
+		return 0, .Would_Block, {}
+	}
+	if errno == windows.ERROR_BROKEN_PIPE || errno == windows.ERROR_NO_DATA {
+		return 0, .End, {}
+	}
+	return 0, .Closed, windows_error("read", errno, allocator)
+}
+
+platform_write_pipe :: proc(pipe: ^Pipe, data: []byte, allocator := context.allocator) -> (int, IO_Status, errs.Error) {
+	if len(data) > int(max(windows.DWORD)) {
+		return 0, .Closed, errs.new(.Resource_Limit, "process: write buffer exceeds Windows I/O limits", allocator = allocator)
+	}
+	if pipe.platform.pending {
+		return complete_overlapped(pipe, "overlapped write", allocator)
+	}
+	if err := prepare_overlapped(pipe, allocator); !errs.ok(err) {
+		return 0, .Closed, err
+	}
+	transferred: windows.DWORD
+	if windows.WriteFile(windows.HANDLE(pipe.native), raw_data(data), windows.DWORD(len(data)), &transferred, &pipe.platform.overlapped) {
+		if transferred == 0 {
+			return 0, .Closed, errs.new(.IO, "process: write made no progress", allocator = allocator)
+		}
+		return int(transferred), .Data, {}
+	}
+	errno := windows.GetLastError()
+	if errno == windows.ERROR_IO_PENDING {
+		pipe.platform.pending = true
+		return 0, .Would_Block, {}
+	}
+	if errno == windows.ERROR_BROKEN_PIPE || errno == windows.ERROR_NO_DATA {
+		return 0, .End, {}
+	}
+	return 0, .Closed, windows_error("write", errno, allocator)
+}
+
 close_pipe :: proc(pipe: ^Pipe, allocator := context.allocator) -> errs.Error {
 	if pipe == nil || !pipe.open {
 		return {}
 	}
 	native := windows.HANDLE(pipe.native)
+	first_errno := windows.DWORD(0)
+	if pipe.platform.pending {
+		if !windows.CancelIoEx(native, &pipe.platform.overlapped) {
+			errno := windows.GetLastError()
+			if errno != windows.ERROR_NOT_FOUND {
+				first_errno = errno
+			}
+		}
+		transferred: windows.DWORD
+		if !windows.GetOverlappedResult(native, &pipe.platform.overlapped, &transferred, true) {
+			errno := windows.GetLastError()
+			if first_errno == 0 && errno != windows.ERROR_OPERATION_ABORTED &&
+				errno != windows.ERROR_BROKEN_PIPE && errno != windows.ERROR_NO_DATA {
+				first_errno = errno
+			}
+		}
+		pipe.platform.pending = false
+	}
+	event := pipe.platform.overlapped.hEvent
 	pipe^ = {}
-	if !windows.CloseHandle(native) {
-		return windows_error("CloseHandle", windows.GetLastError(), allocator)
+	if !windows.CloseHandle(native) && first_errno == 0 {
+		first_errno = windows.GetLastError()
+	}
+	if event != nil && !windows.CloseHandle(event) && first_errno == 0 {
+		first_errno = windows.GetLastError()
+	}
+	if first_errno != 0 {
+		return windows_error("pipe cleanup", first_errno, allocator)
 	}
 	return {}
 }

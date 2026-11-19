@@ -10,6 +10,8 @@ import errs "../errs"
 PR_SET_PDEATHSIG :: 1
 MAX_FD :: linux.Fd(0x7fffffff)
 
+Platform_Pipe :: struct {}
+
 Linux_Pipes :: struct {
 	stdin_read:   linux.Fd,
 	stdin_write:  linux.Fd,
@@ -353,6 +355,14 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 		return {}, linux_error("exec", exec_errno, allocator)
 	}
 
+	parent_ends := []linux.Fd{pipes.stdin_write, pipes.stdout_read, pipes.stderr_read}
+	for fd in parent_ends {
+		if errno := linux.fcntl_setfl(fd, .SETFL, {.NONBLOCK}); errno != .NONE {
+			reap_failed_child(pid)
+			return {}, linux_error("nonblocking pipe setup", errno, allocator)
+		}
+	}
+
 	handle := Handle{
 		id = Process_ID(pid),
 		process = uintptr(pid),
@@ -390,6 +400,47 @@ platform_wait :: proc(handle: ^Handle, allocator := context.allocator) -> (Exit_
 		result.signal = int(linux.WTERMSIG(status))
 	}
 	return result, {}
+}
+
+platform_read_pipe :: proc(pipe: ^Pipe, buffer: []byte, allocator := context.allocator) -> (int, IO_Status, errs.Error) {
+	for {
+		count, errno := linux.read(linux.Fd(pipe.native), buffer)
+		if errno == .EINTR {
+			continue
+		}
+		if errno == .EAGAIN {
+			return 0, .Would_Block, {}
+		}
+		if errno != .NONE {
+			return 0, .Closed, linux_error("read", errno, allocator)
+		}
+		if count == 0 {
+			return 0, .End, {}
+		}
+		return count, .Data, {}
+	}
+}
+
+platform_write_pipe :: proc(pipe: ^Pipe, data: []byte, allocator := context.allocator) -> (int, IO_Status, errs.Error) {
+	for {
+		count, errno := linux.write(linux.Fd(pipe.native), data)
+		if errno == .EINTR {
+			continue
+		}
+		if errno == .EAGAIN {
+			return 0, .Would_Block, {}
+		}
+		if errno == .EPIPE {
+			return 0, .End, {}
+		}
+		if errno != .NONE {
+			return 0, .Closed, linux_error("write", errno, allocator)
+		}
+		if count <= 0 {
+			return 0, .Closed, errs.new(.IO, "process: write made no progress", allocator = allocator)
+		}
+		return count, .Data, {}
+	}
 }
 
 close_pipe :: proc(pipe: ^Pipe, allocator := context.allocator) -> errs.Error {

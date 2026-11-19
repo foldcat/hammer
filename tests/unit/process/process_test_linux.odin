@@ -8,18 +8,10 @@ import "core:testing"
 import process "hammer:core/process"
 
 write_all :: proc(t: ^testing.T, pipe: ^process.Pipe, data: []byte) {
-	native, open := process.pipe_handle(pipe)
-	if !open {
-		testing.expect(t, false, "pipe is closed")
-		return
-	}
 	remaining := data
 	for len(remaining) > 0 {
-		written, errno := linux.write(linux.Fd(native), remaining)
-		if errno == .EINTR {
-			continue
-		}
-		if errno != .NONE || written <= 0 {
+		written, status, err := process.write_pipe(pipe, remaining, context.allocator)
+		if !expect_ok(t, err) || status == .End || status == .Closed {
 			testing.expect(t, false, "pipe write failed")
 			return
 		}
@@ -27,17 +19,16 @@ write_all :: proc(t: ^testing.T, pipe: ^process.Pipe, data: []byte) {
 	}
 }
 
-read_some :: proc(pipe: ^process.Pipe, buffer: []byte) -> (int, bool) {
-	native, open := process.pipe_handle(pipe)
-	if !open {
-		return 0, false
-	}
+read_some :: proc(t: ^testing.T, pipe: ^process.Pipe, buffer: []byte) -> (int, bool) {
 	for {
-		count, errno := linux.read(linux.Fd(native), buffer)
-		if errno == .EINTR {
+		count, status, err := process.read_pipe(pipe, buffer, context.allocator)
+		if !expect_ok(t, err) || status == .Closed {
+			return 0, false
+		}
+		if status == .Would_Block {
 			continue
 		}
-		return count, errno == .NONE
+		return count, true
 	}
 }
 
