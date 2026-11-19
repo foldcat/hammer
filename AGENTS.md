@@ -68,7 +68,7 @@ path, confirmed containment, and a narrow allowlist.
 **Allocators.** `context.allocator` is replaced with a panic allocator.
 Use arena allocators or other custom allocators such as pools. Ensure that
 `free_all` MUST be called at some point. Note that virtual arenas does not
-support individual deletion, only `free_all`.
+support individual deletion, only `free_all`. Also note that `context.temp_allocator` does NOT free itself and require explicit `free_all` call.
 
 **Ownership.** Every allocation has an owner and a matching destructor.
 Containers do not deep-copy. Slices are views. Do not free string

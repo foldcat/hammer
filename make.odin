@@ -34,6 +34,7 @@
 //     odin run make.odin -file -- clipboard-windows-test  # native Windows or Linux/Wine clipboard
 //     odin run make.odin -file -- windows-text-test # native Windows fonts/shaping/product rendering
 //     odin run make.odin -file -- recovery-test    # M04.08 process-kill recovery
+//     odin run make.odin -file -- process-test     # M09.01 process spawning and handle ownership
 //     odin run make.odin -file -- bench            # rope/txn bounded benchmarks
 //
 // The `windows` target builds hammer.exe for windows_amd64. It uses LLVM and
@@ -114,6 +115,14 @@ HAMMER_COLLECTION :: "-collection:hammer=" + SRC_DIR
 RECOVERY_TEST_DIR :: #directory + "/tests/integration/recovery"
 RECOVERY_TEST_BINARY :: OUT_DIR + "/recovery_kill_test"
 RECOVERY_TEST_HARNESS :: RECOVERY_TEST_DIR + "/kill_harness.py"
+PROCESS_TEST_DIR :: #directory + "/tests/unit/process"
+PROCESS_TEST_HELPER_DIR :: PROCESS_TEST_DIR + "/helper"
+PROCESS_TEST_HARNESS :: PROCESS_TEST_DIR + "/process_harness.py"
+when ODIN_OS == .Windows {
+	PROCESS_TEST_HELPER :: OUT_DIR + "/process_test_helper.exe"
+} else {
+	PROCESS_TEST_HELPER :: OUT_DIR + "/process_test_helper"
+}
 
 TEXT_TEST_DIR :: #directory + "/tests/integration/textdeps"
 TEXT_WINDOWS_TEST_DIR :: #directory + "/tests/integration/text_windows"
@@ -188,6 +197,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/filesave",
 	"tests/unit/filestate",
 	"tests/unit/journal",
+	"tests/unit/process",
 }
 
 // Windows cross-build (M00.03 Windows half): the mingw-w64 import
@@ -842,14 +852,25 @@ main :: proc() {
 		return
 	}
 
+	if len(args) > 1 && args[1] == "process-test" {
+		build_process_test_helper()
+		run_process_tests()
+		return
+	}
+
 	// Core unit tests (headless, no Sokol dependency in the core
 	// packages; each package tested separately so failures name the
 	// owning package). Test packages live under tests/unit and import
 	// the source packages through the `hammer` collection.
 	if len(args) > 1 && args[1] == "test" {
+		build_process_test_helper()
 		for pkg in CORE_TEST_PACKAGES {
 			fmt.printf("[Test] %s\n", pkg)
-			run_odin([]string{"odin", "test", pkg, "-vet", HAMMER_COLLECTION})
+			if pkg == "tests/unit/process" {
+				run_process_tests()
+			} else {
+				run_odin([]string{"odin", "test", pkg, "-vet", HAMMER_COLLECTION})
+			}
 		}
 		return
 	}
@@ -1178,6 +1199,18 @@ init_config :: proc(path: string) {
 		os.exit(1)
 	}
 	fmt.printf("[Config] wrote example config to %s\n", path)
+}
+
+build_process_test_helper :: proc() {
+	run_odin([]string{"odin", "build", PROCESS_TEST_HELPER_DIR, "-vet", "-out:" + PROCESS_TEST_HELPER})
+}
+
+run_process_tests :: proc() {
+	python := "python3"
+	when ODIN_OS == .Windows {
+		python = "python"
+	}
+	run_odin([]string{python, PROCESS_TEST_HARNESS, "--repo", #directory}, true)
 }
 
 // run_odin executes an Odin invocation and exits nonzero if the command
