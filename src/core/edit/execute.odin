@@ -15,6 +15,7 @@ execute :: proc(
 	history: ^address.Regex_History,
 	grouping_key: u64 = 0,
 	allocator := context.allocator,
+	cancelled: ^bool = nil,
 ) -> errs.Error {
 	if doc == nil || selection == nil || program == nil {
 		return errs.new(.Invalid_Input, "edit: nil document, selection, or program", allocator = allocator)
@@ -55,10 +56,13 @@ execute :: proc(
 	}
 
 	for &command in program.commands {
+		if address.cancellation_requested(cancelled) {
+			return errs.new(.Cancelled, "edit: execution was cancelled", allocator = allocator)
+		}
 		previous_dot := selection_range(selection^)
 		dot := previous_dot
 		if command.has_address {
-			evaluated, err := address.evaluate_with_history(&doc.tree, &command.expression, previous_dot, history, allocator)
+			evaluated, err := address.evaluate_with_history(&doc.tree, &command.expression, previous_dot, history, allocator, cancelled)
 			if !errs.ok(err) {
 				return err
 			}
@@ -97,11 +101,11 @@ execute :: proc(
 				return err
 			}
 		case .Substitute:
-			if err := execute_substitution(doc, selection, program, &command, dot, history, group, allocator); !errs.ok(err) {
+			if err := execute_substitution(doc, selection, program, &command, dot, history, group, allocator, cancelled); !errs.ok(err) {
 				return err
 			}
 		case .Move, .Copy:
-			destination, err := address.evaluate_with_history(&doc.tree, &command.destination, previous_dot, history, allocator)
+			destination, err := address.evaluate_with_history(&doc.tree, &command.destination, previous_dot, history, allocator, cancelled)
 			if !errs.ok(err) {
 				return err
 			}

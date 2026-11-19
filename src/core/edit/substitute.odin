@@ -14,6 +14,7 @@ execute_substitution :: proc(
 	history: ^address.Regex_History,
 	group: u64,
 	allocator := context.allocator,
+	cancelled: ^bool = nil,
 ) -> errs.Error {
 	if dot.end - dot.start > MAX_MOVE_BYTES {
 		return errs.newf(.Resource_Limit, "edit: substitution range exceeds %d bytes", MAX_MOVE_BYTES, allocator = allocator)
@@ -29,6 +30,7 @@ execute_substitution :: proc(
 		history,
 		max_matches,
 		allocator,
+		cancelled,
 	)
 	if !errs.ok(find_err) {
 		return find_err
@@ -69,6 +71,9 @@ execute_substitution :: proc(
 	template := command_text(program, command^)
 	total_replacement_bytes := 0
 	for match in selected {
+		if address.cancellation_requested(cancelled) {
+			return errs.new(.Cancelled, "edit: substitution was cancelled", allocator = allocator)
+		}
 		replacement := make([dynamic]u8, allocator)
 		for index := 0; index < len(template); {
 			if template[index] == '&' {

@@ -37,8 +37,9 @@ bounded to 64 MiB and at most 4096 replacements per command. No match returns
 resulting document bounds.
 
 Global substitution does not recursively match replacement text, and Undo/Redo
-restores the whole substitution in one step. Execution remains synchronous;
-cancellation belongs to M08.06.
+restores the whole substitution in one step. Product execution subsequently
+moved to the cancellable snapshot runner in `docs/notes/m08-06-async-edit.md`;
+the synchronous core entry point remains available.
 
 ## Product coverage
 

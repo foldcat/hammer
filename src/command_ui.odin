@@ -190,30 +190,109 @@ editor_command_edit :: proc(cmd_context: ^command.Context, invocation: command.I
 	}
 	defer edit.program_destroy(&program, permanent())
 
-	first_log := len(buffer.doc.log)
-	previous_revision := txn.doc_revision(&buffer.doc)
 	editor.typing_group = 0
 	editor.next_group += 1
 	if editor.next_group == 0 {
 		editor.next_group = 1
 	}
-	execute_err := edit.execute(body.doc, body.selection, &program, &buffer.regex_history, editor.next_group, permanent())
-	for index in first_log ..< len(buffer.doc.log) {
-		entry := &buffer.doc.log[index]
-		byte_count := 0 if entry.after_root == nil else entry.after_root.metrics.byte_count
-		view.transform_after_edit(&editor.views, body.item.window_id, body.item.buffer_id, entry.ops, byte_count)
+	editor.next_edit_request += 1
+	if editor.next_edit_request == 0 {
+		editor.next_edit_request = 1
 	}
-	if txn.doc_revision(&buffer.doc) != previous_revision {
-		editor_refresh_window_tags()
-	}
-	log.infof(
-		"edit: window=%d commands=%d transactions=%d revision=%d",
-		u64(body.window_id),
-		len(program.commands),
-		len(buffer.doc.log) - first_log,
+	start_err := edit.runner_start(
+		&editor.edit_runner,
+		body.doc,
+		body.selection^,
+		&program,
+		buffer.regex_history,
+		u64(buffer.id),
+		buffer.generation,
 		txn.doc_revision(&buffer.doc),
+		edit.Request_ID(editor.next_edit_request),
+		editor.next_group,
+		permanent(),
 	)
-	return execute_err
+	if errs.ok(start_err) {
+		editor.edit_window = body.window_id
+		editor.edit_request = edit.Request_ID(editor.next_edit_request)
+		log.infof(
+			"edit: scheduled window=%d request=%d commands=%d revision=%d",
+			u64(body.window_id),
+			editor.next_edit_request,
+			len(program.commands),
+			txn.doc_revision(&buffer.doc),
+		)
+	}
+	return start_err
+}
+
+editor_cancel_edit :: proc() -> bool {
+	if !edit.runner_active(&editor.edit_runner) {
+		return false
+	}
+	edit.runner_cancel(&editor.edit_runner)
+	log.info("edit: cancellation requested")
+	return true
+}
+
+editor_poll_edit :: proc() {
+	result, ok := edit.runner_poll(&editor.edit_runner)
+	if !ok {
+		return
+	}
+	window_id := editor.edit_window
+	expected_request := editor.edit_request
+	request_id := result.request_id
+	buffer := editor_buffer_by_id(view.Buffer_ID(result.target_id))
+	item, found := view.find(&editor.views, window_id)
+	apply_err: errs.Error
+	transactions := 0
+	if buffer == nil || !found || item.buffer_id != view.Buffer_ID(result.target_id) {
+		apply_err = errs.newf(
+			.Conflict,
+			"edit: result target window or buffer is no longer current (request %d)",
+			u64(request_id),
+			allocator = permanent(),
+		)
+	} else {
+		first_log := len(buffer.doc.log)
+		previous_revision := txn.doc_revision(&buffer.doc)
+		apply_err = edit.apply_result(
+			&buffer.doc,
+			&item.selection,
+			&buffer.regex_history,
+			result,
+			u64(buffer.id),
+			buffer.generation,
+			expected_request,
+			permanent(),
+		)
+		for index in first_log ..< len(buffer.doc.log) {
+			entry := &buffer.doc.log[index]
+			byte_count := 0 if entry.after_root == nil else entry.after_root.metrics.byte_count
+			view.transform_after_edit(&editor.views, window_id, item.buffer_id, entry.ops, byte_count)
+		}
+		transactions = len(buffer.doc.log) - first_log
+		if txn.doc_revision(&buffer.doc) != previous_revision {
+			editor_refresh_window_tags()
+		}
+		log.infof(
+			"edit: completed request=%d transactions=%d revision=%d status=%v",
+			u64(request_id),
+			transactions,
+			txn.doc_revision(&buffer.doc),
+			apply_err.kind,
+		)
+	}
+	if apply_err.kind == .Cancelled {
+		log.infof("edit: cancelled request=%d", u64(request_id))
+		errs.destroy(&apply_err)
+	} else {
+		editor_report(apply_err)
+	}
+	edit.runner_release(&editor.edit_runner)
+	editor.edit_window = 0
+	editor.edit_request = 0
 }
 
 editor_command_undo :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {

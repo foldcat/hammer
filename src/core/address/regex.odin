@@ -43,6 +43,7 @@ Regex_Matcher :: struct {
 	second:        Regex_Thread_List,
 	valid:         bool,
 	with_captures: bool,
+	cancelled:     ^bool,
 }
 
 regex_address :: proc(
@@ -52,7 +53,11 @@ regex_address :: proc(
 	current: rope.Byte_Range,
 	history: ^Regex_History,
 	allocator: runtime.Allocator,
+	cancelled: ^bool = nil,
 ) -> (rope.Byte_Range, errs.Error) {
+	if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+		return {}, err
+	}
 	if operation.direction != .Forward && operation.direction != .Backward {
 		return {}, errs.new(.Invalid_Input, "address: invalid regular-expression direction", allocator = allocator)
 	}
@@ -135,7 +140,7 @@ regex_address :: proc(
 		}
 		search_text = string(reversed_text)
 	}
-	matcher, matcher_err := regex_matcher_init(compiled, search_text, scratch, allocator)
+	matcher, matcher_err := regex_matcher_init(compiled, search_text, scratch, allocator, cancelled = cancelled)
 	if !errs.ok(matcher_err) {
 		return {}, matcher_err
 	}
@@ -152,11 +157,17 @@ regex_address :: proc(
 	}
 
 	match, found := regex_matcher_run(&matcher, position, total + 1)
+	if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+		return {}, err
+	}
 	if !matcher.valid {
 		return {}, errs.new(.Internal, "address: invalid native regular-expression execution", allocator = allocator)
 	}
 	if !found && position > 0 {
 		match, found = regex_matcher_run(&matcher, 0, total + 1)
+	}
+	if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+		return {}, err
 	}
 	if !matcher.valid {
 		return {}, errs.new(.Internal, "address: invalid native regular-expression execution", allocator = allocator)
@@ -424,6 +435,7 @@ regex_matcher_init :: proc(
 	allocator: runtime.Allocator,
 	error_allocator: runtime.Allocator,
 	captures: bool = false,
+	cancelled: ^bool = nil,
 ) -> (Regex_Matcher, errs.Error) {
 	matcher := Regex_Matcher{
 		code = compiled.program,
@@ -431,6 +443,7 @@ regex_matcher_init :: proc(
 		text = text,
 		valid = true,
 		with_captures = captures,
+		cancelled = cancelled,
 	}
 	thread_capacity := len(compiled.program) + 1
 	busy_capacity := (len(compiled.program) + 63) / 64
@@ -453,6 +466,9 @@ regex_matcher_run :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: in
 
 regex_matcher_run_captures :: proc(matcher: ^Regex_Matcher, min_start: int, max_start: int, limit_value: int) -> (Regex_Match, bool) {
 	matcher.valid = true
+	if cancellation_requested(matcher.cancelled) {
+		return {}, false
+	}
 	limit := limit_value
 	if limit < 0 || limit > len(matcher.text) {
 		limit = len(matcher.text)
@@ -471,11 +487,17 @@ regex_matcher_run_captures :: proc(matcher: ^Regex_Matcher, min_start: int, max_
 	}
 	found := false
 	for current.count > 0 {
+		if cancellation_requested(matcher.cancelled) {
+			return {}, false
+		}
 		next.count = 0
 		regex_zero_busy(next.busy)
 		next_position := position + current_size
 		next_rune, _ := regex_rune_at(matcher.text, next_position)
 		for index in 0 ..< current.count {
+			if index & 63 == 0 && cancellation_requested(matcher.cancelled) {
+				return {}, false
+			}
 			thread := current.threads[index]
 			if thread.pc < 0 || thread.pc >= len(matcher.code) {
 				matcher.valid = false

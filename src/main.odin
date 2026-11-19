@@ -218,6 +218,7 @@ frame :: proc "c" () {
 
 	state.frame_count += 1
 	sync_dpi_changes()
+	editor_poll_edit()
 	editor_poll_clipboard()
 	editor_poll_scrollbar()
 
@@ -261,7 +262,9 @@ event :: proc "c" (ev: ^sapp.Event) {
 		}
 		editor_consume_input(e)
 		if kd, is_down := e.(input.Key_Down); is_down && !kd.repeat && kd.key == .Escape {
-			editor_request_close(.Quit, .Keyboard)
+			if !editor_cancel_edit() {
+				editor_request_close(.Quit, .Keyboard)
+			}
 		}
 	case .QUIT_REQUESTED:
 		editor_request_close(.Quit, .OS_Close)

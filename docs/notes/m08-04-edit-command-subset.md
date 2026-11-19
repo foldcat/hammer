@@ -88,9 +88,9 @@ X11 harness. Differential fixtures remain M08.08.
 Loops and conditionals (`x`, `y`, `g`, `v`, braces), display and file commands,
 pipes, and the rest of the documented language remain M08.05 and later tasks.
 Substitution (`s`) was subsequently implemented; see
-`docs/notes/m08-05-substitution.md`. Execution is synchronous; expensive-
-operation snapshot execution and cancellation remain M08.06. Atomic multi-buffer
-validation remains M08.07.
+`docs/notes/m08-05-substitution.md`. The core executor supports synchronous use;
+product execution subsequently moved to the cancellable snapshot runner in
+`docs/notes/m08-06-async-edit.md`. Atomic multi-buffer validation remains M08.07.
 
 ## Next task
 

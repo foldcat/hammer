@@ -8,6 +8,7 @@ import "core:strings"
 import address "core/address"
 import command "core/command"
 import directory "core/directory"
+import edit "core/edit"
 import editing "core/editing"
 import errs "core/errs"
 import filecodec "core/filecodec"
@@ -71,6 +72,10 @@ Editor :: struct {
 	mouse_expanded:         bool,
 	mouse_revision:         u64,
 	mouse_generation:       u64,
+	edit_runner:            edit.Runner,
+	edit_window:            layout.Window_ID,
+	edit_request:           edit.Request_ID,
+	next_edit_request:      u64,
 	workspace:              layout.Workspace,
 	active_window:          layout.Window_ID,
 	close_guard:            lifecycle.Close_Guard,
@@ -306,6 +311,7 @@ editor_workspace_init :: proc() -> errs.Error {
 }
 
 editor_destroy :: proc() {
+	edit.runner_destroy(&editor.edit_runner)
 	editor_cancel_pointer_gesture()
 	for index in 0 ..< view.MAX_VIEWS {
 		item := &editor.views.views[index]

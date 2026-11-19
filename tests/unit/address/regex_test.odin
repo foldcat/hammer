@@ -1,5 +1,6 @@
 package address_test
 
+import "core:sync"
 import "core:testing"
 
 import address "hammer:core/address"
@@ -331,4 +332,28 @@ test_regex_find_matches_empty_match_progress :: proc(t: ^testing.T) {
 	defer delete(nonempty, context.allocator)
 	testing.expect(t, len(nonempty) == 1)
 	testing.expect(t, nonempty[0].range == rope.Byte_Range{3, 5})
+}
+
+
+@(test)
+test_regex_search_honors_cancellation :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	init_err := txn.doc_init_from_bytes(&doc, transmute([]byte)string("a a a"), {}, context.allocator)
+	testing.expect(t, errs.ok(init_err))
+	errs.destroy(&init_err)
+	defer txn.doc_destroy(&doc)
+
+	cancelled := false
+	sync.atomic_store(&cancelled, true)
+	matches, find_err := address.regex_find_matches(&doc.tree, "a", {0, 5}, nil, 4, context.allocator, &cancelled)
+	testing.expect(t, find_err.kind == .Cancelled)
+	errs.destroy(&find_err)
+	testing.expect(t, len(matches) == 0)
+
+	expression, parse_err := address.parse("/a/", context.allocator)
+	testing.expect(t, errs.ok(parse_err))
+	errs.destroy(&parse_err)
+	_, eval_err := address.evaluate_with_history(&doc.tree, &expression, {}, nil, context.allocator, &cancelled)
+	testing.expect(t, eval_err.kind == .Cancelled)
+	errs.destroy(&eval_err)
 }

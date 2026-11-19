@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real X11 Edit command dispatch and transaction smoke tests for M08.04–M08.05."""
+"""Real X11 Edit dispatch, snapshot execution, and transaction tests for M08.04–M08.06."""
 
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ def main() -> int:
     succeeded = False
     command_counts: dict[str, int] = {}
     save_count = 0
+    edit_completions = 0
     try:
         x11 = X11()
         environment = os.environ.copy()
@@ -72,7 +73,7 @@ def main() -> int:
             wait_for_log(log_path, "file: opened a", args.timeout)
 
             def execute(command: str, prefix_length: int = 8) -> None:
-                nonlocal save_count
+                nonlocal save_count, edit_completions
                 click(x11, window, 1, 350, 52)
                 for character in command:
                     if character.isupper():
@@ -96,6 +97,9 @@ def main() -> int:
                 name = command.split()[0]
                 command_counts[name] = command_counts.get(name, 0) + 1
                 wait_for_log(log_path, f'mouse: execute "{name}"', args.timeout, command_counts[name])
+                if name == "Edit":
+                    edit_completions += 1
+                    wait_for_log(log_path, "edit: completed ", args.timeout, edit_completions)
                 x11.key(0xFFE3, True)
                 x11.tap(ord("s"))
                 x11.key(0xFFE3, False)

@@ -1,6 +1,7 @@
 package address
 
 import "base:runtime"
+import "core:sync"
 
 import errs "../errs"
 import rope "../rope"
@@ -22,7 +23,11 @@ evaluate_with_history :: proc(
 	dot: rope.Byte_Range,
 	history: ^Regex_History,
 	allocator := context.allocator,
+	cancelled: ^bool = nil,
 ) -> (rope.Byte_Range, errs.Error) {
+	if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+		return {}, err
+	}
 	if tree == nil || expression == nil {
 		return {}, errs.new(.Invalid_Input, "address: nil tree or expression", allocator = allocator)
 	}
@@ -40,7 +45,7 @@ evaluate_with_history :: proc(
 	if expression.node_count <= 0 || expression.root < 0 || expression.root >= expression.node_count {
 		return {}, errs.new(.Invalid_Input, "address: empty or invalid expression", allocator = allocator)
 	}
-	return eval_node(tree, expression, expression.root, dot, 0, history, allocator)
+	return eval_node(tree, expression, expression.root, dot, 0, history, allocator, cancelled)
 }
 
 eval_node :: proc(
@@ -51,7 +56,11 @@ eval_node :: proc(
 	depth: int,
 	history: ^Regex_History,
 	allocator: runtime.Allocator,
+	cancelled: ^bool,
 ) -> (rope.Byte_Range, errs.Error) {
+	if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+		return {}, err
+	}
 	if depth > MAX_RANGE_DEPTH {
 		return {}, errs.new(.Resource_Limit, "address: evaluation nesting is too deep", allocator = allocator)
 	}
@@ -67,6 +76,9 @@ eval_node :: proc(
 		}
 		current := dot
 		for index in node.first_operation ..< node.first_operation + node.operation_count {
+			if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+				return {}, err
+			}
 			operation := expression.operations[index]
 			next: rope.Byte_Range
 			err: errs.Error
@@ -81,7 +93,7 @@ eval_node :: proc(
 			case .Character:
 				next, err = character_address(tree, current, operation.count, operation.direction, allocator)
 			case .Regex:
-				next, err = regex_address(tree, expression, operation, current, history, allocator)
+				next, err = regex_address(tree, expression, operation, current, history, allocator, cancelled)
 			}
 			if !errs.ok(err) {
 				return {}, err
@@ -96,7 +108,7 @@ eval_node :: proc(
 		left := rope.Byte_Range{}
 		err: errs.Error
 		if node.left >= 0 {
-			left, err = eval_node(tree, expression, node.left, dot, depth + 1, history, allocator)
+			left, err = eval_node(tree, expression, node.left, dot, depth + 1, history, allocator, cancelled)
 			if !errs.ok(err) {
 				return {}, err
 			}
@@ -108,7 +120,7 @@ eval_node :: proc(
 		total := rope.tree_byte_count(tree)
 		right := rope.Byte_Range{start = total, end = total}
 		if node.right >= 0 {
-			right, err = eval_node(tree, expression, node.right, right_dot, depth + 1, history, allocator)
+			right, err = eval_node(tree, expression, node.right, right_dot, depth + 1, history, allocator, cancelled)
 			if !errs.ok(err) {
 				return {}, err
 			}
@@ -125,6 +137,17 @@ eval_node :: proc(
 		return rope.Byte_Range{start = left.start, end = right.end}, {}
 	}
 	return {}, errs.new(.Invalid_Input, "address: unknown expression node", allocator = allocator)
+}
+
+cancellation_requested :: proc(cancelled: ^bool) -> bool {
+	return cancelled != nil && sync.atomic_load(cancelled)
+}
+
+check_cancellation :: proc(cancelled: ^bool, allocator: runtime.Allocator) -> errs.Error {
+	if cancellation_requested(cancelled) {
+		return errs.new(.Cancelled, "address: evaluation was cancelled", allocator = allocator)
+	}
+	return {}
 }
 
 address_out_of_range :: proc(allocator: runtime.Allocator) -> errs.Error {

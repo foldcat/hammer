@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M08.06 Add cancellable snapshot-based execution for expensive edits
+## Current task: M08.07 Implement atomic multi-buffer validation where needed

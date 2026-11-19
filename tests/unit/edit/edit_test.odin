@@ -2,6 +2,7 @@ package edit_test
 
 import "core:bytes"
 import "core:testing"
+import "core:time"
 
 import address "hammer:core/address"
 import edit "hammer:core/edit"
@@ -493,4 +494,189 @@ test_substitution_parser_and_result_budget :: proc(t: ^testing.T) {
 	expect_run_error(t, &many_doc, &selection, ",s/a/X/g", .Resource_Limit)
 	testing.expect(t, rope.tree_byte_count(&many_doc.tree) == len(many))
 	testing.expect(t, txn.doc_log_len(&many_doc) == 0)
+}
+
+
+wait_for_edit_result :: proc(t: ^testing.T, runner: ^edit.Runner) -> ^edit.Result {
+	for _ in 0 ..< 2000 {
+		if result, ok := edit.runner_poll(runner); ok {
+			return result
+		}
+		time.sleep(time.Millisecond)
+	}
+	testing.expect(t, false, "timed out waiting for asynchronous Edit")
+	return nil
+}
+
+@(test)
+test_async_snapshot_result_applies_as_one_undo_group :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	init_doc(t, &doc, "a a a")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{}
+	history: address.Regex_History
+	program, parse_err := edit.parse(",s/(a)/[\\1]/g", context.allocator)
+	testing.expect(t, errs.ok(parse_err))
+	errs.destroy(&parse_err)
+	defer edit.program_destroy(&program, context.allocator)
+
+	runner: edit.Runner
+	start_err := edit.runner_start(&runner, &doc, selection, &program, history, 7, 3, 0, 99, 41, context.allocator)
+	testing.expect(t, errs.ok(start_err))
+	errs.destroy(&start_err)
+	if !edit.runner_active(&runner) {
+		return
+	}
+	defer edit.runner_destroy(&runner)
+
+	busy_err := edit.runner_start(&runner, &doc, selection, &program, history, 7, 3, 0, 100, 42, context.allocator)
+	testing.expect(t, busy_err.kind == .Resource_Limit)
+	errs.destroy(&busy_err)
+
+	result := wait_for_edit_result(t, &runner)
+	if result == nil {
+		return
+	}
+	testing.expect(t, result.target_id == 7 && result.target_generation == 3)
+	testing.expect(t, result.source_revision == 0 && result.request_id == 99)
+	testing.expect(t, errs.ok(result.err))
+
+	stale_err := edit.apply_result(&doc, &selection, &history, result, 7, 3, 100, context.allocator)
+	testing.expect(t, stale_err.kind == .Conflict)
+	errs.destroy(&stale_err)
+	expect_content(t, &doc, "a a a")
+
+	apply_err := edit.apply_result(&doc, &selection, &history, result, 7, 3, 99, context.allocator)
+	testing.expect(t, errs.ok(apply_err))
+	errs.destroy(&apply_err)
+	expect_content(t, &doc, "[a] [a] [a]")
+	expect_selection(t, selection, 0, 5)
+	testing.expect(t, txn.doc_log_len(&doc) == 1)
+	testing.expect(t, doc.log[0].grouping_key == 41)
+	_, undo_err := txn.doc_undo(&doc, context.allocator)
+	testing.expect(t, errs.ok(undo_err))
+	errs.destroy(&undo_err)
+	expect_content(t, &doc, "a a a")
+}
+
+@(test)
+test_async_stale_revision_applies_nothing :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	init_doc(t, &doc, "a a")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{}
+	history: address.Regex_History
+	program, parse_err := edit.parse(",s/a/X/g", context.allocator)
+	testing.expect(t, errs.ok(parse_err))
+	errs.destroy(&parse_err)
+	defer edit.program_destroy(&program, context.allocator)
+
+	runner: edit.Runner
+	start_err := edit.runner_start(&runner, &doc, selection, &program, history, 7, 3, 0, 99, 41, context.allocator)
+	testing.expect(t, errs.ok(start_err))
+	errs.destroy(&start_err)
+	if !edit.runner_active(&runner) {
+		return
+	}
+	defer edit.runner_destroy(&runner)
+
+	operation := txn.Operation(txn.Insert{pos = 0, data = transmute([]byte)string("!")})
+	transaction := txn.Transaction{
+		source = .Typing,
+		base_revision = 0,
+		ops = []txn.Operation{operation},
+		after_selection = {anchor = 1, active = 1, affinity = .Right},
+	}
+	edit_err := txn.doc_apply(&doc, &transaction, context.allocator)
+	testing.expect(t, errs.ok(edit_err))
+	errs.destroy(&edit_err)
+	selection = transaction.after_selection
+
+	result := wait_for_edit_result(t, &runner)
+	if result == nil {
+		return
+	}
+	apply_err := edit.apply_result(&doc, &selection, &history, result, 7, 3, 99, context.allocator)
+	testing.expect(t, apply_err.kind == .Conflict)
+	errs.destroy(&apply_err)
+	expect_content(t, &doc, "!a a")
+	expect_selection(t, selection, 1, 1)
+	testing.expect(t, txn.doc_log_len(&doc) == 1)
+}
+
+@(test)
+test_async_cancellation_applies_nothing :: proc(t: ^testing.T) {
+	content := make([]byte, 64 * 1024, context.allocator)
+	defer delete(content, context.allocator)
+	for &c in content {
+		c = 'a'
+	}
+	doc: txn.Doc
+	init_doc(t, &doc, string(content))
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{}
+	history: address.Regex_History
+	program, parse_err := edit.parse(",s/(a|aa)*b/X/g", context.allocator)
+	testing.expect(t, errs.ok(parse_err))
+	errs.destroy(&parse_err)
+	defer edit.program_destroy(&program, context.allocator)
+
+	runner: edit.Runner
+	start_err := edit.runner_start(&runner, &doc, selection, &program, history, 7, 3, 0, 99, 41, context.allocator)
+	testing.expect(t, errs.ok(start_err))
+	errs.destroy(&start_err)
+	if !edit.runner_active(&runner) {
+		return
+	}
+	defer edit.runner_destroy(&runner)
+	edit.runner_cancel(&runner)
+
+	result := wait_for_edit_result(t, &runner)
+	if result == nil {
+		return
+	}
+	testing.expect(t, result.err.kind == .Cancelled)
+	testing.expect(t, len(result.batches) == 0)
+	apply_err := edit.apply_result(&doc, &selection, &history, result, 7, 3, 99, context.allocator)
+	testing.expect(t, apply_err.kind == .Cancelled)
+	errs.destroy(&apply_err)
+	testing.expect(t, rope.tree_byte_count(&doc.tree) == len(content))
+	testing.expect(t, txn.doc_log_len(&doc) == 0)
+	expect_selection(t, selection, 0, 0)
+}
+
+@(test)
+test_async_runtime_error_replays_successful_prefix :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	init_doc(t, &doc, "one\n")
+	defer txn.doc_destroy(&doc)
+	selection := txn.Selection{}
+	history: address.Regex_History
+	program, parse_err := edit.parse("0a/new/\n99d", context.allocator)
+	testing.expect(t, errs.ok(parse_err))
+	errs.destroy(&parse_err)
+	defer edit.program_destroy(&program, context.allocator)
+
+	runner: edit.Runner
+	start_err := edit.runner_start(&runner, &doc, selection, &program, history, 7, 3, 0, 99, 41, context.allocator)
+	testing.expect(t, errs.ok(start_err))
+	errs.destroy(&start_err)
+	if !edit.runner_active(&runner) {
+		return
+	}
+	defer edit.runner_destroy(&runner)
+	result := wait_for_edit_result(t, &runner)
+	if result == nil {
+		return
+	}
+	testing.expect(t, result.err.kind == .NotFound)
+	apply_err := edit.apply_result(&doc, &selection, &history, result, 7, 3, 99, context.allocator)
+	testing.expect(t, apply_err.kind == .NotFound)
+	errs.destroy(&apply_err)
+	expect_content(t, &doc, "newone\n")
+	testing.expect(t, txn.doc_log_len(&doc) == 1)
+	_, undo_err := txn.doc_undo(&doc, context.allocator)
+	testing.expect(t, errs.ok(undo_err))
+	errs.destroy(&undo_err)
+	expect_content(t, &doc, "one\n")
 }

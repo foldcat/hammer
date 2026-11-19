@@ -18,7 +18,11 @@ regex_find_matches :: proc(
 	history: ^Regex_History,
 	max_matches: int,
 	allocator := context.allocator,
+	cancelled: ^bool = nil,
 ) -> ([]Regex_Match, errs.Error) {
+	if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+		return {}, err
+	}
 	if tree == nil {
 		return {}, errs.new(.Invalid_Input, "address: nil regular-expression tree", allocator = allocator)
 	}
@@ -61,7 +65,7 @@ regex_find_matches :: proc(
 	if !errs.ok(compile_err) {
 		return {}, compile_err
 	}
-	matcher, matcher_err := regex_matcher_init(compiled, string(text_bytes), scratch, allocator, true)
+	matcher, matcher_err := regex_matcher_init(compiled, string(text_bytes), scratch, allocator, true, cancelled)
 	if !errs.ok(matcher_err) {
 		return {}, matcher_err
 	}
@@ -78,7 +82,15 @@ regex_find_matches :: proc(
 	search_start := range.start
 	previous_end := -1
 	for search_start <= range.end && count < max_matches {
+		if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+			delete(matches, allocator)
+			return {}, err
+		}
 		match, found := regex_matcher_run_captures(&matcher, search_start, range.end + 1, range.end)
+		if err := check_cancellation(cancelled, allocator); !errs.ok(err) {
+			delete(matches, allocator)
+			return {}, err
+		}
 		if !matcher.valid {
 			delete(matches, allocator)
 			return {}, errs.new(.Internal, "address: invalid native regular-expression execution", allocator = allocator)
