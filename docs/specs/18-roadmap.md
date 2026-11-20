@@ -360,6 +360,8 @@ serialization) are covered by M16.
 - Working-directory/environment context.
 - Cancellation.
 - Selection pipes.
+- General external command routing (`>`, `<`, `|`) with a configurable shell
+  and an explicit trust gate.
 - Named filter-command registry with optional external engines (Raku first).
 
 ### Tasks
@@ -377,6 +379,7 @@ M09.09  Implement named filter-command registry, scoping, and discovery.
 M09.10  Implement command invocation with context snapshot and routing.
 M09.11  Implement optional external regex verb (Raku when present, native fallback).
 M09.12  Implement Raku engine (temp-file programs, -n/-p filters, REPL window).
+M09.13  Implement general external command routing (`>`, `<`, `|`) with an explicit trust gate.
 ```
 
 ### Acceptance
@@ -394,6 +397,13 @@ M09.12  Implement Raku engine (temp-file programs, -n/-p filters, REPL window).
   external regex verb degrades gracefully (native fallback) when the binary
   is absent.
 - External regex/commands are bounded and cancellable via the job service.
+- `>command`, `<command`, and `|command` route selected text through the job
+  service (replace, feed, pipe) per SPECS §12.4, reusing the existing
+  snapshot, stale-target, and output-window machinery.
+- Shell execution is configurable and explicit; arbitrary text never falls
+  through to a bare shell without a prior trust decision, and every run is
+  echoed before execution. No command line is built by concatenating
+  unescaped paths.
 
 ---
 
