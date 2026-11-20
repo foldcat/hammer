@@ -24,6 +24,36 @@ def wait_for_log(log_path: Path, needle: str, timeout: float) -> None:
     raise HarnessFailure(f"timed out waiting for {needle!r}; log: {log_path}")
 
 
+def click(x11: X11, window: int, button: int, x: int, y: int) -> None:
+    x11.move(window, x, y)
+    x11.button(button, True)
+    x11.button(button, False)
+
+
+def select_all(x11: X11) -> None:
+    x11.key(0xFFE3, True)
+    x11.tap(ord("a"))
+    x11.key(0xFFE3, False)
+
+
+def type_text(x11: X11, text: str) -> None:
+    for character in text:
+        if character.isupper():
+            x11.key(0xFFE1, True)
+            x11.tap(ord(character.lower()))
+            x11.key(0xFFE1, False)
+        else:
+            x11.tap(ord(character))
+
+
+def execute(x11: X11, window: int, command: str, x: int, y: int) -> None:
+    click(x11, window, 1, x, y)
+    select_all(x11)
+    type_text(x11, command)
+    select_all(x11)
+    click(x11, window, 2, x, y)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
@@ -125,8 +155,43 @@ def main() -> int:
 
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)
-            succeeded = True
-            return 0
+            process = None
+
+        # M09.detour-2: closing the last window keeps the editor open, so the
+        # user can open a new column or buffer from the global tag.
+        empty_log = sandbox / "empty-hammer.log"
+        with empty_log.open("wb") as log:
+            process = subprocess.Popen(
+                [str(binary)],
+                cwd=sandbox,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+            )
+            window = x11.find_window(args.timeout)
+            x11.lib.XMapRaised(x11.display, window)
+            x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+            x11.lib.XSync(x11.display, 0)
+            time.sleep(0.3)
+
+            execute(x11, window, "Del", 60, 52)
+            wait_for_log(empty_log, "view: closed window 1; 1 views remain", args.timeout)
+            execute(x11, window, "Del", 500, 52)
+            wait_for_log(empty_log, "view: closed window 2; 0 views remain", args.timeout)
+            if process.poll() is not None:
+                raise HarnessFailure("closing the last window exited the editor")
+
+            execute(x11, window, "Newcol", 10, 10)
+            wait_for_log(empty_log, "view: Newcol column=", args.timeout)
+            print("PASS: closing the last window keeps the editor open for Newcol")
+
+            x11.tap(0xFF1B)
+            wait_for_exit(process, args.timeout, empty_log)
+            process = None
+
+        succeeded = True
+        return 0
     finally:
         if process is not None and process.poll() is None:
             process.terminate()

@@ -89,6 +89,10 @@ Acme behavior, not an implementation to copy mechanically.
   ordinary editing cancels exit. OS close uses the same guards and cannot bypass
   either running jobs or unsaved work. Covered by lifecycle tests and real X11
   window-close scenarios in `builtin-test`.
+- Closing the last window or deleting the last column leaves the editor open with
+  only the global tag, so `Newcol`/`New` can open fresh windows instead of the app
+  exiting; quit stays explicit (`Exit`, `Ctrl+Q`, `Escape`, or OS close). Covered
+  by `view-test`.
 - Named filter definitions are declarative and scoped session > project > user.
   `Cmd`/`Cmds` enumerates metadata and PATH availability without execution;
   project definitions load only after explicit `Cmds project` trust. Covered by

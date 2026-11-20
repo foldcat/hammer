@@ -1102,13 +1102,18 @@ editor_request_close :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close
 	}
 }
 
+// editor_enter_empty_state resets the active target after the last window is
+// closed, leaving the editor open with only the global tag. Newcol and New can
+// then create fresh columns and windows (M09.detour-2).
+editor_enter_empty_state :: proc() {
+	editor.active_window = 0
+	editor.buffer = nil
+	editor_activate_text(.Global_Tag)
+}
+
 editor_close_active_view :: proc(origin: lifecycle.Close_Origin) {
 	item := editor_active_view()
 	if item == nil {
-		return
-	}
-	if editor.views.view_count <= 1 {
-		editor_request_close(.Quit, origin)
 		return
 	}
 	window_id := item.window_id
@@ -1122,10 +1127,16 @@ editor_close_active_view :: proc(origin: lifecycle.Close_Origin) {
 	if view.buffer_view_count(&editor.views, buffer_id) == 0 {
 		editor_destroy_buffer(editor_buffer_by_id(buffer_id))
 	}
-	next := editor_active_view()
-	if next == nil {
-		if first := editor_first_view(); first != nil {
-			editor_activate_window(first.window_id)
+	if editor.views.view_count == 0 {
+		// Closing the last window no longer exits the app; the global tag stays
+		// usable so the user can open a new column or window.
+		editor_enter_empty_state()
+	} else {
+		next := editor_active_view()
+		if next == nil {
+			if first := editor_first_view(); first != nil {
+				editor_activate_window(first.window_id)
+			}
 		}
 	}
 	editor_cancel_pointer_gesture()
@@ -1213,13 +1224,14 @@ editor_request_close_column :: proc(column_id: layout.Column_ID) -> errs.Error {
 			editor.buffer = nil
 		}
 	}
-	if first := editor_first_view(); first != nil {
+	if editor.views.view_count == 0 {
+		// Deleting the last column no longer exits the app; the global tag stays
+		// usable so the user can open a new column or window.
+		editor_enter_empty_state()
+	} else if first := editor_first_view(); first != nil {
 		editor_activate_window(first.window_id)
 	}
 	log.infof("view: deleted column %d; %d columns and %d views remain", u64(column_id), editor.workspace.column_count, editor.views.view_count)
-	if editor.views.view_count == 0 {
-		editor_request_close(.Quit, .Tag_Command)
-	}
 	return {}
 }
 
