@@ -137,9 +137,59 @@ editor_finish_history_jump :: proc(item: ^view.View) {
 	editor_refresh_window_tags()
 }
 
+// editor_tag_filepath_token reads the leftmost tag token. When ok is true the
+// result is owned by the caller (temp allocator) and must be freed.
+editor_tag_filepath_token :: proc(tag: ^tagstate.State, allocator := context.temp_allocator) -> (string, bool) {
+	if tag == nil {
+		return "", false
+	}
+	fp, fp_err := tagstate.filepath(tag, allocator)
+	if !errs.ok(fp_err) {
+		errs.destroy(&fp_err)
+		return "", false
+	}
+	return fp, true
+}
+
+// editor_window_commands returns the generated command list for a window's tag.
+// The result is a literal and is not owned by the caller.
+editor_window_commands :: proc(buffer: ^Editor_Buffer, item: ^view.View) -> string {
+	if buffer == nil {
+		return "Del"
+	}
+	switch buffer.kind {
+	case .Job_Output:
+		commands := "Del Stop"
+		if buffer.has_conflict_pipe && buffer.conflict_pipe.state == .Conflict {
+			commands = "Del Apply"
+		}
+		return commands
+	case .Directory:
+		return "Del Get"
+	case .File:
+		if txn.doc_revision(&buffer.doc) != buffer.saved_revision {
+			return "Del Put"
+		}
+		if buffer.path == "" {
+			// An untitled buffer whose leftmost token names the new file
+			// offers Put so the file can be written.
+			if fp, ok := editor_tag_filepath_token(&item.tag); ok {
+				defer delete(fp, context.temp_allocator)
+				if fp != "" && fp != "New" {
+					return "Del Put"
+				}
+			}
+		}
+	case .Errors, .Commands, .Jobs:
+	}
+	return "Del"
+}
+
 editor_window_generated :: proc(item: ^view.View) -> string {
-	name := "New"
 	buffer := editor_buffer_for_view(item)
+	name := "New"
+	typed := ""
+	typed_owned := false
 	if buffer != nil {
 		switch buffer.kind {
 		case .Errors:
@@ -162,25 +212,52 @@ editor_window_generated :: proc(item: ^view.View) -> string {
 						name = buffer.path[index + 1:]
 					}
 				}
+			} else if fp, ok := editor_tag_filepath_token(&item.tag); ok {
+				typed = fp
+				typed_owned = true
+				if typed != "" {
+					name = typed
+				}
 			}
 		}
 	}
-	commands := "Del"
-	if buffer != nil && buffer.kind == .Job_Output {
-		commands = "Del Stop"
-		if buffer.has_conflict_pipe && buffer.conflict_pipe.state == .Conflict {
-			commands = "Del Apply"
-		}
-	} else if buffer != nil && buffer.kind == .Directory {
-		commands = "Del Get"
-	} else if buffer != nil && buffer.kind == .File && txn.doc_revision(&buffer.doc) != buffer.saved_revision {
-		commands = "Del Put"
+	defer if typed_owned {
+		delete(typed, context.temp_allocator)
 	}
-	return fmt.aprintf("%s %s | ", name, commands, allocator = context.temp_allocator)
+	return fmt.aprintf("%s %s | ", name, editor_window_commands(buffer, item), allocator = context.temp_allocator)
+}
+
+// editor_window_tag_locked reports whether the window's generated-commands
+// region should be immutable. Blank (untitled) file buffers have no real
+// filepath to protect, so their whole tag stays editable.
+editor_window_tag_locked :: proc(item: ^view.View) -> bool {
+	buffer := editor_buffer_for_view(item)
+	if buffer == nil {
+		return true
+	}
+	return !(buffer.kind == .File && buffer.path == "")
+}
+
+// editor_active_untitled_file reports whether the active window tag belongs to
+// an untitled (blank) file buffer.
+editor_active_untitled_file :: proc() -> bool {
+	if editor.active_text_kind != .Window_Tag {
+		return false
+	}
+	item := editor_active_view()
+	if item == nil {
+		return false
+	}
+	buffer := editor_buffer_for_view(item)
+	return buffer != nil && buffer.kind == .File && buffer.path == ""
 }
 
 editor_init_window_tag :: proc(item: ^view.View) -> errs.Error {
-	return tagstate.init(&item.tag, editor_window_generated(item), permanent())
+	err := tagstate.init(&item.tag, editor_window_generated(item), permanent())
+	if errs.ok(err) {
+		item.tag.lock_commands = editor_window_tag_locked(item)
+	}
+	return err
 }
 
 editor_column_tag :: proc(column_id: layout.Column_ID) -> ^tagstate.State {
@@ -245,6 +322,7 @@ editor_refresh_window_tags :: proc() {
 		generated := editor_window_generated(item)
 		previous_revision := txn.doc_revision(&item.tag.doc)
 		editor_report(tagstate.refresh_generated(&item.tag, generated, permanent()))
+		item.tag.lock_commands = editor_window_tag_locked(item)
 		if txn.doc_revision(&item.tag.doc) != previous_revision {
 			log.infof("tag: window %d generated %q", u64(item.window_id), generated)
 		}

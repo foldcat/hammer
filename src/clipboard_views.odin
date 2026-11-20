@@ -100,18 +100,27 @@ editor_poll_tag_clipboard :: proc(tag: ^tagstate.State, buffer_id: u64, result: 
 				editor_cancel_delayed_paste(&tag.delayed_paste)
 				log.warn("tag: newline input is not allowed")
 			} else {
-				editor.typing_group = 0
-				apply_err := editing.delayed_paste_apply(
-					&tag.delayed_paste,
-					&tag.doc,
-					&tag.selection,
-					buffer_id,
-					DEFAULT_BUFFER_GENERATION,
-					u64(result.id),
-					result.data,
-				)
-				applied = errs.ok(apply_err)
-				editor_report(apply_err)
+				range := editing.selection_range(tag.selection)
+				if !tagstate.edit_allowed(tag, range.start) {
+					editor_cancel_delayed_paste(&tag.delayed_paste)
+					log.warn("tag: generated commands are immutable")
+				} else {
+					editor.typing_group = 0
+					apply_err := editing.delayed_paste_apply(
+						&tag.delayed_paste,
+						&tag.doc,
+						&tag.selection,
+						buffer_id,
+						DEFAULT_BUFFER_GENERATION,
+						u64(result.id),
+						result.data,
+					)
+					applied = errs.ok(apply_err)
+					editor_report(apply_err)
+					if applied {
+						editor_report(tagstate.rediscover(tag, context.temp_allocator))
+					}
+				}
 			}
 		}
 		editor_mouse_clipboard_result(mouse.Target_ID(buffer_id), result.id, result.operation, applied, tag.doc.current, len(result.data))
@@ -121,6 +130,9 @@ editor_poll_tag_clipboard :: proc(tag: ^tagstate.State, buffer_id: u64, result: 
 		applied := false
 		if !errs.ok(result.err) {
 			editor_cancel_delayed_cut(&tag.delayed_cut)
+		} else if !tagstate.deletion_allowed(tag, tag.selection) {
+			editor_cancel_delayed_cut(&tag.delayed_cut)
+			log.warn("tag: generated commands are immutable")
 		} else {
 			editor.typing_group = 0
 			apply_err := editing.delayed_cut_apply(
@@ -133,6 +145,9 @@ editor_poll_tag_clipboard :: proc(tag: ^tagstate.State, buffer_id: u64, result: 
 			)
 			applied = errs.ok(apply_err)
 			editor_report(apply_err)
+			if applied {
+				editor_report(tagstate.rediscover(tag, context.temp_allocator))
+			}
 		}
 		editor_mouse_clipboard_result(mouse.Target_ID(buffer_id), result.id, result.operation, applied, tag.doc.current, len(result.data))
 		return true

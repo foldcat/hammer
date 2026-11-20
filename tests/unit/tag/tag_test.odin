@@ -100,3 +100,110 @@ test_generated_input_validation :: proc(t: ^testing.T) {
 	errs.destroy(&err)
 	expect_text(t, &state, "Other | ")
 }
+
+@(test)
+test_filepath_boundary_and_immutable_region :: proc(t: ^testing.T) {
+	state: tagstate.State
+	err := tagstate.init(&state, "file.txt Del Put | ", context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	defer tagstate.destroy(&state)
+
+	testing.expect(t, state.filepath_end == len("file.txt"))
+	testing.expect(t, state.generated_end == len("file.txt Del Put | "))
+	testing.expect(t, state.lock_commands)
+
+	// Typing is allowed at the filepath (and its separating space) and the
+	// suffix, blocked inside the generated-commands region.
+	testing.expect(t, tagstate.edit_allowed(&state, 0))
+	testing.expect(t, tagstate.edit_allowed(&state, len("file.txt")))
+	testing.expect(t, !tagstate.edit_allowed(&state, len("file.txt") + 1))
+	testing.expect(t, tagstate.edit_allowed(&state, state.generated_end))
+
+	// Deletion is blocked inside the commands region, allowed at the filepath
+	// and the suffix. A collapsed caret is treated by its byte offset.
+	testing.expect(t, tagstate.deletion_allowed(&state, {anchor = 0, active = 0}))
+	testing.expect(t, tagstate.deletion_allowed(&state, {anchor = len("file.txt"), active = len("file.txt")}))
+	testing.expect(t, !tagstate.deletion_allowed(&state, {anchor = len("file.txt") + 1, active = len("file.txt") + 1}))
+	testing.expect(t, tagstate.deletion_allowed(&state, {anchor = state.generated_end, active = state.generated_end}))
+	// A selection spanning the commands region is also blocked.
+	testing.expect(t, !tagstate.deletion_allowed(&state, {anchor = len("file.txt"), active = state.generated_end}))
+
+	fp, fp_err := tagstate.filepath(&state, context.allocator)
+	defer delete(fp, context.allocator)
+	testing.expect(t, errs.ok(fp_err))
+	errs.destroy(&fp_err)
+	testing.expect(t, fp == "file.txt")
+}
+
+@(test)
+test_unlocked_tag_is_fully_editable :: proc(t: ^testing.T) {
+	state: tagstate.State
+	err := tagstate.init(&state, "New Del | ", context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	defer tagstate.destroy(&state)
+
+	// A blank buffer clears the lock so the whole tag can be edited.
+	state.lock_commands = false
+	for offset in 0 ..= state.generated_end + 2 {
+		testing.expectf(
+			t,
+			tagstate.edit_allowed(&state, offset),
+			"edit_allowed should hold at offset %v when unlocked",
+			offset,
+		)
+		testing.expectf(
+			t,
+			tagstate.deletion_allowed(&state, {anchor = offset, active = offset}),
+			"deletion_allowed should hold at offset %v when unlocked",
+			offset,
+		)
+	}
+}
+
+@(test)
+test_refresh_commands_preserves_name_and_caret :: proc(t: ^testing.T) {
+	state: tagstate.State
+	err := tagstate.init(&state, "fresh.txt Del | ", context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	defer tagstate.destroy(&state)
+
+	// A caret in the middle of the name must survive a commands-only refresh.
+	state.selection = {anchor = 4, active = 4, affinity = .Left}
+	err = tagstate.refresh_commands(&state, "Del Put", context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	expect_text(t, &state, "fresh.txt Del Put | ")
+	testing.expect(t, state.selection.anchor == 4 && state.selection.active == 4)
+	testing.expect(t, state.filepath_end == len("fresh.txt"))
+	testing.expect(t, state.generated_end == len("fresh.txt Del Put | "))
+
+	// Refreshing with the same commands is a no-op.
+	before := txn.doc_revision(&state.doc)
+	err = tagstate.refresh_commands(&state, "Del Put", context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	testing.expect(t, txn.doc_revision(&state.doc) == before)
+	expect_text(t, &state, "fresh.txt Del Put | ")
+}
+
+@(test)
+test_refresh_commands_boundary_caret_stays_put :: proc(t: ^testing.T) {
+	state: tagstate.State
+	err := tagstate.init(&state, "f Del | ", context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	defer tagstate.destroy(&state)
+
+	// After typing "f" over "New", the caret sits at filepath_end (the space
+	// that separates the name from the commands). A commands refresh inserts
+	// Put but must not push the caret past the new commands.
+	state.selection = {anchor = 1, active = 1, affinity = .Left}
+	err = tagstate.refresh_commands(&state, "Del Put", context.allocator)
+	testing.expect(t, errs.ok(err))
+	errs.destroy(&err)
+	expect_text(t, &state, "f Del Put | ")
+	testing.expect(t, state.selection.anchor == 1 && state.selection.active == 1)
+}

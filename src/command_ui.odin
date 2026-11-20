@@ -12,6 +12,7 @@ import lifecycle "core/lifecycle"
 import mouse "core/mouse"
 import process "core/process"
 import rope "core/rope"
+import tagstate "core/tag"
 import txn "core/txn"
 import view "core/view"
 
@@ -328,13 +329,33 @@ editor_command_get :: proc(cmd_context: ^command.Context, invocation: command.In
 		return errs.new(.Internal, "get: current window has no buffer", allocator = permanent())
 	}
 	path := buffer.path
+	owned_path := false
+	defer if owned_path {
+		delete(path, context.temp_allocator)
+	}
 	if invocation.argument != "" {
 		resolved, path_err := editor_normalized_look_path(invocation.argument, target, context.temp_allocator)
 		if !errs.ok(path_err) {
 			return path_err
 		}
-		defer delete(resolved, context.temp_allocator)
 		path = resolved
+		owned_path = true
+	} else if buffer.kind == .File {
+		// The leftmost filepath token of the tag is editable (M09.detour-1);
+		// read it so Get can target a different file than the current one.
+		filepath, fp_err := tagstate.filepath(&body.item.tag, context.temp_allocator)
+		if !errs.ok(fp_err) {
+			return fp_err
+		}
+		defer delete(filepath, context.temp_allocator)
+		if filepath != "" && filepath != editor_file_basename(buffer.path) {
+			resolved, resolve_err := editor_normalized_look_path(filepath, target, context.temp_allocator)
+			if !errs.ok(resolve_err) {
+				return resolve_err
+			}
+			path = resolved
+			owned_path = true
+		}
 	}
 	return editor_reload_buffer(body.item, path)
 }
@@ -346,12 +367,33 @@ editor_command_putall :: proc(cmd_context: ^command.Context, invocation: command
 
 editor_command_put :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
 	target := editor_command_source_target(cmd_context.source)
-	if target.window_id != 0 {
-		if editor.active_window != target.window_id {
-			editor_activate_window(target.window_id)
-		}
-		editor_save()
+	if target.window_id == 0 {
+		return {}
 	}
+	if editor.active_window != target.window_id {
+		editor_activate_window(target.window_id)
+	}
+	body := editor_target_body(target)
+	item := body.item
+	buffer := editor_buffer_for_view(item)
+	if buffer != nil && buffer.kind == .File && buffer.path == "" {
+		// An untitled buffer's leftmost tag token names the new file.
+		filepath, fp_err := tagstate.filepath(&item.tag, context.temp_allocator)
+		if !errs.ok(fp_err) {
+			return fp_err
+		}
+		defer delete(filepath, context.temp_allocator)
+		if filepath == "" || filepath == "New" {
+			return errs.new(.Invalid_Input, "put: type a file name in the tag before Put", allocator = permanent())
+		}
+		resolved, resolve_err := editor_normalized_look_path(filepath, target, context.temp_allocator)
+		if !errs.ok(resolve_err) {
+			return resolve_err
+		}
+		defer delete(resolved, context.temp_allocator)
+		return editor_save_buffer_as(buffer, resolved)
+	}
+	editor_save()
 	return {}
 }
 

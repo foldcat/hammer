@@ -24,6 +24,17 @@ def wait_for_log(log_path: Path, needle: str, timeout: float) -> None:
     raise HarnessFailure(f"timed out waiting for {needle!r}; log: {log_path}")
 
 
+def type_tag_text(x11: X11, text: str) -> None:
+    """Types text with Shift for uppercase letters (tags are case-sensitive)."""
+    for character in text:
+        if character.isupper():
+            x11.key(0xFFE1, True)
+            x11.tap(ord(character.lower()))
+            x11.key(0xFFE1, False)
+        else:
+            x11.tap(ord(character))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
@@ -165,6 +176,164 @@ def main() -> int:
 
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)
+            process = None
+
+            # M09.detour-1: the generated-commands region of a window tag is
+            # immutable against typing; the leftmost filepath is editable and
+            # Get reads it.
+            detour_a = sandbox / "a.txt"
+            detour_b = sandbox / "b.txt"
+            detour_a.write_bytes(b"A\n")
+            detour_b.write_bytes(b"B\n")
+            detour_log = sandbox / "detour-hammer.log"
+            with detour_log.open("wb") as log:
+                process = subprocess.Popen(
+                    [str(binary), "a.txt"],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    env=environment,
+                )
+                window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, window)
+                x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                time.sleep(0.3)
+
+                # The window tag is "a.txt Del | ". Typing inside the generated
+                # commands region is blocked.
+                x11.move(window, 90, 52)
+                x11.button(1, True)
+                x11.button(1, False)
+                x11.tap(ord("X"))
+                wait_for_log(detour_log, "tag: generated commands are immutable", args.timeout)
+                print("PASS: generated-commands region is immutable against typing")
+
+                # Backspace and Tab are also rejected inside the commands
+                # region: neither may delete nor insert into the immutable text.
+                tag_pixels = x11.pixels(window, 22, 390, 46, 66)
+                x11.tap(0xFF08)  # Backspace
+                time.sleep(0.2)
+                if x11.pixels(window, 22, 390, 46, 66) != tag_pixels:
+                    raise HarnessFailure("backspace edited the generated-commands region")
+                x11.tap(0xFF09)  # Tab
+                time.sleep(0.2)
+                if x11.pixels(window, 22, 390, 46, 66) != tag_pixels:
+                    raise HarnessFailure("tab edited the generated-commands region")
+                print("PASS: backspace and tab are rejected in the generated-commands region")
+
+                # Select the filepath "a.txt" and type "b.txt", then Get.
+                x11.move(window, 22, 52)
+                x11.button(1, True)
+                x11.button(1, False)
+                x11.key(0xFFE1, True)
+                for _ in range(5):
+                    x11.tap(0xFF53)  # Right arrow
+                x11.key(0xFFE1, False)
+                type_tag_text(x11, "b.txt")
+                x11.move(window, 180, 52)
+                x11.button(1, True)
+                x11.button(1, False)
+                type_tag_text(x11, "Get")
+                x11.key(0xFFE1, True)
+                for _ in range(3):
+                    x11.tap(0xFF51)  # Left arrow
+                x11.key(0xFFE1, False)
+                x11.move(window, 180, 52)
+                x11.button(2, True)
+                x11.button(2, False)
+                wait_for_log(detour_log, "file: reloaded", args.timeout)
+                if "b.txt" not in detour_log.read_text(encoding="utf-8", errors="replace"):
+                    raise HarnessFailure("Get did not reload the edited filepath")
+                print("PASS: Get reloads the file named in the edited filepath")
+
+                # The cross-file reload leaves the buffer dirty (existing
+                # Get <path> behavior), so terminate directly rather than
+                # expecting a clean Escape.
+                process.terminate()
+                process.wait(timeout=2)
+                process = None
+
+            # M09.detour-1 (blank buffer): an untitled buffer has no real
+            # filepath, so its whole tag is editable — including the generated
+            # commands region.
+            blank_log = sandbox / "blank-hammer.log"
+            with blank_log.open("wb") as log:
+                process = subprocess.Popen(
+                    [str(binary)],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    env=environment,
+                )
+                window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, window)
+                x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                time.sleep(0.3)
+
+                # The blank tag is "New Del | ". Typing inside the generated
+                # commands region is allowed.
+                x11.move(window, 66, 52)
+                x11.button(1, True)
+                x11.button(1, False)
+                tag_pixels = x11.pixels(window, 22, 390, 46, 66)
+                x11.tap(ord("X"))
+                time.sleep(0.3)
+                if x11.pixels(window, 22, 390, 46, 66) == tag_pixels:
+                    raise HarnessFailure("typing in a blank buffer's commands region was blocked")
+                if "tag: generated commands are immutable" in blank_log.read_text(encoding="utf-8", errors="replace"):
+                    raise HarnessFailure("blank buffer tag was treated as immutable")
+                print("PASS: blank buffer's whole tag is editable")
+
+                process.terminate()
+                process.wait(timeout=2)
+                process = None
+
+            # M09.detour-1 (save new file): typing a path into an untitled
+            # buffer's tag offers Put, and middle-clicking Put writes the file.
+            save_log = sandbox / "save-hammer.log"
+            with save_log.open("wb") as log:
+                process = subprocess.Popen(
+                    [str(binary)],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    env=environment,
+                )
+                window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, window)
+                x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                time.sleep(0.3)
+
+                # Replace the placeholder name "New" with a real path.
+                x11.move(window, 22, 52)
+                x11.button(1, True)
+                x11.button(1, False)
+                x11.key(0xFFE1, True)
+                for _ in range(3):
+                    x11.tap(0xFF53)  # Right arrow selects "New"
+                x11.key(0xFFE1, False)
+                type_tag_text(x11, "f.txt")
+
+                # The tag is now "f.txt Del Put | "; middle-click Put.
+                x11.move(window, 114, 52)
+                x11.button(2, True)
+                x11.button(2, False)
+                wait_for_log(save_log, "file: saved", args.timeout)
+                saved = sandbox / "f.txt"
+                if not saved.is_file():
+                    raise HarnessFailure("Put did not create the file at the typed path")
+                print("PASS: Put saves an untitled buffer to the typed path")
+
+                process.terminate()
+                process.wait(timeout=2)
+                process = None
+
             succeeded = True
             return 0
     finally:

@@ -662,8 +662,23 @@ editor_log_layout_drag :: proc(kind: layout.Drag_Kind, column_id: layout.Column_
 }
 
 editor_perform :: proc(action: editing.Action) {
+	resolved := action
+	previous_filepath := ""
+	previous_filepath_owned := false
+	if editor_active_untitled_file() {
+		if tag := editor_active_tag(); tag != nil {
+			if fp, ok := editor_tag_filepath_token(tag); ok {
+				previous_filepath = fp
+				previous_filepath_owned = true
+			}
+		}
+	}
+	defer if previous_filepath_owned {
+		delete(previous_filepath, context.temp_allocator)
+	}
+
 	if editor.active_text_kind != .Body {
-		#partial switch a in action {
+		#partial switch a in resolved {
 		case editing.Insert_Text:
 			if a.text == '\n' || a.text == '\r' {
 				log.warn("tag: newline input is not allowed")
@@ -678,13 +693,19 @@ editor_perform :: proc(action: editing.Action) {
 			}
 		case:
 		}
+		if tag := editor_active_tag(); tag != nil {
+			if !editor_tag_constrain(tag, editor_active_selection()^, &resolved) {
+				log.warn("tag: generated commands are immutable")
+				return
+			}
+		}
 	}
 	doc := editor_active_doc()
 	previous_revision := txn.doc_revision(doc)
 	err := editing.perform_with_options(
 		doc,
 		editor_active_selection(),
-		action,
+		resolved,
 		{autopair = cfg.Autopair, auto_indent = true, indent = {style = .Tabs}},
 	)
 	if editor.active_text_kind == .Body {
@@ -694,13 +715,61 @@ editor_perform :: proc(action: editing.Action) {
 			editor_reveal_caret(item)
 		}
 	} else {
+		if errs.ok(err) {
+			if tag := editor_active_tag(); tag != nil {
+				editor_report(tagstate.rediscover(tag, context.temp_allocator))
+			}
+			if editor_active_untitled_file() {
+				if tag := editor_active_tag(); tag != nil {
+					if fp, ok := editor_tag_filepath_token(tag); ok {
+						if fp != previous_filepath {
+							item := editor_active_view()
+							editor_report(tagstate.refresh_commands(tag, editor_window_commands(editor_buffer_for_view(item), item), context.temp_allocator))
+						}
+						delete(fp, context.temp_allocator)
+					}
+				}
+			}
+		}
 		editor_report(err)
 	}
+}
+
+// editor_tag_constrain enforces the immutable generated-commands region of a
+// tag: typing at a caret or replacing a selection whose insertion point falls
+// inside the commands region (between the leftmost filepath token and the
+// ` | ` delimiter) is rejected, as is deletion whose caret or selection falls
+// inside it. Movement is always allowed so the cursor can navigate through the
+// commands to reach the filepath.
+editor_tag_constrain :: proc(tag: ^tagstate.State, selection: txn.Selection, action: ^editing.Action) -> bool {
+	#partial switch a in action^ {
+	case editing.Insert_Text, editing.Commit_Text:
+		range := editing.selection_range(selection)
+		return tagstate.edit_allowed(tag, range.start)
+	case editing.Delete_Backward, editing.Delete_Word_Backward, editing.Delete_Forward:
+		return tagstate.deletion_allowed(tag, selection)
+	case:
+		return true
+	}
+	return true
 }
 
 editor_indent_active :: proc(direction: editing.Indent_Direction) {
 	doc := editor_active_doc()
 	previous_revision := txn.doc_revision(doc)
+	if editor.active_text_kind != .Body {
+		if tag := editor_active_tag(); tag != nil {
+			selection := editor_active_selection()^
+			allowed := tagstate.deletion_allowed(tag, selection)
+			if direction == .Indent {
+				allowed = tagstate.edit_allowed(tag, editing.selection_range(selection).start)
+			}
+			if !allowed {
+				log.warn("tag: generated commands are immutable")
+				return
+			}
+		}
+	}
 	err := editing.indent(doc, editor_active_selection(), direction, {style = .Tabs})
 	if editor.active_text_kind == .Body {
 		editor_finish_edit(editor_active_view(), previous_revision, err)
@@ -764,6 +833,50 @@ editor_save_buffer :: proc(buffer: ^Editor_Buffer) -> errs.Error {
 			allocator = context.temp_allocator,
 		)
 	}
+	buffer.saved_revision = result.revision
+	buffer.capture = result.capture
+	editor_refresh_window_tags()
+	log.infof("file: saved %s (revision %d)", buffer.path, result.revision)
+	return {}
+}
+
+// editor_save_buffer_as writes an untitled file buffer to a new destination
+// path and adopts that path as the buffer's identity. The destination must not
+// exist (no-clobber); the buffer's path is replaced only after a successful
+// save, so a failed Put leaves the buffer editable and unnamed.
+editor_save_buffer_as :: proc(buffer: ^Editor_Buffer, path: string) -> errs.Error {
+	if buffer == nil {
+		return errs.new(.Invalid_Input, "save: no buffer", allocator = context.temp_allocator)
+	}
+	if buffer.kind != .File {
+		return errs.new(.Unsupported, "save: non-file windows cannot be saved as files", allocator = context.temp_allocator)
+	}
+	if path == "" {
+		return errs.new(.Invalid_Input, "save: empty destination path", allocator = context.temp_allocator)
+	}
+	revision := txn.doc_revision(&buffer.doc)
+	result, err := filesave.save_tree(
+		{tree = &buffer.doc.tree, root = buffer.doc.tree.root, revision = revision},
+		path,
+		buffer.metadata,
+		{disk_check = .Must_Not_Exist},
+		context.temp_allocator,
+	)
+	if !errs.ok(err) {
+		if result.replaced {
+			log.error("file: save published the destination but did not complete; buffer remains dirty and must not be blindly retried")
+		}
+		return err
+	}
+	if result.revision != txn.doc_revision(&buffer.doc) {
+		return errs.new(
+			.Conflict,
+			"file: saved revision no longer matches the current buffer",
+			allocator = context.temp_allocator,
+		)
+	}
+	delete(buffer.path, permanent())
+	buffer.path = strings.clone(path, permanent())
 	buffer.saved_revision = result.revision
 	buffer.capture = result.capture
 	editor_refresh_window_tags()

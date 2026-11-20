@@ -41,6 +41,16 @@ editor_clean_look_path :: proc(candidate, original: string, allocator := context
 	return cleaned, {}
 }
 
+editor_file_basename :: proc(path: string) -> string {
+	base := path
+	for r, index in path {
+		if r == '/' || r == '\\' {
+			base = path[index + 1:]
+		}
+	}
+	return base
+}
+
 editor_normalized_look_path :: proc(path: string, source: Mouse_Text_Target, allocator := context.temp_allocator) -> (string, errs.Error) {
 	if os.is_absolute_path(path) {
 		return editor_clean_look_path(path, path, allocator)
