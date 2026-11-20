@@ -8,8 +8,7 @@
   </picture>
 </a>
 
-I will NOT sugar coat. This project is completely vibe coded with minimal human 
-review made for my own personal use.
+This project is mainly made for my own usage.
 
 ---
 
