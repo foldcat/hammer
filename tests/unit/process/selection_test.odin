@@ -219,6 +219,7 @@ test_selection_pipe_rejects_overlap_and_applies_explicitly :: proc(t: ^testing.T
 		_, replay_err := process.selection_pipe_replay(&job.selection_pipe, &diagnostics, 3)
 		expect_ok(t, replay_err)
 	}
+	expect_ok(t, process.output_finish(&diagnostics))
 	preserved := selection_test_text(t, &diagnostics_doc)
 	defer delete(preserved, context.allocator)
 	testing.expect(t, strings.contains(string(preserved), "pipe diagnostic\n"))

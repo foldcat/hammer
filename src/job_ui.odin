@@ -367,6 +367,14 @@ editor_poll_jobs :: proc() {
 				if !job.discard_output && state.failed_id != id && job.has_selection_pipe && job.selection_pipe.state == .Conflict {
 					editor_job_preserve_conflict(state, job)
 				}
+				if !job.discard_output && state.failed_id != id {
+					was_dirty, follow := editor_job_output_snapshot(state)
+					finish_err := process.output_finish(&state.output)
+					editor_job_output_apply(state, was_dirty, follow)
+					if !errs.ok(finish_err) {
+						editor_report(finish_err)
+					}
+				}
 				release_err := process.job_release(&editor.jobs, id)
 				editor_report(release_err)
 				log.infof("job: released id=%d", u64(id))

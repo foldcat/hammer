@@ -2,6 +2,7 @@ package process
 
 import "base:runtime"
 
+import console "../console"
 import errs "../errs"
 import rope "../rope"
 import txn "../txn"
@@ -24,16 +25,27 @@ Output_Update :: struct {
 }
 
 // Output_Buffer borrows a document and applies at most one transaction per
-// consume/append call. Its pending storage is fixed at initialization. Output
-// history is collapsed after every successful update so both rope scrollback
-// and retained undo storage stay bounded. The update borrows operation storage
-// owned by Output_Buffer until the next consume/append or destroy.
+// consume/append call. Its pending storage is fixed at initialization and its
+// decoded output buffer grows as needed, bounded by the console line buffer's
+// cell budget plus one batch (a partial line carried across a batch boundary is
+// emitted whole when it completes). Output history is collapsed after every
+// successful update so both rope scrollback and retained undo storage stay
+// bounded. The update borrows operation storage owned by Output_Buffer until
+// the next consume/append or destroy.
+//
+// Raw output bytes are decoded through a console.Stream before reaching the
+// document (SPECS §12.5 model A): ANSI escape sequences are consumed, and CR/
+// backspace/erase progress collapses. All writers (output_consume, output_append,
+// selection_pipe_consume stderr, selection_pipe_replay) funnel through pending
+// and output_flush, so every path decodes uniformly.
 Output_Buffer :: struct {
 	allocator:     runtime.Allocator,
 	doc:           ^txn.Doc,
 	options:       Output_Options,
 	pending:       []byte,
 	pending_len:   int,
+	decoded:       [dynamic]byte,
+	stream:        console.Stream,
 	ops:           [2]txn.Operation,
 	update:        Output_Update,
 	has_update:    bool,
@@ -61,11 +73,18 @@ output_init :: proc(buffer: ^Output_Buffer, doc: ^txn.Doc, options: Output_Optio
 	if alloc_err != nil {
 		return errs.new(.Resource_Limit, "process: cannot allocate output batch storage", allocator = allocator)
 	}
+	stream: console.Stream
+	if err := console.stream_init(&stream, allocator); !errs.ok(err) {
+		delete(pending, allocator)
+		return err
+	}
 	buffer^ = {
 		allocator = allocator,
 		doc = doc,
 		options = resolved,
 		pending = pending,
+		decoded = make([dynamic]byte, allocator),
+		stream = stream,
 	}
 	return {}
 }
@@ -74,17 +93,36 @@ output_flush :: proc(buffer: ^Output_Buffer) -> errs.Error {
 	if buffer.pending_len == 0 {
 		return {}
 	}
+	resize(&buffer.decoded, 0)
+	if err := console.stream_feed(&buffer.stream, buffer.pending[:buffer.pending_len], &buffer.decoded); !errs.ok(err) {
+		buffer.pending_len = 0
+		buffer.has_update = false
+		return err
+	}
+	buffer.pending_len = 0
+	return output_append_decoded(buffer)
+}
+
+// output_append_decoded appends buffer.decoded to the document with scrollback
+// trimming. It borrows buffer.decoded until the next flush. A zero-length
+// decode (for example, input consisting only of escape sequences) leaves
+// has_update untouched so an earlier update in the same consume is not lost.
+output_append_decoded :: proc(buffer: ^Output_Buffer) -> errs.Error {
+	decoded_len := len(buffer.decoded)
+	if decoded_len == 0 {
+		return {}
+	}
 	start := rope.tree_byte_count(&buffer.doc.tree)
-	trimmed := max(0, start + buffer.pending_len - buffer.options.scrollback_bytes)
+	trimmed := max(0, start + decoded_len - buffer.options.scrollback_bytes)
 	operation_count := 1
 	if trimmed > 0 {
 		buffer.ops[0] = txn.Delete{range = {0, trimmed}}
-		buffer.ops[1] = txn.Insert{pos = start, data = buffer.pending[:buffer.pending_len]}
+		buffer.ops[1] = txn.Insert{pos = start, data = buffer.decoded[:decoded_len]}
 		operation_count = 2
 	} else {
-		buffer.ops[0] = txn.Insert{pos = start, data = buffer.pending[:buffer.pending_len]}
+		buffer.ops[0] = txn.Insert{pos = start, data = buffer.decoded[:decoded_len]}
 	}
-	end := start - trimmed + buffer.pending_len
+	end := start - trimmed + decoded_len
 	buffer.update = {
 		transaction = {
 			source = .Command_Output,
@@ -101,9 +139,29 @@ output_flush :: proc(buffer: ^Output_Buffer) -> errs.Error {
 	}
 	buffer.dropped_bytes += u64(trimmed)
 	buffer.has_update = true
-	buffer.pending_len = 0
 	txn.doc_collapse_history(buffer.doc)
 	return {}
+}
+
+// output_finish flushes the console stream's trailing state — a truncated
+// UTF-8 replacement and any partial trailing line — into the document. Call it
+// once the pump has drained and no further output is expected. It is
+// idempotent.
+output_finish :: proc(buffer: ^Output_Buffer) -> errs.Error {
+	if buffer == nil || buffer.doc == nil {
+		return errs.new(.Invalid_Input, "process: invalid output finish input")
+	}
+	buffer.has_update = false
+	if buffer.pending_len > 0 {
+		if err := output_flush(buffer); !errs.ok(err) {
+			return err
+		}
+	}
+	resize(&buffer.decoded, 0)
+	if err := console.stream_flush(&buffer.stream, &buffer.decoded); !errs.ok(err) {
+		return err
+	}
+	return output_append_decoded(buffer)
 }
 
 output_consume :: proc(buffer: ^Output_Buffer, pump: ^Pump, max_bytes: int) -> (int, errs.Error) {
@@ -176,6 +234,8 @@ output_destroy :: proc(buffer: ^Output_Buffer) {
 	if buffer == nil {
 		return
 	}
+	console.stream_destroy(&buffer.stream)
+	delete(buffer.decoded)
 	delete(buffer.pending, buffer.allocator)
 	buffer^ = {}
 }

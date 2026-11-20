@@ -175,6 +175,15 @@ pty :: proc() -> int {
 // size reports the terminal window size the child observes via TIOCGWINSZ.
 // (Defined per-platform: see size_linux.odin / size_other.odin.)
 
+// ansi emits ANSI-styled text, a CR progress update, and a trailing partial
+// line, so the output decoder can be verified end to end (M10.06).
+ansi :: proc() -> int {
+	fmt.printf("\x1b[31mred\x1b[0m\n\x1b[32mgreen\x1b[0m\n")
+	fmt.printf("abcde\rvwxyz\n")
+	fmt.printf("no-newline-tail")
+	return 0
+}
+
 main :: proc() {
 	if len(os.args) < 2 {
 		os.exit(2)
@@ -203,6 +212,8 @@ main :: proc() {
 		code = pty()
 	case "size":
 		code = size()
+	case "ansi":
+		code = ansi()
 	case:
 		code = 2
 	}
