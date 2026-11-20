@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M09.11 Implement optional external regex verb (Raku when present, native fallback)
+## Current task: M10.01 Implement chunk-safe UTF-8 decoder.
