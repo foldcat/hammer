@@ -68,6 +68,15 @@ and made it worse; `.Cooked` is the correct default.
   at the bottom, but only when the view was already following the tail, so a
   user scrolled up to read earlier output is not yanked back down.
 
+### Double-forwarded Enter fix (`src/terminal_ui.odin`)
+
+The backend delivers Enter as both a `Commit_Text "\r"` (the XIM input method)
+and a `Key_Down .Enter`, and the terminal forwarded both as `\r`. The shell saw
+two newlines, ran an empty command, and reprinted its prompt — which looked like
+`clear` "leaving a line on top" (the same bug appeared after every command).
+`editor_terminal_input` now drops the `Commit_Text`/`Text` control characters
+(`\r`, `\n`, `\t`, `\b`) so each keypress reaches the PTY once.
+
 ## Trade-offs and limitations
 
 - The document is replaced wholesale on each grid update rather than diffed,
@@ -105,7 +114,7 @@ and made it worse; `.Cooked` is the correct default.
 
 ```text
 odin test tests/unit/txn -vet -collection:hammer=src     -> 28/28 passed
-odin test tests/unit/console -vet -collection:hammer=src -> 74/74 passed
+odin test tests/unit/console -vet -collection:hammer=src -> 78/78 passed
 odin run make.odin -file -- process-test                 -> 37/37 passed
 odin run make.odin -file -- test                         -> full core suite passed
 odin check src -vet -collection:sokol=third_party/sokol/sokol -> clean
@@ -119,5 +128,5 @@ Windows runtime is still a ConPTY stub. The tty echo is validated at the unit
 level (`test_pty_cooked_mode_echoes_input`) and the terminal is exercised
 end-to-end by the X11 harness, but no integration assertion reads the transcript
 mid-line to confirm a keystroke appears before Enter. Next: M10.07b — terminal
-resize (SIGWINCH), the alternate screen, a rendered terminal cursor, and
-scrollback navigation, plus the read-only-transcript guard.
+resize (SIGWINCH), the alternate screen, a rendered terminal cursor, scrollback
+navigation, Ctrl+Shift+C copy, and the read-only-transcript guard.

@@ -325,8 +325,24 @@ editor_terminal_input :: proc(event: input.Event) -> bool {
 	t := &buffer.terminal
 	#partial switch e in event {
 	case input.Text:
+		// The backend emits a CHAR event for Enter/Tab/Backspace in addition
+		// to their Key_Down event, which already forwarded the right byte.
+		// Drop the duplicate control characters so each keypress reaches the
+		// PTY exactly once (a doubled '\r' makes the shell run an empty
+		// command and reprint its prompt).
+		if e.text == '\r' || e.text == '\n' || e.text == '\t' || e.text == '\b' {
+			return true
+		}
 		editor_terminal_write_rune(t, e.text)
 	case input.Commit_Text:
+		// The IME commits Enter/Tab/Backspace as a Commit_Text in addition to
+		// the Key_Down event, which already forwarded the right byte. Drop the
+		// duplicate control character so each keypress reaches the PTY exactly
+		// once (a doubled '\r' makes the shell run an empty command and reprint
+		// its prompt).
+		if e.text == "\r" || e.text == "\n" || e.text == "\t" || e.text == "\b" {
+			return true
+		}
 		editor_terminal_write_bytes(t, transmute([]byte)e.text)
 	case input.Key_Down:
 		editor_terminal_write_key(t, e.key, e.modifiers)

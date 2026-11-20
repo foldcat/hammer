@@ -129,3 +129,47 @@ test_grid_stream_chunk_boundaries :: proc(t: ^testing.T) {
 	console.grid_append_text(&s.grid, &out)
 	testing.expectf(t, string(out[:]) == "é", "got %q", string(out[:]))
 }
+
+@(test)
+test_grid_clear_screen_and_scrollback :: proc(t: ^testing.T) {
+	// `clear` sends \x1b[H\x1b[2J\x1b[3J: cursor home, clear the screen, clear
+	// the scrollback. With a populated scrollback the result must be only the
+	// new prompt.
+	expect_grid(t, 3, 80, transmute([]byte)string("a\r\nb\r\nc\r\nd\r\n\x1b[H\x1b[2J\x1b[3Jp"), "p")
+}
+
+@(test)
+test_grid_real_clear_sequence :: proc(t: ^testing.T) {
+	// The exact bytes bash-as-sh + `clear` emit (bracketed-paste toggles,
+	// echo, and the clear escape), captured from a live PTY. The transcript
+	// must end at the single fresh prompt, with no leftover line above it.
+	data := transmute([]byte)string("\x1b[?2004hsh-5.3$ clear\r\n\x1b[?2004l\r\x1b[H\x1b[2J\x1b[3J\x1b[?2004hsh-5.3$ ")
+	expect_grid(t, 24, 80, data, "sh-5.3$ ")
+}
+
+@(test)
+test_grid_echo_command_sequence :: proc(t: ^testing.T) {
+	// The exact bytes bash-as-sh emits for a simple command (prompt, echo,
+	// Enter, output, prompt). The transcript must be three lines: the command
+	// line, the output, and one fresh prompt — not a duplicated prompt.
+	data := transmute([]byte)string("\x1b[?2004hsh-5.3$ echo terminal-ok\r\n\x1b[?2004l\rterminal-ok\r\n\x1b[?2004hsh-5.3$ ")
+	expect_grid(t, 24, 80, data, "sh-5.3$ echo terminal-ok\nterminal-ok\nsh-5.3$ ")
+}
+
+@(test)
+test_grid_echo_command_chunked :: proc(t: ^testing.T) {
+	// The same command, fed in the chunks the terminal's read loop produces
+	// (prompt, echoed keystrokes, Enter, output). The grid state must be
+	// chunk-independent: still three lines, one prompt.
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 24, 80, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?2004hsh-5.3$ "))
+	console.grid_stream_feed(&s, transmute([]byte)string("echo terminal-ok"))
+	console.grid_stream_feed(&s, transmute([]byte)string("\r\n"))
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?2004l\rterminal-ok\r\n\x1b[?2004hsh-5.3$ "))
+	out := make([dynamic]byte, context.allocator)
+	defer delete(out)
+	console.grid_append_text(&s.grid, &out)
+	testing.expectf(t, string(out[:]) == "sh-5.3$ echo terminal-ok\nterminal-ok\nsh-5.3$ ", "got %q", string(out[:]))
+}
