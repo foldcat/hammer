@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M10.03 Implement CR/backspace/erase progress behavior.
+## Current task: M10.04 Implement hyperlink/control-sequence safety policy.
