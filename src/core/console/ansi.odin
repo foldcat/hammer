@@ -7,12 +7,17 @@
 // characters, and recognized sequences — that later tasks interpret (CR/BS/
 // erase progress in M10.03, OSC/hyperlink safety in M10.04) and render (M10.06).
 //
-// The parser is a fixed-location, allocation-free state machine. It preserves
-// state across `feed` calls, so an escape sequence split across output chunks
-// is reassembled correctly. It never executes a control string: OSC payloads
-// are only reported as data (see AGENTS.md §2, Trust). Unknown and truncated
-// sequences are handled deterministically.
+// The parser is a fixed-location state machine. It preserves state across
+// `feed` calls, so an escape sequence split across output chunks is
+// reassembled correctly. It never executes a control string: OSC payloads are
+// only reported as data (see AGENTS.md §2, Trust). Unknown and truncated
+// sequences are handled deterministically. The only allocation is per OSC
+// payload (bounded at MAX_OSC_PAYLOAD runes), released at the next feed.
 package console
+
+import "base:runtime"
+
+import errs "../errs"
 
 MAX_SGR_PARAMS :: 16
 MAX_OSC_PAYLOAD :: 1024
@@ -183,9 +188,10 @@ Control_Event :: struct {
 	rune: rune,
 }
 
-// Osc_Event reports an OSC control string's payload. `payload` borrows
-// parser-owned storage and is valid until the next feed. The parser never
-// executes the payload (M10.04 owns the safety policy).
+// Osc_Event reports an OSC control string's payload. `payload` is owned by the
+// parser (allocated with the parser's allocator) and is valid until the next
+// feed call or `parser_destroy`. The parser never executes the payload (M10.04
+// owns the safety policy).
 Osc_Event :: struct {
 	payload: []rune,
 }
@@ -207,13 +213,13 @@ Parser_State :: enum u8 {
 	Osc, // saw ESC ], collecting an OSC payload
 }
 
-// Parser is a streaming ANSI state machine over runes. It is a
-// fixed-location, allocation-free value; keep it at one address and do not
-// copy it while it is mid-sequence. The zero value is a parser in Ground state
-// with the SGR reset style.
+// Parser is a streaming ANSI state machine over runes. Initialize it with
+// `parser_init` and release it with `parser_destroy`. Keep it at one address
+// and do not copy it while it is mid-sequence.
 Parser :: struct {
-	state: Parser_State,
-	style: Style,
+	allocator: runtime.Allocator,
+	state:     Parser_State,
+	style:     Style,
 	// CSI parameter accumulation.
 	params:      [MAX_SGR_PARAMS]u32,
 	param_count: u8,
@@ -223,15 +229,44 @@ Parser :: struct {
 	osc:          [MAX_OSC_PAYLOAD]rune,
 	osc_len:      int,
 	osc_overflow: bool,
+	// owned holds the OSC payloads allocated during the current feed; they are
+	// released at the start of the next feed and by parser_destroy.
+	owned: [dynamic][]rune,
+}
+
+// parser_init prepares p. OSC payloads emitted by feed are allocated with
+// `allocator` and released at the next feed (or by parser_destroy).
+parser_init :: proc(p: ^Parser, allocator := context.allocator) -> errs.Error {
+	if p == nil {
+		return errs.new(.Invalid_Input, "console: parser is nil", allocator = allocator)
+	}
+	p^ = {
+		allocator = allocator,
+		state = .Ground,
+		owned = make([dynamic][]rune, allocator),
+	}
+	return {}
+}
+
+// parser_destroy releases the OSC payloads allocated by the last feed.
+parser_destroy :: proc(p: ^Parser) {
+	if p == nil {
+		return
+	}
+	release_owned(p)
+	delete(p.owned)
+	p^ = {}
 }
 
 // feed consumes input runes and appends events to out, returning how many
 // events were written and how many input runes were consumed. A buffer of
 // len(input) events always consumes all of input (each event accounts for at
 // least one input rune). If out fills first, consumed is less than len(input);
-// resume with the remaining runes and a fresh out. Events reference the input
-// slice and parser-owned OSC storage; both are valid until the next feed.
+// resume with the remaining runes and a fresh out. Text_Event.runes borrow the
+// input slice (valid until the next feed); Osc_Event.payload is owned by the
+// parser (valid until the next feed or parser_destroy).
 feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed: int) {
+	release_owned(p)
 	i := 0
 	n := len(input)
 	run_start := -1
@@ -345,11 +380,15 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 
 		case .Osc:
 			if r == 0x07 || r == 0x1b {
-				// BEL or ESC (ST) terminates the payload.
+				// BEL or ESC (ST) terminates the payload. Copy it so later OSC
+				// sequences in the same feed do not overwrite it.
 				if written >= len(out) {
 					return written, i
 				}
-				out[written] = Osc_Event{payload = p.osc[:p.osc_len]}
+				payload := make([]rune, p.osc_len, p.allocator)
+				copy(payload, p.osc[:p.osc_len])
+				append(&p.owned, payload)
+				out[written] = Osc_Event{payload = payload}
 				written += 1
 				p.state = .Escape if r == 0x1b else .Ground
 				i += 1
@@ -377,6 +416,14 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 		run_start = -1
 	}
 	return written, i
+}
+
+// release_owned frees the OSC payloads allocated during the previous feed.
+release_owned :: proc(p: ^Parser) {
+	for payload in p.owned {
+		delete(payload, p.allocator)
+	}
+	resize(&p.owned, 0)
 }
 
 // is_control reports whether r is a C0 control, DEL, or C1 control rune (that

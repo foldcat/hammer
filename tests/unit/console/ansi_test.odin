@@ -290,6 +290,8 @@ delete_events :: proc(events: [dynamic]console.Event) {
 parse_chunked :: proc(runes: []rune, chunk: int) -> [dynamic]console.Event {
 	events := make([dynamic]console.Event, context.allocator)
 	p: console.Parser
+	console.parser_init(&p, context.allocator)
+	defer console.parser_destroy(&p)
 	buf := make([]console.Event, max(chunk, 1), context.allocator)
 	defer delete(buf)
 	offset := 0
@@ -585,6 +587,8 @@ test_parser_partial_consumption :: proc(t: ^testing.T) {
 	events := make([dynamic]console.Event, context.allocator)
 	defer delete_events(events)
 	p: console.Parser
+	console.parser_init(&p, context.allocator)
+	defer console.parser_destroy(&p)
 	buf := make([]console.Event, 2, context.allocator)
 	defer delete(buf)
 	offset := 0

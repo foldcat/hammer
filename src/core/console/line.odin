@@ -28,10 +28,12 @@ import errs "../errs"
 DEFAULT_LINE_CELLS :: 64 * 1024
 MAX_LINE_CELLS :: 4 * 1024 * 1024
 
-// Cell is one display cell: a rune and the style it is rendered with.
+// Cell is one display cell: a rune, the style it is rendered with, and the
+// hyperlink it belongs to (an index into Line_Buffer.links, or -1).
 Cell :: struct {
 	r:     rune,
 	style: Style,
+	link:  i32,
 }
 
 // Run describes a uniform-style span of a line's text, in rune units.
@@ -40,24 +42,37 @@ Run :: struct {
 	style:  Style,
 }
 
-// Line is a completed styled line. `text` is the visible content and `runs`
-// is the sorted, non-overlapping set of style runs that covers it exactly.
-// Both are owned by the caller; free with `line_destroy`.
+// Link describes a hyperlink span of a line's text: a rune range and the URI
+// it points to. Links are line-scoped; an OSC 8 hyperlink that is still open
+// at a line feed is closed there.
+Link :: struct {
+	start:  int,
+	length: int,
+	uri:    []rune, // owned
+}
+
+// Line is a completed styled line. `text` is the visible content; `runs` is
+// the sorted, non-overlapping style-run set covering it; `links` is the
+// (possibly empty) hyperlink set. All three are owned by the caller; free with
+// `line_destroy`.
 Line :: struct {
-	text: []rune,
-	runs: []Run,
+	text:  []rune,
+	runs:  []Run,
+	links: []Link,
 }
 
 // Line_Buffer assembles terminal output into styled lines with progress
 // editing. It is a fixed-location value; keep it at one address and do not
 // copy it while it holds a partial line. The zero value is not initialized.
 Line_Buffer :: struct {
-	allocator: runtime.Allocator,
-	cells:     [dynamic]Cell,
-	cursor:    int,
-	style:     Style,
-	max_cells: int,
-	truncated: u64,
+	allocator:  runtime.Allocator,
+	cells:      [dynamic]Cell,
+	cursor:     int,
+	style:      Style,
+	max_cells:  int,
+	truncated:  u64,
+	links:      [dynamic][]rune, // owned URI table for the current line
+	active_link: i32, // index into links, or -1 for no active hyperlink
 }
 
 // line_buffer_init prepares lb. A max_cells of 0 selects DEFAULT_LINE_CELLS.
@@ -75,7 +90,9 @@ line_buffer_init :: proc(lb: ^Line_Buffer, max_cells: int, allocator := context.
 	lb^ = {
 		allocator = allocator,
 		cells = make([dynamic]Cell, allocator),
+		links = make([dynamic][]rune, allocator),
 		max_cells = resolved,
+		active_link = -1,
 	}
 	return {}
 }
@@ -86,7 +103,9 @@ line_buffer_destroy :: proc(lb: ^Line_Buffer) {
 	if lb == nil {
 		return
 	}
+	clear_links(lb)
 	delete(lb.cells)
+	delete(lb.links)
 	lb^ = {}
 }
 
@@ -127,7 +146,7 @@ line_buffer_feed :: proc(lb: ^Line_Buffer, events: []Event, out: ^[dynamic]Line,
 				// (M10.07); ignored for the log window.
 			}
 		case Osc_Event:
-			// OSC payloads are reported, not executed (M10.04 owns policy).
+			handle_osc(lb, v.payload)
 		}
 	}
 	return {}
@@ -146,10 +165,14 @@ line_buffer_flush :: proc(lb: ^Line_Buffer, out: ^[dynamic]Line) -> errs.Error {
 	return {}
 }
 
-// line_destroy frees a Line's owned text and runs.
+// line_destroy frees a Line's owned text, runs, and links.
 line_destroy :: proc(line: Line, allocator: runtime.Allocator) {
 	delete(line.text, allocator)
 	delete(line.runs, allocator)
+	for link in line.links {
+		delete(link.uri, allocator)
+	}
+	delete(line.links, allocator)
 }
 
 // write_cells writes runes at the cursor using the current style, overwriting
@@ -157,14 +180,15 @@ line_destroy :: proc(line: Line, allocator: runtime.Allocator) {
 // dropped and counted.
 write_cells :: proc(lb: ^Line_Buffer, runes: []rune) {
 	for r in runes {
+		cell := Cell{r = r, style = lb.style, link = lb.active_link}
 		if lb.cursor < len(lb.cells) {
-			lb.cells[lb.cursor] = Cell{r = r, style = lb.style}
+			lb.cells[lb.cursor] = cell
 		} else {
 			if len(lb.cells) >= lb.max_cells {
 				lb.truncated += 1
 				continue
 			}
-			append(&lb.cells, Cell{r = r, style = lb.style})
+			append(&lb.cells, cell)
 		}
 		lb.cursor += 1
 	}
@@ -220,29 +244,74 @@ erase_in_display :: proc(lb: ^Line_Buffer, csi: Csi_Event, cleared: ^bool) {
 }
 
 // flush_line emits the current line as a completed Line (including an empty
-// line) and resets the cursor.
+// line) and resets the cursor and hyperlink state.
 flush_line :: proc(lb: ^Line_Buffer, out: ^[dynamic]Line) {
 	line := build_line(lb)
 	append(out, line)
 	resize(&lb.cells, 0)
 	lb.cursor = 0
+	clear_links(lb)
 }
 
 // build_line converts the current cells into a Line (text plus coalesced
-// style runs). The result is allocated with the buffer's allocator.
+// style runs and hyperlink ranges). The result is allocated with the buffer's
+// allocator.
 build_line :: proc(lb: ^Line_Buffer) -> Line {
 	n := len(lb.cells)
 	text := make([]rune, n, lb.allocator)
 	runs := make([dynamic]Run, lb.allocator)
+	links := make([dynamic]Link, lb.allocator)
+	last_link: i32 = -1
 	for i in 0 ..< n {
-		text[i] = lb.cells[i].r
-		if len(runs) > 0 && style_equal(runs[len(runs) - 1].style, lb.cells[i].style) {
+		cell := lb.cells[i]
+		text[i] = cell.r
+		if len(runs) > 0 && style_equal(runs[len(runs) - 1].style, cell.style) {
 			runs[len(runs) - 1].length += 1
 		} else {
-			append(&runs, Run{length = 1, style = lb.cells[i].style})
+			append(&runs, Run{length = 1, style = cell.style})
+		}
+		if cell.link == last_link {
+			if cell.link >= 0 {
+				links[len(links) - 1].length += 1
+			}
+		} else if cell.link >= 0 {
+			uri := make([]rune, len(lb.links[cell.link]), lb.allocator)
+			copy(uri, lb.links[cell.link])
+			append(&links, Link{start = i, length = 1, uri = uri})
+			last_link = cell.link
+		} else {
+			last_link = cell.link
 		}
 	}
-	return Line{text = text, runs = runs[:]}
+	return Line{text = text, runs = runs[:], links = links[:]}
+}
+
+// handle_osc applies an OSC payload to the line buffer. Hyperlinks open or
+// close the active link; every other command is inert (the clipboard policy is
+// applied by the consumer, not here).
+handle_osc :: proc(lb: ^Line_Buffer, payload: []rune) {
+	osc := osc_parse(payload)
+	#partial switch o in osc {
+	case Osc_Hyperlink:
+		if len(o.uri) == 0 {
+			lb.active_link = -1
+		} else {
+			uri := make([]rune, len(o.uri), lb.allocator)
+			copy(uri, o.uri)
+			append(&lb.links, uri)
+			lb.active_link = i32(len(lb.links) - 1)
+		}
+	}
+}
+
+// clear_links frees the link URI table and closes the active link. Hyperlinks
+// are line-scoped, so this runs at each flush.
+clear_links :: proc(lb: ^Line_Buffer) {
+	for uri in lb.links {
+		delete(uri, lb.allocator)
+	}
+	resize(&lb.links, 0)
+	lb.active_link = -1
 }
 
 // style_equal reports whether two styles render identically.
