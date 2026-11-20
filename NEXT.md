@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M10.06 (remaining) — wire the PTY into a `win` terminal window.
+## Current task: M10.07 Implement resize, alternate screen, and raw input.

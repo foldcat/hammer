@@ -42,6 +42,7 @@ Buffer_Kind :: enum u8 {
 	Job_Output,
 	Commands,
 	Jobs,
+	Terminal,
 }
 
 Editor_Buffer :: struct {
@@ -57,6 +58,7 @@ Editor_Buffer :: struct {
 	job_name:       string,
 	conflict_pipe:  process.Selection_Pipe,
 	has_conflict_pipe: bool,
+	terminal:       Editor_Terminal,
 }
 
 Editor :: struct {
@@ -116,6 +118,9 @@ editor_buffer_for_view :: proc(item: ^view.View) -> ^Editor_Buffer {
 editor_destroy_buffer :: proc(buffer: ^Editor_Buffer) {
 	if buffer == nil || buffer.id == 0 {
 		return
+	}
+	if buffer.kind == .Terminal {
+		editor_terminal_destroy(buffer)
 	}
 	process.selection_pipe_destroy(&buffer.conflict_pipe)
 	txn.doc_destroy(&buffer.doc)
@@ -422,6 +427,10 @@ editor_consume_input :: proc(event: input.Event) {
 		}
 	}
 	editor_cancel_pointer_gesture()
+
+	if editor_terminal_input(event) {
+		return
+	}
 
 	action, ok := keybind.resolve_event(event)
 	if !ok {
@@ -789,8 +798,24 @@ editor_begin_typing_group :: proc() {
 	editor.typing_group = editor.next_group
 }
 
+// editor_buffer_dirty reports whether a buffer has unsaved text that must be
+// protected before close/quit. Only file buffers can be saved, so directory
+// listings and output/transcript windows (errors, job output, command/job
+// listings, the terminal) are never dirty in the close-guard sense and close or
+// quit without prompting. File buffers retain the ordinary dirty tracking.
+editor_buffer_dirty :: proc(buffer: ^Editor_Buffer) -> bool {
+	if buffer == nil {
+		return false
+	}
+	#partial switch buffer.kind {
+	case .Directory, .Errors, .Job_Output, .Commands, .Jobs, .Terminal:
+		return false
+	}
+	return txn.doc_revision(&buffer.doc) != buffer.saved_revision
+}
+
 editor_dirty :: proc() -> bool {
-	return txn.doc_revision(&editor.buffer.doc) != editor.buffer.saved_revision
+	return editor_buffer_dirty(editor.buffer)
 }
 
 editor_save_buffer :: proc(buffer: ^Editor_Buffer) -> errs.Error {
@@ -917,7 +942,7 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 	if buffer == nil {
 		return errs.new(.Internal, "get: window has no buffer", allocator = permanent())
 	}
-	if buffer.kind == .Errors || buffer.kind == .Job_Output || buffer.kind == .Commands || buffer.kind == .Jobs {
+	if buffer.kind == .Errors || buffer.kind == .Job_Output || buffer.kind == .Commands || buffer.kind == .Jobs || buffer.kind == .Terminal {
 		return errs.new(.Unsupported, "get: output windows cannot be reloaded", allocator = permanent())
 	}
 
@@ -927,7 +952,7 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 		generation = buffer.generation,
 		revision = txn.doc_revision(&buffer.doc),
 		view_count = view.buffer_view_count(&editor.views, buffer.id),
-		dirty = txn.doc_revision(&buffer.doc) != buffer.saved_revision,
+		dirty = editor_buffer_dirty(buffer),
 	}
 	request := lifecycle.Close_Request{
 		kind = .Close_Buffer,
@@ -1056,7 +1081,7 @@ editor_request_close :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close
 				generation = buffer.generation,
 				revision = txn.doc_revision(&buffer.doc),
 				view_count = view.buffer_view_count(&editor.views, buffer.id),
-				dirty = txn.doc_revision(&buffer.doc) != buffer.saved_revision,
+				dirty = editor_buffer_dirty(buffer),
 			}
 			snapshot_count += 1
 		}
@@ -1180,7 +1205,7 @@ editor_request_close_column :: proc(column_id: layout.Column_ID) -> errs.Error {
 			generation = buffer.generation,
 			revision = txn.doc_revision(&buffer.doc),
 			view_count = view.buffer_view_count(&editor.views, buffer.id),
-			dirty = txn.doc_revision(&buffer.doc) != buffer.saved_revision,
+			dirty = editor_buffer_dirty(buffer),
 		}
 		snapshot_count += 1
 	}

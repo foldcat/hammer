@@ -40,6 +40,7 @@ EDITOR_COMMANDS :: []command.Entry {
 	{name = "Kill", handler = editor_command_kill},
 	{name = "Paste", handler = editor_command_paste},
 	{name = "Look", handler = editor_command_look},
+	{name = "Win", handler = editor_command_win},
 }
 
 editor_capture_mouse_argument :: proc(target: Mouse_Text_Target) {

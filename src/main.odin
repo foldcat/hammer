@@ -227,6 +227,7 @@ frame :: proc "c" () {
 	editor_poll_job_quit()
 	editor_poll_clipboard()
 	editor_poll_scrollbar()
+	editor_poll_terminals()
 
 	if app.phase == .Initializing {
 		lifecycle.app_enter_running(&app)

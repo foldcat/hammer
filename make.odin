@@ -142,6 +142,7 @@ DIRECTORY_TEST_HARNESS :: #directory + "/tests/integration/directory/x11_harness
 COMPATIBILITY_TEST_HARNESS :: #directory + "/tests/integration/compatibility/x11_harness.py"
 EDIT_TEST_HARNESS :: #directory + "/tests/integration/edit/x11_harness.py"
 BUILTIN_TEST_HARNESS :: #directory + "/tests/integration/builtins/x11_harness.py"
+TERMINAL_TEST_HARNESS :: #directory + "/tests/integration/terminal/x11_harness.py"
 WRAP_TEST_HARNESS :: #directory + "/tests/integration/wrap/x11_harness.py"
 SCROLL_TEST_HARNESS :: #directory + "/tests/integration/scroll/x11_harness.py"
 WRAP_SOFT_BINARY :: OUT_DIR + "/hammer-wrap-soft"
@@ -735,6 +736,36 @@ main :: proc() {
 			}, true)
 		} else {
 			fmt.eprintln("[Test] builtin-test currently requires Linux/X11")
+			os.exit(1)
+		}
+		return
+	}
+
+	if len(args) > 1 && args[1] == "terminal-test" {
+		when ODIN_OS == .Linux {
+			stage_config(args[2:])
+			if !setup_sokol_linux() {
+				os.exit(1)
+			}
+			run_odin([]string {
+				"odin",
+				"build",
+				SRC_DIR,
+				SOKOL_COLLECTION,
+				"-vet",
+				"-out:" + BINARY_PATH,
+				"-debug",
+			})
+			run_odin([]string {
+				"xvfb-run",
+				"-a",
+				"python3",
+				TERMINAL_TEST_HARNESS,
+				"--binary",
+				BINARY_PATH,
+			}, true)
+		} else {
+			fmt.eprintln("[Test] terminal-test currently requires Linux/X11")
 			os.exit(1)
 		}
 		return

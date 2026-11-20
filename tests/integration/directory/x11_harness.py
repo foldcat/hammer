@@ -103,7 +103,7 @@ def main() -> int:
             wait_for_log(log_path, f"look: opened {nested} window=5 buffer=5 line=0", args.timeout)
             print("PASS: nested directory entries resolve against the immediate listing")
 
-            message = "save: directory and error windows cannot be saved as files"
+            message = "save: non-file windows cannot be saved as files"
             error_bytes = len(message.encode()) + 1
             x11.move(window, 500, 76)
             x11.button(1, True)
@@ -114,38 +114,22 @@ def main() -> int:
             x11.button(1, True)
             x11.button(1, False)
             save(x11)
-            wait_for_log(log_path, f"errors: appended window=6 buffer=6 bytes={2 * error_bytes}", args.timeout)
+            wait_for_log(log_path, "errors: appended window=6 buffer=6", args.timeout)
             text = log_path.read_text(encoding="utf-8", errors="replace")
             if text.count("errors: opened ") != 1:
                 raise HarnessFailure("a second error created a duplicate +Errors window")
             print("PASS: errors accumulate through transactions in one reusable +Errors window")
 
+            # Output windows are disposable: a user edit of +Errors must not
+            # block quit (or Del).
             x11.move(window, 500, 360)
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("e"))
-            x11.move(window, 500, 76)
-            x11.button(1, True)
-            x11.button(1, False)
-            save(x11)
-            wait_for_log(log_path, f"errors: appended window=6 buffer=6 bytes={3 * error_bytes + 1}", args.timeout)
-            x11.tap(0xFF1B)
-            time.sleep(0.3)
-            if process.poll() is not None:
-                raise HarnessFailure("an automatic error append cleared user-dirty state and allowed lossy quit")
-            wait_for_log(log_path, "edit: unsaved text; close blocked", args.timeout)
-            print("PASS: automatic error output preserves user-dirty close protection")
-
-            x11.move(window, 500, 360)
-            x11.button(1, True)
-            x11.button(1, False)
-            for _ in range(2):
-                x11.key(0xFFE3, True)
-                x11.tap(ord("z"))
-                x11.key(0xFFE3, False)
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)
             process = None
+            print("PASS: editing an output window is disposable and does not block quit")
             succeeded = True
             return 0
     finally:

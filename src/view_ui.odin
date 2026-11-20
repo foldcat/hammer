@@ -180,7 +180,7 @@ editor_window_commands :: proc(buffer: ^Editor_Buffer, item: ^view.View) -> stri
 				}
 			}
 		}
-	case .Errors, .Commands, .Jobs:
+	case .Errors, .Commands, .Jobs, .Terminal:
 	}
 	return "Del"
 }
@@ -200,6 +200,8 @@ editor_window_generated :: proc(item: ^view.View) -> string {
 			name = "+Commands"
 		case .Jobs:
 			name = "+Jobs"
+		case .Terminal:
+			name = buffer.job_name
 		case .Directory:
 			if buffer.path != "" {
 				name = buffer.path
