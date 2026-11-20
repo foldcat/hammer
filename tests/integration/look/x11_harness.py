@@ -131,11 +131,11 @@ def main() -> int:
             x11.tap(ord("s"))
             x11.key(0xFFE3, False)
             wait_for_log(log_path, f"file: saved {coltarget}", args.timeout)
-            if coltarget.read_bytes() != b"0123x456789\n":
-                raise HarnessFailure(f"file:line:col placed the caret at the wrong column: {coltarget.read_bytes()!r}")
+            if coltarget.read_bytes() != b"x456789\n":
+                raise HarnessFailure(f"file:line:col did not select the line up to the column: {coltarget.read_bytes()!r}")
             if source.read_bytes() != expected_source:
                 raise HarnessFailure("opening a file:line:col reference changed the source document")
-            print("PASS: file:line:col Look finds the file in a subdirectory and places the caret at the column")
+            print("PASS: file:line:col Look finds the file in a subdirectory, highlights up to the column, and places the caret there")
 
             missing_start = len(f"starget.txt:2\n{unicode_target}\n".encode())
             missing_end = missing_start + len(b"missing-token")

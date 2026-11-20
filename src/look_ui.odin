@@ -154,14 +154,16 @@ editor_apply_look_position :: proc(item: ^view.View, line, col: int) {
 	item.first_row = 0
 	item.wheel_remainder = 0
 	if col > 0 {
-		// A column address places a precise caret; a column past the line
-		// end clamps to the line's last character rather than discarding
-		// the jump, matching Acme's column walk that never leaves the line.
+		// A column address places the caret at that exact column and also
+		// highlights the line from its start up to the column, so the jump
+		// destination is visible. A column past the line end clamps to the
+		// line's last character rather than discarding the jump, matching
+		// Acme's column walk that never leaves the line.
 		position := line_end
 		if byte_pos, col_err := rope.tree_line_col_to_byte(&buffer.doc.tree, line_index, rope.Column_Index(col - 1), context.temp_allocator); errs.ok(col_err) {
 			position = byte_pos
 		}
-		item.selection = txn.Selection{anchor = position, active = position, affinity = .Left}
+		item.selection = txn.Selection{anchor = start, active = position, affinity = .Left}
 		editor_reveal_caret(item)
 	} else {
 		// A line address selects the whole line, matching Acme, so the jump

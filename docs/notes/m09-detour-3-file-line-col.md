@@ -15,8 +15,9 @@ the line.
 A line-only jump (`file:line`) now selects (highlights) the whole target
 line, matching Acme's line address; the caret lands at the line start and
 the viewport scrolls to show it from the left. A column jump
-(`file:line:col`) keeps a precise collapsed caret at the column, since a
-column reference points at an exact position.
+(`file:line:col`) places the caret at that exact column and highlights the
+line from its start up to the column, so the destination is visible while
+the caret marks the precise position.
 
 If a bare basename is not found in the source directory, Look searches the
 source directory's subtree (bounded: 16 levels, 4096 entries, hidden and
@@ -26,7 +27,7 @@ back to literal search. This makes compiler output like
 launched at the project root and the source directory is a subdirectory.
 
 - `target.txt:12` → line 12 selected (no column).
-- `target.txt:12:34` → caret at line 12, column 34.
+- `target.txt:12:34` → line 12 highlighted up to column 34, caret at column 34.
 - `C:\work\target.txt:9:3` → caret at line 9, column 3; the drive colon
   never matches a numeric segment, so Windows paths parse as before.
 - `target.txt:12:` / `target.txt:12:34:` → a trailing colon is an empty
