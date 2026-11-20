@@ -53,6 +53,8 @@ Editor_Buffer :: struct {
 	saved_revision: u64,
 	regex_history:  address.Regex_History,
 	job_name:       string,
+	conflict_pipe:  process.Selection_Pipe,
+	has_conflict_pipe: bool,
 }
 
 Editor :: struct {
@@ -111,6 +113,7 @@ editor_destroy_buffer :: proc(buffer: ^Editor_Buffer) {
 	if buffer == nil || buffer.id == 0 {
 		return
 	}
+	process.selection_pipe_destroy(&buffer.conflict_pipe)
 	txn.doc_destroy(&buffer.doc)
 	delete(buffer.path, permanent())
 	delete(buffer.job_name, permanent())

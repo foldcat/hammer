@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:os"
 
 import errs "core/errs"
 import layout "core/layout"
@@ -168,6 +169,65 @@ editor_job_apply_selection :: proc(job: ^process.Job) -> errs.Error {
 	return {}
 }
 
+editor_job_apply_conflict :: proc(output_buffer: ^Editor_Buffer) -> errs.Error {
+	if output_buffer == nil || !output_buffer.has_conflict_pipe || output_buffer.conflict_pipe.state != .Conflict {
+		return errs.new(.NotFound, "job: no preserved selection conflict is available", allocator = permanent())
+	}
+	pipe := &output_buffer.conflict_pipe
+	item, found := view.find(&editor.views, layout.Window_ID(pipe.target.window_id))
+	if !found || u64(item.buffer_id) != pipe.target.id {
+		return errs.new(.Conflict, "job: selection source view is no longer available", allocator = permanent())
+	}
+	buffer := editor_buffer_by_id(item.buffer_id)
+	if buffer == nil || buffer.generation != pipe.target.generation {
+		return errs.new(.Conflict, "job: selection target buffer is no longer available", allocator = permanent())
+	}
+	previous_revision := txn.doc_revision(&buffer.doc)
+	request_id := pipe.target.request_id
+	output_len := pipe.output_len
+	if err := process.selection_pipe_apply_explicit(
+		pipe,
+		&buffer.doc,
+		u64(buffer.id),
+		buffer.generation,
+		request_id,
+		item.selection,
+	); !errs.ok(err) {
+		return err
+	}
+	item.selection = pipe.transaction.after_selection
+	editor_finish_edit(item, previous_revision, {})
+	process.selection_pipe_destroy(pipe)
+	output_buffer.has_conflict_pipe = false
+	log.infof(
+		"job: selection conflict applied id=%d window=%d buffer=%d revision=%d bytes=%d",
+		request_id,
+		u64(item.window_id),
+		u64(buffer.id),
+		txn.doc_revision(&buffer.doc),
+		output_len,
+	)
+	return {}
+}
+
+// The output buffer takes ownership of a fully replayed conflict so the job
+// slot can be released without losing the explicit Apply action.
+editor_job_preserve_conflict :: proc(state: ^Editor_Job_Output, job: ^process.Job) {
+	assert(state != nil && state.buffer != nil && job != nil && job.has_selection_pipe)
+	assert(!state.buffer.has_conflict_pipe)
+	state.buffer.conflict_pipe = job.selection_pipe
+	state.buffer.has_conflict_pipe = true
+	job.selection_pipe = {}
+	job.has_selection_pipe = false
+	editor_refresh_window_tags()
+	log.infof(
+		"job: selection conflict preserved id=%d window=%d bytes=%d",
+		u64(job.id),
+		job.attachment,
+		state.buffer.conflict_pipe.output_len,
+	)
+}
+
 editor_poll_jobs :: proc() {
 	process.job_service_poll(&editor.jobs, mouse_now_ms())
 	remaining := JOB_FRAME_OUTPUT_BUDGET
@@ -270,6 +330,9 @@ editor_poll_jobs :: proc() {
 			}
 			if can_release {
 				id := job.id
+				if state.failed_id != id && job.has_selection_pipe && job.selection_pipe.state == .Conflict {
+					editor_job_preserve_conflict(state, job)
+				}
 				release_err := process.job_release(&editor.jobs, id)
 				editor_report(release_err)
 				log.infof("job: released id=%d", u64(id))
@@ -301,9 +364,13 @@ editor_start_selection_test_job :: proc(helper: string) -> errs.Error {
 	}
 	end := rope.tree_byte_count(&buffer.doc.tree)
 	item.selection = {anchor = end, active = 0, affinity = .Right}
+	helper_mode := "pipe"
+	if delay, found := os.lookup_env("HAMMER_TEST_PIPE_DELAY", context.temp_allocator); found && delay == "1" {
+		helper_mode = "pipe-delay"
+	}
 	id, start_err := process.job_start_selection(
 		&editor.jobs,
-		{command = {helper, "pipe"}},
+		{command = {helper, helper_mode}},
 		&buffer.doc,
 		item.selection,
 		u64(buffer.id),

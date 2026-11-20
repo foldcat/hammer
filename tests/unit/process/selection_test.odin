@@ -15,6 +15,15 @@ selection_test_text :: proc(t: ^testing.T, doc: ^txn.Doc) -> []byte {
 	return content
 }
 
+selection_test_edit :: proc(t: ^testing.T, doc: ^txn.Doc, op: txn.Operation) {
+	edit := txn.Transaction{
+		source = .Typing,
+		base_revision = txn.doc_revision(doc),
+		ops = []txn.Operation{op},
+	}
+	expect_ok(t, txn.doc_apply(doc, &edit, context.allocator))
+}
+
 drive_selection_job :: proc(t: ^testing.T, service: ^process.Job_Service, id: process.Job_ID, diagnostics: ^process.Output_Buffer) -> errs.Error {
 	for iteration in 0 ..< 10000 {
 		process.job_service_poll(service, u64(iteration))
@@ -87,7 +96,95 @@ test_selection_pipe_replaces_stdin_snapshot_in_one_undo_transaction :: proc(t: ^
 }
 
 @(test)
-test_selection_pipe_rejects_stale_revision_and_preserves_output :: proc(t: ^testing.T) {
+test_selection_pipe_transforms_nonoverlapping_edits :: proc(t: ^testing.T) {
+	source: txn.Doc
+	expect_ok(t, txn.doc_init_from_bytes(&source, transmute([]byte)string("alpha beta gamma"), {}, context.allocator))
+	defer txn.doc_destroy(&source)
+	pipe: process.Selection_Pipe
+	expect_ok(t, process.selection_pipe_init(&pipe, &source, {anchor = 6, active = 10}, 15, 16, 17, {output_bytes = 32}, context.allocator))
+	defer process.selection_pipe_destroy(&pipe)
+	copy(pipe.output, "filtered:beta")
+	pipe.output_len = len("filtered:beta")
+	process.selection_pipe_ready(&pipe)
+	selection_test_edit(t, &source, txn.Insert{pos = 0, data = transmute([]byte)string(">")})
+	selection_test_edit(t, &source, txn.Insert{pos = rope.tree_byte_count(&source.tree), data = transmute([]byte)string("!")})
+	expect_ok(t, process.selection_pipe_apply(&pipe, &source, 15, 16, 17))
+	content := selection_test_text(t, &source)
+	defer delete(content, context.allocator)
+	testing.expectf(t, string(content) == ">alpha filtered:beta gamma!", "replacement %q", string(content))
+	_, undo_err := txn.doc_undo(&source)
+	expect_ok(t, undo_err)
+	original := selection_test_text(t, &source)
+	defer delete(original, context.allocator)
+	testing.expect(t, string(original) == ">alpha beta gamma!")
+}
+
+@(test)
+test_selection_pipe_preserves_insertions_at_range_boundaries :: proc(t: ^testing.T) {
+	source: txn.Doc
+	expect_ok(t, txn.doc_init_from_bytes(&source, transmute([]byte)string("alpha"), {}, context.allocator))
+	defer txn.doc_destroy(&source)
+	pipe: process.Selection_Pipe
+	expect_ok(t, process.selection_pipe_init(&pipe, &source, {anchor = 1, active = 4}, 18, 19, 20, {output_bytes = 8}, context.allocator))
+	defer process.selection_pipe_destroy(&pipe)
+	pipe.output[0] = 'X'
+	pipe.output_len = 1
+	process.selection_pipe_ready(&pipe)
+	selection_test_edit(t, &source, txn.Insert{pos = 1, data = transmute([]byte)string("<")})
+	selection_test_edit(t, &source, txn.Insert{pos = 5, data = transmute([]byte)string(">")})
+	expect_ok(t, process.selection_pipe_apply(&pipe, &source, 18, 19, 20))
+	content := selection_test_text(t, &source)
+	defer delete(content, context.allocator)
+	testing.expectf(t, string(content) == "a<X>a", "replacement %q", string(content))
+}
+
+@(test)
+test_selection_pipe_empty_target_conflicts_at_edit_position :: proc(t: ^testing.T) {
+	operations := []txn.Operation{
+		txn.Insert{pos = 1, data = transmute([]byte)string("q")},
+		txn.Replace{range = {1, 2}, data = transmute([]byte)string("q")},
+	}
+	for op in operations {
+		source: txn.Doc
+		expect_ok(t, txn.doc_init_from_bytes(&source, transmute([]byte)string("abc"), {}, context.allocator))
+		pipe: process.Selection_Pipe
+		expect_ok(t, process.selection_pipe_init(&pipe, &source, {anchor = 1, active = 1}, 18, 19, 20, {output_bytes = 8}, context.allocator))
+		pipe.output[0] = 'X'
+		pipe.output_len = 1
+		process.selection_pipe_ready(&pipe)
+		selection_test_edit(t, &source, op)
+		apply_err := process.selection_pipe_apply(&pipe, &source, 18, 19, 20)
+		expect_kind(t, apply_err, .Conflict)
+		testing.expect(t, pipe.state == .Conflict && txn.doc_revision(&source) == 1)
+		process.selection_pipe_destroy(&pipe)
+		txn.doc_destroy(&source)
+	}
+}
+
+@(test)
+test_selection_pipe_rejects_abandoned_history_branch :: proc(t: ^testing.T) {
+	source: txn.Doc
+	expect_ok(t, txn.doc_init_from_bytes(&source, transmute([]byte)string("abc"), {}, context.allocator))
+	defer txn.doc_destroy(&source)
+	selection_test_edit(t, &source, txn.Insert{pos = 0, data = transmute([]byte)string("x")})
+	pipe: process.Selection_Pipe
+	expect_ok(t, process.selection_pipe_init(&pipe, &source, {anchor = 0, active = 4}, 18, 19, 20, {output_bytes = 8}, context.allocator))
+	defer process.selection_pipe_destroy(&pipe)
+	pipe.output[0] = 'Y'
+	pipe.output_len = 1
+	process.selection_pipe_ready(&pipe)
+	_, undo_err := txn.doc_undo(&source)
+	expect_ok(t, undo_err)
+	selection_test_edit(t, &source, txn.Insert{pos = 0, data = transmute([]byte)string("z")})
+	apply_err := process.selection_pipe_apply(&pipe, &source, 18, 19, 20)
+	expect_kind(t, apply_err, .Conflict)
+	content := selection_test_text(t, &source)
+	defer delete(content, context.allocator)
+	testing.expect(t, string(content) == "zabc")
+}
+
+@(test)
+test_selection_pipe_rejects_overlap_and_applies_explicitly :: proc(t: ^testing.T) {
 	source: txn.Doc
 	expect_ok(t, txn.doc_init_from_bytes(&source, transmute([]byte)string("alpha"), {}, context.allocator))
 	defer txn.doc_destroy(&source)
@@ -106,7 +203,7 @@ test_selection_pipe_rejects_stale_revision_and_preserves_output :: proc(t: ^test
 	edit := txn.Transaction{
 		source = .Typing,
 		base_revision = txn.doc_revision(&source),
-		ops = []txn.Operation{txn.Insert{pos = 5, data = transmute([]byte)string("!")}},
+		ops = []txn.Operation{txn.Insert{pos = 2, data = transmute([]byte)string("!")}},
 		after_selection = {anchor = 6, active = 6, affinity = .Right},
 	}
 	expect_ok(t, txn.doc_apply(&source, &edit, context.allocator))
@@ -117,7 +214,7 @@ test_selection_pipe_rejects_stale_revision_and_preserves_output :: proc(t: ^test
 	testing.expect(t, job.selection_pipe.state == .Conflict)
 	content := selection_test_text(t, &source)
 	defer delete(content, context.allocator)
-	testing.expect(t, string(content) == "alpha!")
+	testing.expect(t, string(content) == "al!pha")
 	for !process.selection_pipe_replay_done(&job.selection_pipe) {
 		_, replay_err := process.selection_pipe_replay(&job.selection_pipe, &diagnostics, 3)
 		expect_ok(t, replay_err)
@@ -126,6 +223,19 @@ test_selection_pipe_rejects_stale_revision_and_preserves_output :: proc(t: ^test
 	defer delete(preserved, context.allocator)
 	testing.expect(t, strings.contains(string(preserved), "pipe diagnostic\n"))
 	testing.expect(t, strings.contains(string(preserved), "filtered:alpha"))
+	invalid_err := process.selection_pipe_apply_explicit(&job.selection_pipe, &source, 21, 22, u64(id), {anchor = 0, active = 7})
+	expect_kind(t, invalid_err, .Invalid_Input)
+	testing.expect(t, job.selection_pipe.state == .Conflict && txn.doc_revision(&source) == 1)
+	expect_ok(t, process.selection_pipe_apply_explicit(&job.selection_pipe, &source, 21, 22, u64(id), {anchor = 3, active = 6}))
+	applied := selection_test_text(t, &source)
+	defer delete(applied, context.allocator)
+	testing.expectf(t, string(applied) == "al!filtered:alpha", "explicit replacement %q", string(applied))
+	testing.expect(t, job.selection_pipe.state == .Applied && job.selection_pipe.has_update)
+	_, undo_err := txn.doc_undo(&source)
+	expect_ok(t, undo_err)
+	before_apply := selection_test_text(t, &source)
+	defer delete(before_apply, context.allocator)
+	testing.expect(t, string(before_apply) == "al!pha")
 	expect_ok(t, process.job_release(&service, id))
 }
 

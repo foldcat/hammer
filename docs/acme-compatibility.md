@@ -79,6 +79,10 @@ Acme behavior, not an implementation to copy mechanically.
   cancellation; automatic error output never bypasses that rule.
 - Errors are both logged and displayed in `+Errors`. Error-window creation does
   not interrupt work by changing the active document.
+- Selection-pipe results transform through non-overlapping edits. True range or
+  history conflicts preserve stdout in the job window, whose explicit `Apply`
+  command replaces the source view's current selection rather than stale text.
+  Covered by process unit tests and the `builtin-test` conflict scenario.
 
 ## Unsupported or deferred behavior
 

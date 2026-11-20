@@ -15,6 +15,7 @@ import txn "core/txn"
 import view "core/view"
 
 EDITOR_COMMANDS :: []command.Entry {
+	{name = "Apply", handler = editor_command_apply},
 	{name = "Del", handler = editor_command_del},
 	{name = "Delcol", handler = editor_command_delcol},
 	{name = "Exit", handler = editor_command_exit},
@@ -132,6 +133,22 @@ editor_execute_mouse :: proc(action: mouse.Execute) {
 		return
 	}
 	editor_report(dispatch_err)
+}
+
+editor_command_apply :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	if invocation.argument != "" {
+		return errs.new(.Invalid_Input, "job: Apply takes no arguments", allocator = permanent())
+	}
+	target := editor_command_source_target(cmd_context.source)
+	body := editor_target_body(target)
+	if body.item == nil {
+		return errs.new(.NotFound, "job: Apply requires a conflicted job output window", allocator = permanent())
+	}
+	buffer := editor_buffer_for_view(body.item)
+	if buffer == nil || buffer.kind != .Job_Output {
+		return errs.new(.Unsupported, "job: Apply is available only in a job output window", allocator = permanent())
+	}
+	return editor_job_apply_conflict(buffer)
 }
 
 editor_command_del :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {

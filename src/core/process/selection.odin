@@ -212,6 +212,109 @@ selection_pipe_reject :: proc(pipe: ^Selection_Pipe) {
 	}
 }
 
+selection_insert_conflicts :: proc(target: rope.Byte_Range, pos, length: int) -> bool {
+	if length == 0 {
+		return false
+	}
+	if target.start == target.end {
+		return pos == target.start
+	}
+	return pos > target.start && pos < target.end
+}
+
+selection_range_conflicts :: proc(target, edit: rope.Byte_Range) -> bool {
+	if edit.start == edit.end {
+		return false
+	}
+	if target.start == target.end {
+		return edit.start < target.start && target.start < edit.end
+	}
+	return edit.start < target.end && target.start < edit.end
+}
+
+selection_operation_conflicts :: proc(target: rope.Byte_Range, op: txn.Operation) -> bool {
+	switch operation in op {
+	case txn.Insert:
+		return selection_insert_conflicts(target, operation.pos, len(operation.data))
+	case txn.Delete:
+		return selection_range_conflicts(target, operation.range)
+	case txn.Replace:
+		if operation.range.start == operation.range.end {
+			return selection_insert_conflicts(target, operation.range.start, len(operation.data))
+		}
+		if target.start == target.end && operation.range.start == target.start && len(operation.data) > 0 {
+			return true
+		}
+		return selection_range_conflicts(target, operation.range)
+	}
+	return true
+}
+
+selection_pipe_current_range :: proc(pipe: ^Selection_Pipe, doc: ^txn.Doc) -> (rope.Byte_Range, errs.Error) {
+	source_revision := pipe.target.source_revision
+	found := source_revision == 0
+	for node := doc.current; node != 0; {
+		entry := &doc.log[node - 1]
+		if entry.after == source_revision {
+			found = true
+			break
+		}
+		for op in entry.ops {
+			if selection_operation_conflicts(pipe.target.range, op) {
+				return {}, errs.new(.Conflict, "process: selection target range has newer edits", allocator = pipe.allocator)
+			}
+		}
+		node = entry.parent
+	}
+	if !found {
+		return {}, errs.newf(
+			.Conflict,
+			"process: selection source revision %d is not on the current history path",
+			source_revision,
+			allocator = pipe.allocator,
+		)
+	}
+	start := txn.Anchor{pos = pipe.target.range.start, affinity = .Left, revision = source_revision}
+	end := txn.Anchor{pos = pipe.target.range.end, affinity = .Right, revision = source_revision}
+	if err := txn.anchor_transform(doc, &start, pipe.allocator); !errs.ok(err) {
+		return {}, err
+	}
+	if err := txn.anchor_transform(doc, &end, pipe.allocator); !errs.ok(err) {
+		return {}, err
+	}
+	if start.pos > end.pos {
+		return {}, errs.new(.Conflict, "process: transformed selection range is ambiguous", allocator = pipe.allocator)
+	}
+	return rope.Byte_Range{start.pos, end.pos}, {}
+}
+
+selection_pipe_replace :: proc(pipe: ^Selection_Pipe, doc: ^txn.Doc, range: rope.Byte_Range, selection: txn.Selection) -> errs.Error {
+	pipe.has_update = false
+	start := range.start
+	end := start + pipe.output_len
+	pipe.operations[0] = txn.Replace{range = range, data = pipe.output[:pipe.output_len]}
+	after := txn.Selection{anchor = start, active = end, affinity = .Right}
+	if selection.anchor > selection.active {
+		after.anchor, after.active = after.active, after.anchor
+	}
+	pipe.transaction = {
+		source = .Command_Output,
+		base_revision = txn.doc_revision(doc),
+		ops = pipe.operations[:],
+		after_selection = after,
+	}
+	if err := txn.doc_apply(doc, &pipe.transaction, pipe.allocator); !errs.ok(err) {
+		pipe.state = .Conflict if err.kind == .Conflict else .Failed
+		return err
+	}
+	pipe.target.range = range
+	pipe.target.source_revision = txn.doc_revision(doc)
+	pipe.target.selection = selection
+	pipe.state = .Applied
+	pipe.has_update = true
+	return {}
+}
+
 selection_pipe_apply :: proc(pipe: ^Selection_Pipe, doc: ^txn.Doc, target_id: u64, target_generation: u64, request_id: u64) -> errs.Error {
 	if pipe == nil || doc == nil || pipe.state != .Ready {
 		return errs.new(.Invalid_Input, "process: selection pipe is not ready to apply")
@@ -221,36 +324,40 @@ selection_pipe_apply :: proc(pipe: ^Selection_Pipe, doc: ^txn.Doc, target_id: u6
 		pipe.state = .Conflict
 		return errs.new(.Conflict, "process: selection pipe target or request is stale", allocator = pipe.allocator)
 	}
+	range := pipe.target.range
 	if pipe.target.source_revision != txn.doc_revision(doc) {
-		pipe.state = .Conflict
-		return errs.newf(
-			.Conflict,
-			"process: selection source revision %d is stale; current revision is %d",
-			pipe.target.source_revision,
-			txn.doc_revision(doc),
-			allocator = pipe.allocator,
-		)
+		current_range, err := selection_pipe_current_range(pipe, doc)
+		if !errs.ok(err) {
+			pipe.state = .Conflict if err.kind == .Conflict else .Failed
+			return err
+		}
+		range = current_range
 	}
-	start := pipe.target.range.start
-	end := start + pipe.output_len
-	pipe.operations[0] = txn.Replace{range = pipe.target.range, data = pipe.output[:pipe.output_len]}
-	after := txn.Selection{anchor = start, active = end, affinity = .Right}
-	if pipe.target.selection.anchor > pipe.target.selection.active {
-		after.anchor, after.active = after.active, after.anchor
+	return selection_pipe_replace(pipe, doc, range, pipe.target.selection)
+}
+
+// Explicit application replaces the caller's current selection, not the stale
+// range. The user therefore chooses exactly which newer text may be replaced.
+selection_pipe_apply_explicit :: proc(
+	pipe: ^Selection_Pipe,
+	doc: ^txn.Doc,
+	target_id: u64,
+	target_generation: u64,
+	request_id: u64,
+	selection: txn.Selection,
+) -> errs.Error {
+	if pipe == nil || doc == nil || pipe.state != .Conflict {
+		return errs.new(.Invalid_Input, "process: selection pipe has no conflict to apply")
 	}
-	pipe.transaction = {
-		source = .Command_Output,
-		base_revision = pipe.target.source_revision,
-		ops = pipe.operations[:],
-		after_selection = after,
+	pipe.has_update = false
+	if pipe.target.id != target_id || pipe.target.generation != target_generation || pipe.target.request_id != request_id {
+		return errs.new(.Conflict, "process: selection pipe target or request is stale", allocator = pipe.allocator)
 	}
-	if err := txn.doc_apply(doc, &pipe.transaction, pipe.allocator); !errs.ok(err) {
-		pipe.state = .Conflict if err.kind == .Conflict else .Failed
-		return err
+	if !txn.selection_in_bounds(selection, rope.tree_byte_count(&doc.tree)) {
+		return errs.new(.Invalid_Input, "process: explicit selection is outside the document", allocator = pipe.allocator)
 	}
-	pipe.state = .Applied
-	pipe.has_update = true
-	return {}
+	range := rope.Byte_Range{min(selection.anchor, selection.active), max(selection.anchor, selection.active)}
+	return selection_pipe_replace(pipe, doc, range, selection)
 }
 
 selection_pipe_replay_done :: proc(pipe: ^Selection_Pipe) -> bool {

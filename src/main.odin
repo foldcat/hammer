@@ -13,6 +13,7 @@
 //   HAMMER_TEST_IGNORE_JOB=<path>  start the purpose-built ignore helper for Stop integration
 //   HAMMER_TEST_FLOOD_JOB=<path>  start the purpose-built flood helper for output integration
 //   HAMMER_TEST_PIPE_JOB=<path>   start the purpose-built selection pipe helper for replacement integration
+//   HAMMER_TEST_PIPE_DELAY=1      delay test-helper output for stale-target conflict integration
 //   HAMMER_LOG=<path>           log file path; empty string disables file logging
 package main
 

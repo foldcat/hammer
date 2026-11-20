@@ -70,6 +70,11 @@ echo :: proc() -> int {
 	return 0
 }
 
+pipe_delay :: proc() -> int {
+	time.sleep(time.Second)
+	return pipe()
+}
+
 pipe :: proc() -> int {
 	input := make([dynamic]u8, 0, 1024, context.allocator)
 	defer delete(input)
@@ -140,6 +145,8 @@ main :: proc() {
 		code = echo()
 	case "pipe":
 		code = pipe()
+	case "pipe-delay":
+		code = pipe_delay()
 	case "flood":
 		code = flood()
 	case "ignore":

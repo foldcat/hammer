@@ -164,6 +164,9 @@ editor_window_generated :: proc(item: ^view.View) -> string {
 	commands := "Del"
 	if buffer != nil && buffer.kind == .Job_Output {
 		commands = "Del Stop"
+		if buffer.has_conflict_pipe && buffer.conflict_pipe.state == .Conflict {
+			commands = "Del Apply"
+		}
 	} else if buffer != nil && buffer.kind == .Directory {
 		commands = "Del Get"
 	} else if buffer != nil && buffer.kind == .File && txn.doc_revision(&buffer.doc) != buffer.saved_revision {

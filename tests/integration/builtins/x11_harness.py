@@ -211,6 +211,7 @@ def main() -> int:
             pipe_environment.pop("HAMMER_TEST_IGNORE_JOB")
             pipe_environment.pop("HAMMER_TEST_FLOOD_JOB")
             pipe_environment["HAMMER_TEST_PIPE_JOB"] = str(job_helper)
+            pipe_environment.pop("HAMMER_TEST_PIPE_DELAY", None)
             pipe_environment["XDG_STATE_HOME"] = str(sandbox / "pipe-state")
             with pipe_log_path.open("wb") as pipe_log:
                 process = subprocess.Popen(
@@ -234,6 +235,47 @@ def main() -> int:
                 print("PASS: selection stdin is filtered and stdout replaces the selection in the real editor")
                 x11.tap(0xFF1B)
                 wait_for_exit(process, args.timeout, pipe_log_path)
+                process = None
+
+            pipe_source.write_bytes("pipe α β\n".encode("utf-8"))
+            conflict_log_path = sandbox / "pipe-conflict-hammer.log"
+            conflict_environment = pipe_environment.copy()
+            conflict_environment["HAMMER_TEST_PIPE_DELAY"] = "1"
+            conflict_environment["XDG_STATE_HOME"] = str(sandbox / "pipe-conflict-state")
+            with conflict_log_path.open("wb") as conflict_log:
+                process = subprocess.Popen(
+                    [str(binary), "pipe.txt"],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=conflict_log,
+                    stderr=subprocess.STDOUT,
+                    env=conflict_environment,
+                )
+                conflict_window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, conflict_window)
+                x11.lib.XSetInputFocus(x11.display, conflict_window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                wait_for_log(conflict_log_path, "job: selection test helper started", args.timeout)
+                click(x11, conflict_window, 1, 60, 100)
+                select_all(x11)
+                type_text(x11, "newer")
+                wait_for_log(conflict_log_path, "job: selection conflict preserved", args.timeout)
+                if "job: selection replaced" in conflict_log_path.read_text(encoding="utf-8", errors="replace"):
+                    raise HarnessFailure("conflicted selection output replaced newer edits")
+                execute(x11, conflict_window, "Putall", 10, 10, args.timeout, conflict_log_path, 1)
+                wait_for_log(conflict_log_path, "file: saved pipe.txt", args.timeout, 1)
+                if pipe_source.read_bytes() != b"newer":
+                    raise HarnessFailure(f"conflict did not preserve newer edits: {pipe_source.read_bytes()!r}")
+                execute(x11, conflict_window, "Apply", 540, 330, args.timeout, conflict_log_path, 1)
+                wait_for_log(conflict_log_path, "job: selection conflict applied", args.timeout)
+                execute(x11, conflict_window, "Putall", 10, 10, args.timeout, conflict_log_path, 2)
+                wait_for_log(conflict_log_path, "file: saved pipe.txt", args.timeout, 2)
+                expected = "newerfiltered:pipe α β\n".encode("utf-8")
+                if pipe_source.read_bytes() != expected:
+                    raise HarnessFailure(f"explicit Apply wrote unexpected bytes: {pipe_source.read_bytes()!r}")
+                print("PASS: conflicted output preserves newer edits and Apply uses the current selection")
+                x11.tap(0xFF1B)
+                wait_for_exit(process, args.timeout, conflict_log_path)
                 process = None
             succeeded = True
             return 0
