@@ -113,17 +113,36 @@ test_token_budget_is_explicit :: proc(t: ^testing.T) {
 @(test)
 test_look_path_and_windows_token_expansion :: proc(t: ^testing.T) {
 	reference := mouse.parse_look_path("target.txt")
-	testing.expect(t, reference.path == "target.txt" && reference.line == 0)
+	testing.expect(t, reference.path == "target.txt" && reference.line == 0 && reference.col == 0)
 	reference = mouse.parse_look_path("target.txt:12")
-	testing.expect(t, reference.path == "target.txt" && reference.line == 12)
+	testing.expect(t, reference.path == "target.txt" && reference.line == 12 && reference.col == 0)
 	reference = mouse.parse_look_path(`C:\work\target.txt:9`)
-	testing.expect(t, reference.path == `C:\work\target.txt` && reference.line == 9)
+	testing.expect(t, reference.path == `C:\work\target.txt` && reference.line == 9 && reference.col == 0)
 	reference = mouse.parse_look_path("relative.txt:001")
-	testing.expect(t, reference.path == "relative.txt" && reference.line == 1)
-	unchanged := []string{"target.txt:", ":2", "target.txt:0", "target.txt:x", "target.txt:999999999999999999999999999"}
+	testing.expect(t, reference.path == "relative.txt" && reference.line == 1 && reference.col == 0)
+	reference = mouse.parse_look_path("target.txt:12:34")
+	testing.expect(t, reference.path == "target.txt" && reference.line == 12 && reference.col == 34)
+	reference = mouse.parse_look_path(`C:\work\target.txt:9:3`)
+	testing.expect(t, reference.path == `C:\work\target.txt` && reference.line == 9 && reference.col == 3)
+	reference = mouse.parse_look_path("relative.txt:001:007")
+	testing.expect(t, reference.path == "relative.txt" && reference.line == 1 && reference.col == 7)
+	reference = mouse.parse_look_path("target.txt:12:")
+	testing.expect(t, reference.path == "target.txt" && reference.line == 12 && reference.col == 0)
+	reference = mouse.parse_look_path("target.txt:12:34:")
+	testing.expect(t, reference.path == "target.txt" && reference.line == 12 && reference.col == 34)
+	unchanged := []string{
+		"target.txt:",
+		":2",
+		"target.txt:0",
+		"target.txt:x",
+		"target.txt:999999999999999999999999999",
+		"target.txt:12:0",
+		"target.txt:12:x",
+		"target.txt:12:999999999999999999999999999",
+	}
 	for text in unchanged {
 		reference = mouse.parse_look_path(text)
-		testing.expect(t, reference.path == text && reference.line == 0)
+		testing.expectf(t, reference.path == text && reference.line == 0 && reference.col == 0, "got {%q, line=%d, col=%d}", reference.path, reference.line, reference.col)
 	}
 
 	doc: txn.Doc
@@ -132,4 +151,11 @@ test_look_path_and_windows_token_expansion :: proc(t: ^testing.T) {
 	range, err := mouse.action_range(&doc, {}, 6, 6, .Look)
 	testing.expect(t, errs.ok(err))
 	expect_text(t, &doc, range, `C:\work\target.txt:9`)
+
+	col_doc: txn.Doc
+	init_doc(t, &col_doc, `xx C:\work\target.txt:9:3 yy`)
+	defer txn.doc_destroy(&col_doc)
+	range, err = mouse.action_range(&col_doc, {}, 6, 6, .Look)
+	testing.expect(t, errs.ok(err))
+	expect_text(t, &col_doc, range, `C:\work\target.txt:9:3`)
 }

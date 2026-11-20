@@ -40,8 +40,11 @@ def main() -> int:
     target.write_bytes(b"first\nsecond target\nthird\n")
     unicode_target = sandbox / "目标.txt"
     unicode_target.write_bytes(b"unicode\n")
+    coltarget = sandbox / "sub" / "coltarget.txt"
+    coltarget.parent.mkdir()
+    coltarget.write_bytes(b"0123456789\n")
     source = sandbox / "source.txt"
-    source.write_text(f"target.txt:2\n{unicode_target}\nmissing-token\n", encoding="utf-8")
+    source.write_text(f"target.txt:2\n{unicode_target}\nmissing-token\ncoltarget.txt:1:5\n", encoding="utf-8")
     log_path = sandbox / "hammer.log"
     process: subprocess.Popen[bytes] | None = None
     x11: X11 | None = None
@@ -74,9 +77,9 @@ def main() -> int:
             x11.tap(ord("s"))
             x11.key(0xFFE3, False)
             wait_for_log(log_path, f"file: saved {target}", args.timeout)
-            if target.read_bytes() != b"first\nxsecond target\nthird\n":
+            if target.read_bytes() != b"first\nx\nthird\n":
                 raise HarnessFailure(f"file:line opened or saved the wrong buffer: {target.read_bytes()!r}")
-            if source.read_bytes() != f"target.txt:2\n{unicode_target}\nmissing-token\n".encode():
+            if source.read_bytes() != f"target.txt:2\n{unicode_target}\nmissing-token\ncoltarget.txt:1:5\n".encode():
                 raise HarnessFailure("opening a file changed the source document")
             print("PASS: relative file:line Look opens the target at its line and saves only that buffer")
 
@@ -112,12 +115,27 @@ def main() -> int:
             x11.tap(ord("s"))
             x11.key(0xFFE3, False)
             wait_for_log(log_path, f"file: saved {source}", args.timeout)
-            expected_source = f"starget.txt:2\n{unicode_target}\nmissing-token\n".encode()
+            expected_source = f"starget.txt:2\n{unicode_target}\nmissing-token\ncoltarget.txt:1:5\n".encode()
             if source.read_bytes() != expected_source:
                 raise HarnessFailure(f"source buffer saved unexpected bytes: {source.read_bytes()!r}")
-            if target.read_bytes() != b"first\nxsecond target\nthird\n" or unicode_target.read_bytes() != b"uunicode\n":
+            if target.read_bytes() != b"first\nx\nthird\n" or unicode_target.read_bytes() != b"uunicode\n":
                 raise HarnessFailure("saving the source buffer modified a Look-opened file")
             print("PASS: source and Look-opened buffers edit and save independently")
+
+            x11.move(window, 46, 148)
+            x11.button(3, True)
+            x11.button(3, False)
+            wait_for_log(log_path, f"look: opened {coltarget} window=5 buffer=5 line=1 col=5", args.timeout)
+            x11.tap(ord("x"))
+            x11.key(0xFFE3, True)
+            x11.tap(ord("s"))
+            x11.key(0xFFE3, False)
+            wait_for_log(log_path, f"file: saved {coltarget}", args.timeout)
+            if coltarget.read_bytes() != b"0123x456789\n":
+                raise HarnessFailure(f"file:line:col placed the caret at the wrong column: {coltarget.read_bytes()!r}")
+            if source.read_bytes() != expected_source:
+                raise HarnessFailure("opening a file:line:col reference changed the source document")
+            print("PASS: file:line:col Look finds the file in a subdirectory and places the caret at the column")
 
             missing_start = len(f"starget.txt:2\n{unicode_target}\n".encode())
             missing_end = missing_start + len(b"missing-token")
@@ -129,7 +147,7 @@ def main() -> int:
                 f'mouse: look "missing-token" reverse=false match=[{missing_start},{missing_end})',
                 args.timeout,
             )
-            if log_path.read_text(encoding="utf-8", errors="replace").count("look: opened ") != 2:
+            if log_path.read_text(encoding="utf-8", errors="replace").count("look: opened ") != 3:
                 raise HarnessFailure("a missing filename created a buffer instead of using literal search")
             print("PASS: missing filenames fall back to wrapped literal search")
 

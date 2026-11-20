@@ -131,7 +131,7 @@ editor_look_column :: proc(target: Mouse_Text_Target) -> layout.Column_ID {
 	return 0
 }
 
-editor_apply_look_line :: proc(item: ^view.View, line: int) {
+editor_apply_look_position :: proc(item: ^view.View, line, col: int) {
 	if item == nil || line <= 0 {
 		return
 	}
@@ -145,10 +145,60 @@ editor_apply_look_line :: proc(item: ^view.View, line: int) {
 		editor_report(err)
 		return
 	}
-	item.selection = txn.Selection{anchor = start, active = start, affinity = .Left}
+	line_end, end_err := editor_line_content_end(buffer, line_index)
+	if !errs.ok(end_err) {
+		editor_report(end_err)
+		return
+	}
 	item.first_line = line_index
 	item.first_row = 0
 	item.wheel_remainder = 0
+	if col > 0 {
+		// A column address places a precise caret; a column past the line
+		// end clamps to the line's last character rather than discarding
+		// the jump, matching Acme's column walk that never leaves the line.
+		position := line_end
+		if byte_pos, col_err := rope.tree_line_col_to_byte(&buffer.doc.tree, line_index, rope.Column_Index(col - 1), context.temp_allocator); errs.ok(col_err) {
+			position = byte_pos
+		}
+		item.selection = txn.Selection{anchor = position, active = position, affinity = .Left}
+		editor_reveal_caret(item)
+	} else {
+		// A line address selects the whole line, matching Acme, so the jump
+		// destination is visible. The caret lands at the line start.
+		item.selection = txn.Selection{anchor = line_end, active = start, affinity = .Left}
+		item.horizontal_offset = 0
+	}
+}
+
+// editor_line_content_end returns the byte offset just past the last visible
+// character of `line` (the trailing line break is excluded), matching the
+// line-selection convention used elsewhere in the editor.
+editor_line_content_end :: proc(buffer: ^Editor_Buffer, line: rope.Line_Index) -> (int, errs.Error) {
+	start, start_err := rope.tree_line_start(&buffer.doc.tree, line, context.temp_allocator)
+	if !errs.ok(start_err) {
+		return 0, start_err
+	}
+	end, end_err := rope.tree_line_end(&buffer.doc.tree, line, context.temp_allocator)
+	if !errs.ok(end_err) {
+		return 0, end_err
+	}
+	if end > start {
+		tail_start := max(start, end - 2)
+		tail: [2]u8
+		n, read_err := rope.tree_read(&buffer.doc.tree, rope.Byte_Range{tail_start, end}, tail[:end - tail_start])
+		if errs.ok(read_err) {
+			if n > 0 && tail[n - 1] == '\n' {
+				end -= 1
+				if n > 1 && tail[n - 2] == '\r' {
+					end -= 1
+				}
+			} else if n > 0 && tail[n - 1] == '\r' {
+				end -= 1
+			}
+		}
+	}
+	return end, {}
 }
 
 // On failure, destroy_on_error controls ownership of buffer. Zerox passes false
@@ -205,8 +255,35 @@ editor_open_look_file :: proc(target: Mouse_Text_Target, text: string) -> Look_O
 		editor_report(path_err)
 		return .Failed
 	}
-	defer delete(path, context.temp_allocator)
 
+	result := editor_try_open_look(target, path, reference)
+	if result != .Not_A_File {
+		return result
+	}
+
+	// A bare basename that was not found in the source directory may live in
+	// a subdirectory: compiler output (`reverb_http.adb:169:44`) often omits
+	// the source directory. Search the source directory's subtree with tight
+	// bounds before giving up and falling back to literal search.
+	if os.dir(reference.path) == "" {
+		root := os.dir(path)
+		if root == "" {
+			root = "."
+		}
+		if found_path, ok := editor_find_basename_under(root, reference.path); ok {
+			result = editor_try_open_look(target, found_path, reference)
+			if result != .Not_A_File {
+				return result
+			}
+		}
+	}
+	return .Not_A_File
+}
+
+// editor_try_open_look activates an already-open buffer or loads and opens
+// `path`, then applies the line/column jump. It returns .Not_A_File only when
+// the path does not exist, so the caller can try an alternative path.
+editor_try_open_look :: proc(target: Mouse_Text_Target, path: string, reference: mouse.Look_Path) -> Look_Open_Result {
 	if buffer := editor_find_open_buffer_path(path, context.temp_allocator); buffer != nil {
 		item := editor_first_view_for_buffer(buffer.id)
 		if item == nil {
@@ -214,8 +291,8 @@ editor_open_look_file :: proc(target: Mouse_Text_Target, text: string) -> Look_O
 			return .Failed
 		}
 		editor_activate_window(item.window_id)
-		editor_apply_look_line(item, reference.line)
-		log.infof("look: activated %s window=%d buffer=%d line=%d", path, u64(item.window_id), u64(buffer.id), reference.line)
+		editor_apply_look_position(item, reference.line, reference.col)
+		log.infof("look: activated %s window=%d buffer=%d line=%d col=%d", path, u64(item.window_id), u64(buffer.id), reference.line, reference.col)
 		return .Opened
 	}
 
@@ -234,9 +311,84 @@ editor_open_look_file :: proc(target: Mouse_Text_Target, text: string) -> Look_O
 		return .Failed
 	}
 	editor_activate_window(item.window_id)
-	editor_apply_look_line(item, reference.line)
-	log.infof("look: opened %s window=%d buffer=%d line=%d", path, u64(item.window_id), u64(buffer.id), reference.line)
+	editor_apply_look_position(item, reference.line, reference.col)
+	log.infof("look: opened %s window=%d buffer=%d line=%d col=%d", path, u64(item.window_id), u64(buffer.id), reference.line, reference.col)
 	return .Opened
+}
+
+LOOK_SEARCH_MAX_DEPTH :: 16
+LOOK_SEARCH_MAX_ENTRIES :: 4096
+
+// Directories the fallback basename search never descends into: build outputs
+// and dependency caches that can otherwise contain a same-named file that is
+// not the user's source. Hidden entries (`.git`, caches, ...) are also skipped.
+LOOK_SEARCH_SKIP_DIRS := [?]string{
+	"obj", "bin", "target", "build", "out", "dist",
+	"node_modules", "vendor", "alire", "deps",
+}
+
+editor_look_skip_dir :: proc(name: string) -> bool {
+	if name == "" || name[0] == '.' {
+		return true
+	}
+	for skip in LOOK_SEARCH_SKIP_DIRS {
+		if name == skip {
+			return true
+		}
+	}
+	return false
+}
+
+// editor_find_basename_under searches `root` recursively for a file named
+// exactly `name` and returns its absolute path. The walk is bounded in depth
+// and entry count; the first match wins. The result lives on the frame scratch
+// arena, valid until the end of the frame.
+editor_find_basename_under :: proc(root, name: string) -> (string, bool) {
+	remaining := LOOK_SEARCH_MAX_ENTRIES
+	found_path := ""
+	found := false
+	editor_search_directory(root, name, 0, &remaining, &found_path, &found)
+	return found_path, found
+}
+
+editor_search_directory :: proc(dir, name: string, depth: int, remaining: ^int, found_path: ^string, found: ^bool) {
+	if found^ || depth > LOOK_SEARCH_MAX_DEPTH || remaining^ <= 0 {
+		return
+	}
+	file, open_err := os.open(dir, {.Read})
+	if open_err != nil {
+		return
+	}
+	defer os.close(file)
+	iterator := os.read_directory_iterator_create(file)
+	defer os.read_directory_iterator_destroy(&iterator)
+	for entry in os.read_directory_iterator(&iterator) {
+		if found^ || remaining^ <= 0 {
+			break
+		}
+		remaining^ -= 1
+		if entry.name == "" {
+			continue
+		}
+		if entry.type == .Directory {
+			if editor_look_skip_dir(entry.name) {
+				continue
+			}
+			sub, join_err := os.join_path([]string{dir, entry.name}, context.temp_allocator)
+			if join_err == .None {
+				editor_search_directory(sub, name, depth + 1, remaining, found_path, found)
+			}
+		} else if entry.type == .Regular && entry.name == name {
+			joined, join_err := os.join_path([]string{dir, entry.name}, context.temp_allocator)
+			if join_err == .None {
+				if cleaned, clean_err := os.clean_path(joined, context.temp_allocator); clean_err == .None {
+					found_path^ = cleaned
+					found^ = true
+				}
+			}
+			return
+		}
+	}
 }
 
 editor_look_text :: proc(target: Mouse_Text_Target, needle: []byte, reverse: bool) {
