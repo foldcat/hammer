@@ -40,7 +40,7 @@ stubs, validation actually run, platform claims recorded honestly.
 | [M07](m07.md) | Acme columns, windows, tags, mouse, lookup         | M06            | Alpha B     | **Done**    |
 | [M08](m08.md) | Address language, internal commands, Acme Edit     | M07            | Alpha B     | **Done**    |
 | [M09](m09.md) | Asynchronous external commands, selection pipes    | M08            | Alpha B     | **Active**  |
-| [M10](m10.md) | Unicode ANSI console, PTY/ConPTY terminal mode     | M09            | Beta        | Not started |
+| [M10](m10.md) | Unicode ANSI console, PTY/ConPTY terminal mode     | M09            | Beta        | **Active**  |
 | [M11](m11.md) | EditorConfig and compiled-config workflow          | M06, M09       | Beta        | Not started |
 | [M12](m12.md) | Incremental Tree-sitter highlighting               | M02, M05, M11  | Beta        | Not started |
 | [M13](m13.md) | Lightweight buffer completion                      | M06, M12       | Beta        | Not started |

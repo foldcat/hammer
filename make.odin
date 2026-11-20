@@ -198,6 +198,7 @@ CORE_TEST_PACKAGES := []string {
 	"tests/unit/filestate",
 	"tests/unit/journal",
 	"tests/unit/process",
+	"tests/unit/console",
 }
 
 // Windows cross-build (M00.03 Windows half): the mingw-w64 import
