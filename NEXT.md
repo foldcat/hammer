@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M10.05 Implement PTY/ConPTY process mode.
+## Current task: M10.06 Integrate a tested terminal-emulation layer, you can start the terminal with the `win` command.

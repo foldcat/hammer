@@ -145,6 +145,36 @@ wait_for_close :: proc() {
 	os.read(os.stdin, buffer[:])
 }
 
+// pty reports whether stdin is a TTY, then echoes one input line. Used to
+// verify that a PTY child sees a terminal and that master I/O round-trips.
+pty :: proc() -> int {
+	tty_flag := 0
+	if os.is_tty(os.stdin) {
+		tty_flag = 1
+	}
+	fmt.printf("tty=%d\n", tty_flag)
+	input := make([dynamic]u8, 0, 256, context.allocator)
+	defer delete(input)
+	buffer: [1]u8
+	for len(input) < 256 {
+		count, err := os.read(os.stdin, buffer[:])
+		if count > 0 {
+			append(&input, ..buffer[:count])
+			if buffer[0] == '\n' {
+				break
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	fmt.printf("echo:%s", string(input[:]))
+	return 0
+}
+
+// size reports the terminal window size the child observes via TIOCGWINSZ.
+// (Defined per-platform: see size_linux.odin / size_other.odin.)
+
 main :: proc() {
 	if len(os.args) < 2 {
 		os.exit(2)
@@ -169,6 +199,10 @@ main :: proc() {
 		code = mark()
 	case "wait":
 		wait_for_close()
+	case "pty":
+		code = pty()
+	case "size":
+		code = size()
 	case:
 		code = 2
 	}

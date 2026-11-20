@@ -1,5 +1,6 @@
 package process
 
+import "base:runtime"
 import "core:os"
 import "core:strings"
 import "core:sys/linux"
@@ -172,63 +173,20 @@ child_exec :: proc "contextless" (
 	child_fail(pipes.error_write, last_errno)
 }
 
-linux_error :: proc(action: string, errno: linux.Errno, allocator := context.allocator) -> errs.Error {
-	kind := errs.Kind.IO
-	if errno == .ENOENT || errno == .ENOTDIR {
-		kind = .NotFound
-	} else if errno == .ENOMEM {
-		kind = .Resource_Limit
-	} else if errno == .ENOSYS {
-		kind = .Unsupported
-	}
-	return errs.newf(kind, "process: %s failed: %v", action, errno, allocator = allocator)
+// Spawn_Exec is the fully-built argv/envp/executable set for a child exec,
+// allocated in the caller's spawn arena.
+Spawn_Exec :: struct {
+	argv:             [^]cstring,
+	envp:             [^]cstring,
+	executables:      [^]cstring,
+	executable_count: int,
+	working_dir:      cstring,
 }
 
-read_exec_error :: proc(fd: linux.Fd) -> (linux.Errno, linux.Errno) {
-	encoded: [2]u8
-	total := 0
-	for total < len(encoded) {
-		count, errno := linux.read(fd, encoded[total:])
-		if errno == .EINTR {
-			continue
-		}
-		if errno != .NONE {
-			return .NONE, errno
-		}
-		if count == 0 {
-			return .NONE, .NONE
-		}
-		total += count
-	}
-	if total != len(encoded) {
-		return .NONE, .EIO
-	}
-	return linux.Errno(u16(encoded[0]) | u16(encoded[1]) << 8), .NONE
-}
-
-reap_failed_child :: proc(pid: linux.Pid) {
-	linux.kill(-pid, .SIGKILL)
-	linux.kill(pid, .SIGKILL)
-	status: u32
-	for {
-		_, errno := linux.waitpid(pid, &status, {}, nil)
-		if errno != .EINTR {
-			return
-		}
-	}
-}
-
-platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Handle, errs.Error) {
-	arena: mem_virtual.Arena
-	if arena_err := mem_virtual.arena_init_growing(&arena); arena_err != .None {
-		return {}, errs.newf(.Resource_Limit, "process: cannot initialize spawn arena: %v", arena_err, allocator = allocator)
-	}
-	defer {
-		mem_virtual.arena_free_all(&arena)
-		mem_virtual.arena_destroy(&arena)
-	}
-	scratch := mem_virtual.arena_allocator(&arena)
-
+// build_exec resolves the environment, argument vector, working directory, and
+// PATH-searched executable list for a Description. All storage is borrowed from
+// `scratch`; `allocator` is used only for error messages.
+build_exec :: proc(desc: Description, scratch, allocator: runtime.Allocator) -> (Spawn_Exec, errs.Error) {
 	environment := desc.environment
 	if environment == nil {
 		inherited, env_err := os.environ(scratch)
@@ -321,6 +279,77 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 		}
 	}
 
+	return Spawn_Exec{
+		argv = raw_data(argv),
+		envp = raw_data(envp),
+		executables = raw_data(executables),
+		executable_count = executable_count,
+		working_dir = working_dir,
+	}, {}
+}
+
+linux_error :: proc(action: string, errno: linux.Errno, allocator := context.allocator) -> errs.Error {
+	kind := errs.Kind.IO
+	if errno == .ENOENT || errno == .ENOTDIR {
+		kind = .NotFound
+	} else if errno == .ENOMEM {
+		kind = .Resource_Limit
+	} else if errno == .ENOSYS {
+		kind = .Unsupported
+	}
+	return errs.newf(kind, "process: %s failed: %v", action, errno, allocator = allocator)
+}
+
+read_exec_error :: proc(fd: linux.Fd) -> (linux.Errno, linux.Errno) {
+	encoded: [2]u8
+	total := 0
+	for total < len(encoded) {
+		count, errno := linux.read(fd, encoded[total:])
+		if errno == .EINTR {
+			continue
+		}
+		if errno != .NONE {
+			return .NONE, errno
+		}
+		if count == 0 {
+			return .NONE, .NONE
+		}
+		total += count
+	}
+	if total != len(encoded) {
+		return .NONE, .EIO
+	}
+	return linux.Errno(u16(encoded[0]) | u16(encoded[1]) << 8), .NONE
+}
+
+reap_failed_child :: proc(pid: linux.Pid) {
+	linux.kill(-pid, .SIGKILL)
+	linux.kill(pid, .SIGKILL)
+	status: u32
+	for {
+		_, errno := linux.waitpid(pid, &status, {}, nil)
+		if errno != .EINTR {
+			return
+		}
+	}
+}
+
+platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Handle, errs.Error) {
+	arena: mem_virtual.Arena
+	if arena_err := mem_virtual.arena_init_growing(&arena); arena_err != .None {
+		return {}, errs.newf(.Resource_Limit, "process: cannot initialize spawn arena: %v", arena_err, allocator = allocator)
+	}
+	defer {
+		mem_virtual.arena_free_all(&arena)
+		mem_virtual.arena_destroy(&arena)
+	}
+	scratch := mem_virtual.arena_allocator(&arena)
+
+	exec, exec_err := build_exec(desc, scratch, allocator)
+	if !errs.ok(exec_err) {
+		return {}, exec_err
+	}
+
 	pipes: Linux_Pipes
 	if errno := open_all(&pipes); errno != .NONE {
 		close_all(&pipes)
@@ -338,7 +367,7 @@ platform_spawn :: proc(desc: Description, allocator := context.allocator) -> (Ha
 		close_raw(&pipes.stdout_read)
 		close_raw(&pipes.stderr_read)
 		close_raw(&pipes.error_read)
-		child_exec(&pipes, raw_data(argv), raw_data(envp), raw_data(executables), executable_count, working_dir, parent_pid)
+		child_exec(&pipes, exec.argv, exec.envp, exec.executables, exec.executable_count, exec.working_dir, parent_pid)
 	}
 
 	close_raw(&pipes.stdin_read)
