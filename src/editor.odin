@@ -40,6 +40,7 @@ Buffer_Kind :: enum u8 {
 	Directory,
 	Errors,
 	Job_Output,
+	Commands,
 }
 
 Editor_Buffer :: struct {
@@ -86,6 +87,7 @@ Editor :: struct {
 	active_window:          layout.Window_ID,
 	close_guard:            lifecycle.Close_Guard,
 	job_quit:               lifecycle.Job_Quit_Guard,
+	filters:                command.Filter_Registry,
 	jobs:                   process.Job_Service,
 	job_outputs:            [process.MAX_JOBS]Editor_Job_Output,
 	job_output_cursor:      int,
@@ -276,9 +278,14 @@ editor_init :: proc(path := "") -> errs.Error {
 	if job_quit_err := lifecycle.job_quit_guard_init(&editor.job_quit, permanent()); !errs.ok(job_quit_err) {
 		return job_quit_err
 	}
+	path_environment := os.get_env("PATH", context.temp_allocator)
+	if filter_err := command.filter_registry_init(&editor.filters, {path = path_environment}, permanent()); !errs.ok(filter_err) {
+		return filter_err
+	}
 	if workspace_err := editor_workspace_init(); !errs.ok(workspace_err) {
 		return workspace_err
 	}
+	editor_report(editor_filter_load_user())
 	if helper, found := os.lookup_env("HAMMER_TEST_IGNORE_JOB", context.temp_allocator); found && helper != "" {
 		id, start_err := process.job_start(
 			&editor.jobs,
@@ -382,6 +389,7 @@ editor_destroy :: proc() {
 			editor_destroy_column_tag(editor.column_tag_ids[column_index])
 		}
 	}
+	command.filter_registry_destroy(&editor.filters)
 	lifecycle.job_quit_guard_destroy(&editor.job_quit)
 	lifecycle.close_guard_destroy(&editor.close_guard)
 	for index in 0 ..< view.MAX_VIEWS {
@@ -795,7 +803,7 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 	if buffer == nil {
 		return errs.new(.Internal, "get: window has no buffer", allocator = permanent())
 	}
-	if buffer.kind == .Errors || buffer.kind == .Job_Output {
+	if buffer.kind == .Errors || buffer.kind == .Job_Output || buffer.kind == .Commands {
 		return errs.new(.Unsupported, "get: output windows cannot be reloaded", allocator = permanent())
 	}
 

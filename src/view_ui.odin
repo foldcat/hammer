@@ -146,6 +146,8 @@ editor_window_generated :: proc(item: ^view.View) -> string {
 			name = "+Errors"
 		case .Job_Output:
 			name = buffer.job_name
+		case .Commands:
+			name = "+Commands"
 		case .Directory:
 			if buffer.path != "" {
 				name = buffer.path
@@ -221,7 +223,7 @@ editor_destroy_column_tag :: proc(column_id: layout.Column_ID) {
 }
 
 editor_init_global_and_column_tags :: proc() -> errs.Error {
-	if err := tagstate.init(&editor.global_tag, "Newcol Putall Wait Stop | ", permanent()); !errs.ok(err) {
+	if err := tagstate.init(&editor.global_tag, "Newcol Putall Cmds Wait Stop | ", permanent()); !errs.ok(err) {
 		return err
 	}
 	for column_index in 0 ..< editor.workspace.column_count {

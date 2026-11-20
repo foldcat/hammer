@@ -345,6 +345,54 @@ def main() -> int:
                 x11.tap(0xFF1B)
                 wait_for_exit(process, args.timeout, conflict_log_path)
                 process = None
+
+            config_home = sandbox / "config"
+            user_commands = config_home / "hammer" / "commands"
+            project_commands = sandbox / ".hammer" / "commands"
+            user_commands.mkdir(parents=True)
+            project_commands.mkdir(parents=True)
+            marker = sandbox / "filter-body-executed"
+            body = f"touch {marker}"
+            (user_commands / "shared.filter").write_text(
+                f"name: shared-filter\nengine: {job_helper.name}\nrouting: discard\nbody: {body}\n",
+                encoding="utf-8",
+            )
+            (project_commands / "shared.filter").write_text(
+                f"name: shared-filter\nengine: missing-m09-engine\nrouting: output-window\nbody: {body}\n",
+                encoding="utf-8",
+            )
+            filter_log_path = sandbox / "filter-hammer.log"
+            filter_environment = pipe_environment.copy()
+            for variable in ("HAMMER_TEST_IGNORE_JOB", "HAMMER_TEST_FLOOD_JOB", "HAMMER_TEST_PIPE_JOB", "HAMMER_TEST_PIPE_DELAY"):
+                filter_environment.pop(variable, None)
+            filter_environment["XDG_CONFIG_HOME"] = str(config_home)
+            filter_environment["XDG_STATE_HOME"] = str(sandbox / "filter-state")
+            filter_environment["PATH"] = f"{job_helper.parent}{os.pathsep}{filter_environment['PATH']}"
+            with filter_log_path.open("wb") as filter_log:
+                process = subprocess.Popen(
+                    [str(binary), "source.txt"],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=filter_log,
+                    stderr=subprocess.STDOUT,
+                    env=filter_environment,
+                )
+                filter_window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, filter_window)
+                x11.lib.XSetInputFocus(x11.display, filter_window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                wait_for_log(filter_log_path, "filter: loaded user definitions", args.timeout)
+                execute(x11, filter_window, "Cmds", 10, 10, args.timeout, filter_log_path, 1)
+                wait_for_log(filter_log_path, "filter: listed 1 definitions (1 engines available)", args.timeout)
+                execute(x11, filter_window, "Cmd project", 10, 10, args.timeout, filter_log_path, 1)
+                wait_for_log(filter_log_path, "filter: explicitly trusting project definitions", args.timeout)
+                wait_for_log(filter_log_path, "filter: listed 2 definitions (1 engines available)", args.timeout)
+                if marker.exists():
+                    raise HarnessFailure("command discovery executed a filter body")
+                print("PASS: Cmd/Cmds enumerates trusted user and explicit project definitions without execution")
+                x11.tap(0xFF1B)
+                wait_for_exit(process, args.timeout, filter_log_path)
+                process = None
             succeeded = True
             return 0
     finally:

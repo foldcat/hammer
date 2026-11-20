@@ -17,6 +17,8 @@ import view "core/view"
 
 EDITOR_COMMANDS :: []command.Entry {
 	{name = "Apply", handler = editor_command_apply},
+	{name = "Cmd", handler = editor_command_cmds},
+	{name = "Cmds", handler = editor_command_cmds},
 	{name = "Del", handler = editor_command_del},
 	{name = "Delcol", handler = editor_command_delcol},
 	{name = "Exit", handler = editor_command_exit},

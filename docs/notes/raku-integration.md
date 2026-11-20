@@ -1,10 +1,11 @@
 # Raku integration — design and decisions
 
-**Status:** proposed (2026-11-18). Design note; no implementation. Recorded
-because adding an optional external language runtime and a user-defined
-command layer is an architecture change (AGENTS.md §1, scope §3: "Do not
-introduce a … scripting runtime, plugin system, or major dependency merely
-to complete a small task"), so it needs a documented decision before any
+**Status:** proposed on 2026-11-18; R-05 registry/discovery is now implemented
+by M09.09. Invocation, external engines, and Raku-specific behavior remain
+unimplemented. Recorded because adding an optional external language runtime and
+a user-defined command layer is an architecture change (AGENTS.md §1, scope §3:
+"Do not introduce a … scripting runtime, plugin system, or major dependency
+merely to complete a small task"), so it needs a documented decision before any
 code.
 
 **Scope of this note:** how an *optional* Raku binary (detected on `PATH`,
@@ -61,7 +62,7 @@ first-class default because of its regex/text strengths. The editor builds a
 | R-02 | Optional Raku regex is a separate, explicitly invoked verb with native fallback (detect `raku` → use it, else native). | Proposed |
 | R-03 | Commands are pure stdio filters: `(stdin + env + args) → stdout`. No editor API, no live object model.        | Proposed |
 | R-04 | Editor state is passed as a one-shot invocation-time snapshot (env vars + stdin), never a live bidirectional handle. | Proposed |
-| R-05 | Command *definitions* are declarative metadata + a body string; the registry is enumerable/validatable without executing anything. | Proposed |
+| R-05 | Command *definitions* are declarative metadata + a body string; the registry is enumerable/validatable without executing anything. | Implemented (M09.09) |
 | R-06 | Raku-driven editor *mutation* (move cursor, open window, rename, listen to events) is deferred to M18 IPC, versioned and revision-validated. | Proposed |
 | R-07 | Raku is never embedded; absence is graceful (command unavailable or native fallback).                          | Proposed |
 
@@ -127,8 +128,13 @@ future session doesn't "helpfully" wire Raku into the address language.
 
 ## 6. Not validated
 
-Nothing here is implemented or validated. This is a proposal: no spawn path,
-no registry, no Raku binary interaction has been tested. Cross-platform claims
-(Windows/ConPTY, Linux) and Raku-specific behaviors (`-n`/`-p`, temp-file
-program execution, stdout/stderr routing) are unverified until M09+ work runs
-against a real `raku`.
+M09.09 implements and validates the registry, scopes, PATH detection, and
+non-executing discovery on Linux/X11; Windows is source-checked only. The current
+`.filter` format accepts single-line bodies, not multi-line programs or PATHEXT
+customization. See `docs/notes/m09-09-filter-registry.md` for the implemented
+contract.
+
+No named-command spawn path or Raku binary interaction has been tested.
+Cross-platform claims (Windows/ConPTY, Linux) and Raku-specific behaviors
+(`-n`/`-p`, temp-file program execution, stdout/stderr routing) remain unverified
+until later M09 work runs against a real `raku`.
