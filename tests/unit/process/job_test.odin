@@ -174,3 +174,28 @@ test_job_service_destroy_force_cleans_active_job :: proc(t: ^testing.T) {
 	expect_ok(t, process.job_service_destroy(&service))
 	testing.expect(t, !service.initialized && process.job_service_active_count(&service) == 0)
 }
+
+@(test)
+test_job_context_discard_runs_and_drains_without_output :: proc(t: ^testing.T) {
+	service: process.Job_Service
+	process.job_service_init(&service, {}, context.allocator)
+	defer expect_ok(t, process.job_service_destroy(&service))
+	snapshot: process.Context_Snapshot
+	expect_ok(t, process.context_snapshot_init(&snapshot, {}, context.allocator))
+	defer process.context_snapshot_destroy(&snapshot)
+
+	id, start_err := process.job_start_context_discard(&service, {HELPER, "echo"}, &snapshot, 5)
+	expect_ok(t, start_err)
+	job := process.job_find(&service, id)
+	testing.expect(t, job != nil && job.discard_output && !job.has_selection_pipe)
+
+	stdout := make([dynamic]byte, 0, 1024, context.allocator)
+	defer delete(stdout)
+	stderr := make([dynamic]byte, 0, 1024, context.allocator)
+	defer delete(stderr)
+	poll_job_until_releasable(t, &service, id, &stdout, &stderr)
+	testing.expect(t, job.state == .Exited && job.exit_status.success && job.err.kind == .None)
+	testing.expect(t, string(stdout[:]) == "stdout=\n")
+	testing.expect(t, string(stderr[:]) == "stderr=\n")
+	expect_ok(t, process.job_release(&service, id))
+}

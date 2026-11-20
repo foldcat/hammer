@@ -135,8 +135,13 @@ editor_execute_mouse :: proc(action: mouse.Execute) {
 	cmd_context := editor_command_context(target, range, action.with_argument)
 	handled, dispatch_err := command.dispatch(EDITOR_COMMANDS, invocation, &cmd_context, context.temp_allocator)
 	if !handled && dispatch_err.kind == .NotFound {
-		log.warnf("mouse: command %q was not executed; no handler is registered", invocation.name)
 		errs.destroy(&dispatch_err)
+		filter_handled, filter_err := editor_invoke_filter(&cmd_context, invocation)
+		if !filter_handled {
+			log.warnf("mouse: command %q was not executed; no handler is registered", invocation.name)
+			return
+		}
+		editor_report(filter_err)
 		return
 	}
 	editor_report(dispatch_err)

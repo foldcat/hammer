@@ -265,7 +265,9 @@ editor_poll_jobs :: proc() {
 		if job.id == 0 {
 			continue
 		}
-		if state.failed_id == job.id {
+		if job.discard_output {
+			editor_job_drain_records(job)
+		} else if state.failed_id == job.id {
 			editor_job_drain_records(job)
 			if job.has_selection_pipe {
 				process.selection_pipe_abort(&job.selection_pipe)
@@ -340,13 +342,13 @@ editor_poll_jobs :: proc() {
 		if process.job_releasable(job) {
 			if job.err.kind != .None && !state.error_reported {
 				state.error_reported = true
-				if state.failed_id == job.id {
+				if state.failed_id == job.id || job.discard_output {
 					editor_report(errs.new(job.err.kind, job.err.message, allocator = permanent()))
 				} else {
 					editor_job_queue_error(state, job.err.message)
 				}
 			}
-			if state.failed_id != job.id {
+			if !job.discard_output && state.failed_id != job.id {
 				can_release = editor_job_flush_error(state, &remaining)
 				if job.has_selection_pipe {
 					pipe := &job.selection_pipe
@@ -357,7 +359,7 @@ editor_poll_jobs :: proc() {
 			}
 			if can_release {
 				id := job.id
-				if state.failed_id != id && job.has_selection_pipe && job.selection_pipe.state == .Conflict {
+				if !job.discard_output && state.failed_id != id && job.has_selection_pipe && job.selection_pipe.state == .Conflict {
 					editor_job_preserve_conflict(state, job)
 				}
 				release_err := process.job_release(&editor.jobs, id)

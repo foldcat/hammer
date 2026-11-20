@@ -125,6 +125,20 @@ ignore_until_killed :: proc() {
 	}
 }
 
+// mark writes a fixed marker file in the current working directory and emits a
+// small amount of output, giving a discard-routing invocation an observable
+// side effect that does not depend on an output window.
+mark :: proc() -> int {
+	write_err := os.write_entire_file("discard-marker.txt", "ran\n")
+	if write_err != nil {
+		fmt.eprintf("mark write error: %v\n", write_err)
+		return 2
+	}
+	fmt.println("discard stdout")
+	fmt.eprintln("discard stderr")
+	return 0
+}
+
 wait_for_close :: proc() {
 	fmt.println("ready")
 	buffer: [1]u8
@@ -151,6 +165,8 @@ main :: proc() {
 		code = flood()
 	case "ignore":
 		ignore_until_killed()
+	case "mark":
+		code = mark()
 	case "wait":
 		wait_for_close()
 	case:

@@ -159,3 +159,27 @@ test_filter_discovery_scopes_availability_and_atomic_reload :: proc(t: ^testing.
 	expect_ok(t, command.filter_registry_clear_scope(&registry, .Project))
 	testing.expect(t, registry.count == 0 && command.filter_registry_find(&registry, "sort") == nil)
 }
+
+@(test)
+test_filter_command_builds_vector_and_rejects_missing_engine :: proc(t: ^testing.T) {
+	definition := command.Filter_Definition{
+		name = "sort",
+		engine = "engine",
+		body = "program arg",
+		origin = "test",
+		engine_path = "/usr/bin/engine",
+		scope = .User,
+		routing = .Replace_Selection,
+	}
+	argv, argv_err := command.filter_command(&definition, context.allocator)
+	expect_ok(t, argv_err)
+	testing.expect(t, len(argv) == 2 && argv[0] == "/usr/bin/engine" && argv[1] == "program arg")
+	command.filter_command_destroy(argv, context.allocator)
+
+	missing := command.Filter_Definition{name = "m", engine = "nope", body = "x", scope = .User}
+	_, missing_err := command.filter_command(&missing, context.allocator)
+	expect_kind(t, missing_err, .Unsupported)
+
+	_, nil_err := command.filter_command(nil, context.allocator)
+	expect_kind(t, nil_err, .Invalid_Input)
+}

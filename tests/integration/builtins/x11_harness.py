@@ -393,6 +393,81 @@ def main() -> int:
                 x11.tap(0xFF1B)
                 wait_for_exit(process, args.timeout, filter_log_path)
                 process = None
+
+            # M09.10: named-filter invocation with context snapshot, routing, and echo.
+            invoke_config_home = sandbox / "invoke-config"
+            invoke_user_commands = invoke_config_home / "hammer" / "commands"
+            invoke_user_commands.mkdir(parents=True)
+            (invoke_user_commands / "invoke-pipe.filter").write_text(
+                f"name: invoke-pipe\nengine: {job_helper.name}\nrouting: replace-selection\nbody: pipe\n",
+                encoding="utf-8",
+            )
+            (invoke_user_commands / "invoke-out.filter").write_text(
+                f"name: invoke-out\nengine: {job_helper.name}\nrouting: output-window\nbody: pipe\n",
+                encoding="utf-8",
+            )
+            (invoke_user_commands / "invoke-discard.filter").write_text(
+                f"name: invoke-discard\nengine: {job_helper.name}\nrouting: discard\nbody: mark\n",
+                encoding="utf-8",
+            )
+            invoke_source = sandbox / "invoke.txt"
+            invoke_source.write_bytes("invoke α β\n".encode("utf-8"))
+            discard_marker = sandbox / "discard-marker.txt"
+            invoke_log_path = sandbox / "invoke-hammer.log"
+            invoke_environment = filter_environment.copy()
+            invoke_environment["XDG_CONFIG_HOME"] = str(invoke_config_home)
+            invoke_environment["XDG_STATE_HOME"] = str(sandbox / "invoke-state")
+            with invoke_log_path.open("wb") as invoke_log:
+                process = subprocess.Popen(
+                    [str(binary), "invoke.txt"],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=invoke_log,
+                    stderr=subprocess.STDOUT,
+                    env=invoke_environment,
+                )
+                invoke_window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, invoke_window)
+                x11.lib.XSetInputFocus(x11.display, invoke_window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                wait_for_log(invoke_log_path, "filter: loaded user definitions", args.timeout)
+
+                click(x11, invoke_window, 1, 60, 100)
+                select_all(x11)
+                execute(x11, invoke_window, "invoke-pipe", 60, 52, args.timeout, invoke_log_path, 1)
+                wait_for_log(invoke_log_path, 'filter: echo "invoke-pipe"', args.timeout)
+                wait_for_log(invoke_log_path, "job: selection replaced", args.timeout)
+                execute(x11, invoke_window, "Putall", 10, 10, args.timeout, invoke_log_path, 1)
+                wait_for_log(invoke_log_path, "file: saved invoke.txt", args.timeout)
+                if invoke_source.read_bytes() != "filtered:invoke α β\n".encode("utf-8"):
+                    raise HarnessFailure(f"replace-selection filter wrote unexpected bytes: {invoke_source.read_bytes()!r}")
+                log_text = invoke_log_path.read_text(encoding="utf-8", errors="replace")
+                echo_pos = log_text.find('filter: echo "invoke-pipe"')
+                start_pos = log_text.find("filter: invoke-pipe started replace-selection")
+                if echo_pos < 0 or start_pos < 0 or echo_pos > start_pos:
+                    raise HarnessFailure("filter echo did not precede the job start")
+                print("PASS: replace-selection filter pipes the body selection and echoes before run")
+
+                execute(x11, invoke_window, "invoke-out", 60, 52, args.timeout, invoke_log_path, 1)
+                wait_for_log(invoke_log_path, "filter: invoke-out started output-window", args.timeout)
+                wait_for_log(invoke_log_path, "job: output opened", args.timeout)
+                wait_for_log(invoke_log_path, "job: released id=", args.timeout)
+                print("PASS: output-window filter opens a bounded job output window")
+
+                before_opened = invoke_log_path.read_text(encoding="utf-8", errors="replace").count("job: output opened")
+                execute(x11, invoke_window, "invoke-discard", 60, 52, args.timeout, invoke_log_path, 1)
+                wait_for_log(invoke_log_path, "filter: invoke-discard started discard", args.timeout)
+                wait_for_log(invoke_log_path, "job: released id=", args.timeout, 2)
+                if not discard_marker.exists():
+                    raise HarnessFailure("discard filter did not run its engine")
+                after_opened = invoke_log_path.read_text(encoding="utf-8", errors="replace").count("job: output opened")
+                if after_opened != before_opened:
+                    raise HarnessFailure("discard filter opened an output window")
+                print("PASS: discard filter runs its engine without an output window")
+
+                x11.tap(0xFF1B)
+                wait_for_exit(process, args.timeout, invoke_log_path)
+                process = None
             succeeded = True
             return 0
     finally:

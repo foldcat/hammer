@@ -318,6 +318,46 @@ filter_registry_available_count :: proc(registry: ^Filter_Registry) -> int {
 	return count
 }
 
+// filter_command builds the argument vector for invoking a resolved
+// definition: the engine executable (argv[0]) followed by the raw body as a
+// single program argument (argv[1]). The engine interprets that program
+// argument; engine-specific adapters (for example Raku's -e/temp-file
+// convention) are a later milestone. A definition whose engine path is still
+// unresolved cannot be invoked. The caller owns the returned slice and each
+// element and must release them with filter_command_destroy.
+filter_command :: proc(definition: ^Filter_Definition, allocator := context.allocator) -> ([]string, errs.Error) {
+	if definition == nil {
+		return nil, errs.new(.Invalid_Input, "filter: nil command definition", allocator = allocator)
+	}
+	if definition.engine_path == "" {
+		return nil, errs.new(.Unsupported, "filter: command engine is not available", allocator = allocator)
+	}
+	argv, alloc_err := make([]string, 2, allocator)
+	if alloc_err != nil {
+		return nil, errs.new(.Resource_Limit, "filter: cannot allocate command vector", allocator = allocator)
+	}
+	argv[0] = strings.clone(definition.engine_path, allocator)
+	argv[1] = strings.clone(definition.body, allocator)
+	if argv[0] == "" || argv[1] == "" {
+		delete(argv[0], allocator)
+		delete(argv[1], allocator)
+		delete(argv, allocator)
+		return nil, errs.new(.Resource_Limit, "filter: cannot copy command vector", allocator = allocator)
+	}
+	return argv, {}
+}
+
+// filter_command_destroy releases an owned vector produced by filter_command.
+filter_command_destroy :: proc(argv: []string, allocator := context.allocator) {
+	if len(argv) >= 1 {
+		delete(argv[0], allocator)
+	}
+	if len(argv) >= 2 {
+		delete(argv[1], allocator)
+	}
+	delete(argv, allocator)
+}
+
 // Enumeration returns an owned, deterministic report. The sorted definitions
 // are shallow read-only copies; their strings remain registry-owned.
 filter_registry_describe :: proc(registry: ^Filter_Registry, allocator := context.allocator) -> (report: string, err: errs.Error) {

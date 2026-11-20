@@ -30,6 +30,7 @@ Job :: struct {
 	input:           []byte,
 	selection_pipe:  Selection_Pipe,
 	has_selection_pipe: bool,
+	discard_output:  bool,
 	handle:          Handle,
 	pump:            Pump,
 	exit_status:     Exit_Status,
@@ -249,6 +250,19 @@ job_start_context :: proc(service: ^Job_Service, command: []string, snapshot: ^C
 		environment = snapshot.environment,
 	}
 	return job_start(service, desc, input, attachment)
+}
+
+// job_start_context_discard starts a job with a context snapshot but marks it
+// to discard all stdout/stderr instead of opening an output window. The job
+// still participates in cancellation, quit-blocking, and slot lifecycle.
+job_start_context_discard :: proc(service: ^Job_Service, command: []string, snapshot: ^Context_Snapshot, attachment: u64) -> (Job_ID, errs.Error) {
+	id, start_err := job_start_context(service, command, snapshot, nil, attachment)
+	if !errs.ok(start_err) {
+		return 0, start_err
+	}
+	job := job_find(service, id)
+	job.discard_output = true
+	return id, {}
 }
 
 job_force :: proc(job: ^Job) {
