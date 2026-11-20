@@ -1430,6 +1430,36 @@ patch_sokol_x11_ime :: proc() -> (changed, ok: bool) {
 	return true, true
 }
 
+// patch_sokol_win32_modifiers makes the Windows modifier mask read the
+// interrupt-level key state (GetAsyncKeyState) instead of the queue-based
+// GetKeyState. GetKeyState only reports the state as of the last keyboard
+// message read from the queue, so a Ctrl/Alt+click delivered before that
+// message is processed loses its modifier — a common laptop-trackpad
+// scenario on Windows. Done in-process (not via the external `patch` tool) so
+// it works identically for the Linux cross-build and native Windows builds.
+// Idempotent: returns changed=false when the hook is already present.
+patch_sokol_win32_modifiers :: proc() -> (changed, ok: bool) {
+	path := SOKOL_C_DIR + "/sokol_app.h"
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	if err != nil {
+		fmt.eprintf("[Setup] cannot inspect Sokol win32 modifier hook: %v\n", err)
+		return false, false
+	}
+	s := string(data)
+	if strings.contains(s, "GetAsyncKeyState(VK_SHIFT)") {
+		return false, true
+	}
+	// GetKeyState( appears only inside _sapp_win32_mods; the button bits below
+	// it already use GetAsyncKeyState, so a single prefix rewrite is exact.
+	s, _ = strings.replace_all(s, "GetKeyState(", "GetAsyncKeyState(", context.temp_allocator)
+	if werr := os.write_entire_file(path, transmute([]byte)s); werr != nil {
+		fmt.eprintf("[Setup] cannot write the patched Sokol source: %v\n", werr)
+		return false, false
+	}
+	fmt.println("[Setup] Applied the pinned Sokol win32 modifier-state patch.")
+	return true, true
+}
+
 system_deps_present :: proc() -> bool {
 	missing: [dynamic]string
 	defer delete(missing)
@@ -1676,6 +1706,15 @@ setup_windows :: proc() -> bool {
 		fmt.println("[Setup] Sokol C headers not found; downloading the pinned revision...")
 		if !fetch_sokol_headers() {
 			return false
+		}
+	}
+	patched, patch_ok := patch_sokol_win32_modifiers()
+	if !patch_ok {
+		return false
+	}
+	if patched {
+		for variant in SOKOL_VARIANTS {
+			os.remove(sokol_lib_path_windows("app", variant))
 		}
 	}
 

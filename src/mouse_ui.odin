@@ -266,7 +266,20 @@ modifier_chord_button :: proc(key: input.Key) -> (input.Mouse_Button, bool) {
 // cancel-on-non-pointer-input path for these keys. Any other key (or a gesture
 // in Execute/Look mode) returns false and is handled normally.
 editor_modifier_chord :: proc(event: input.Event) -> bool {
-	if !mouse.active(&editor.mouse_gesture) || editor.mouse_gesture.mode != .Select {
+	if !mouse.active(&editor.mouse_gesture) {
+		return false
+	}
+	// A repeated Ctrl/Alt press is the OS auto-repeat of a key the user is
+	// already holding, not a fresh key press. Consume it in every gesture mode
+	// so it cannot fall through to the cancel path: in Execute/Look mode the
+	// held Ctrl/Alt is the very modifier that started the gesture, so its
+	// auto-repeat (common while holding the key during a click) must not cancel
+	// it. A non-modifier repeat still returns false and cancels as before.
+	if kd, is_down := event.(input.Key_Down); is_down && kd.repeat {
+		_, ok := modifier_chord_button(kd.key)
+		return ok
+	}
+	if editor.mouse_gesture.mode != .Select {
 		return false
 	}
 	#partial switch e in event {
@@ -274,11 +287,6 @@ editor_modifier_chord :: proc(event: input.Event) -> bool {
 		button, ok := modifier_chord_button(e.key)
 		if !ok {
 			return false
-		}
-		if e.repeat {
-			// Consume a repeated modifier press without re-triggering the
-			// chord; it must not fall through to the cancel path.
-			return true
 		}
 		target := editor_text_target_by_id(editor.mouse_gesture.target)
 		if !editor_mouse_target_current(target) {
