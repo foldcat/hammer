@@ -150,6 +150,50 @@ test_stale_rejection :: proc(t: ^testing.T) {
 	expect_doc_ok(t, &doc, "after stale rejection")
 }
 
+// test_collapse_history_dense_ids pins that doc_collapse_history resets the
+// transaction id counter: after collapsing, subsequent applies must receive
+// dense ids again (doc.log[i].id == i + 1), which keeps doc_apply's
+// doc.log[parent - 1] selection lookup in range. A stale next_id here caused
+// an out-of-bounds panic when a terminal exited and ordinary input followed.
+@(test)
+test_collapse_history_dense_ids :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	testing.expect(t, errs.ok(txn.doc_init(&doc, {chunk_size = 4})))
+	defer txn.doc_destroy(&doc)
+
+	// Several bounded output updates, each collapsing history (the output
+	// buffer's pattern).
+	for _ in 0 ..< 3 {
+		tr: txn.Transaction
+		tr = {
+			source = .Command_Output,
+			base_revision = txn.doc_revision(&doc),
+			ops = {insert_op(rope.tree_byte_count(&doc.tree), "out\n")},
+		}
+		testing.expect(t, errs.ok(txn.doc_apply(&doc, &tr)))
+		txn.doc_collapse_history(&doc)
+		testing.expect(t, txn.doc_log_len(&doc) == 0)
+	}
+
+	// Two ordinary edits after collapse (e.g. typing after the shell exits)
+	// must not index the log out of bounds and must restart ids at 1.
+	first: txn.Transaction
+	first = {source = .Typing, base_revision = txn.doc_revision(&doc), ops = {insert_op(0, "x")}}
+	testing.expect(t, errs.ok(txn.doc_apply(&doc, &first)))
+	testing.expect(t, first.id == 1, "post-collapse id must restart at 1")
+	testing.expect(t, txn.doc_log_len(&doc) == 1)
+
+	second: txn.Transaction
+	second = {source = .Typing, base_revision = txn.doc_revision(&doc), ops = {insert_op(1, "y")}}
+	testing.expect(t, errs.ok(txn.doc_apply(&doc, &second)))
+	testing.expect(t, second.id == 2)
+	testing.expect(t, txn.doc_log_len(&doc) == 2)
+
+	got := doc_flatten(t, &doc)
+	defer delete(got)
+	testing.expect(t, string(got) == "xyout\nout\nout\n", "content must reflect all post-collapse edits")
+}
+
 // test_multi_op_ordering pins the original-snapshot contract: the same
 // operations produce the same content in any input order.
 @(test)

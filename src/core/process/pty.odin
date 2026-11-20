@@ -22,6 +22,12 @@ Termios_Mode :: enum u8 {
 	// Raw applies the cfmakeraw-equivalent state: no echo, no output
 	// post-processing, no canonical input, no control-character signals.
 	Raw,
+	// Cooked applies the line discipline an interactive terminal emulator
+	// uses for a plain shell: cooked input (echo on, canonical input, control-
+	// character signals) and output post-processing on. The tty echoes each
+	// keystroke back to the master, and a line editor that needs raw input
+	// (readline) switches the slave to raw mode itself while it reads.
+	Cooked,
 }
 
 // Winsize is a terminal window size in columns and rows.

@@ -253,6 +253,13 @@ doc_log_len :: proc(doc: ^Doc) -> int {
 // doc_collapse_history makes the current text the empty undo-tree baseline
 // without changing the monotonic document revision. It is intended for bounded
 // machine-generated logs whose old output and undo history are disposable.
+//
+// After collapsing, the document is back at the initial state (current == 0)
+// with an empty log, so the next applied transaction must receive id 1 again —
+// the log's "dense ids in apply order" invariant (doc.log[i].id == i + 1) and
+// doc_apply's doc.log[parent - 1] lookups both assume ids stay within
+// [0, len(log)]. next_id is reset here; next_revision is already doc.revision + 1
+// and keeps the revision monotonic.
 doc_collapse_history :: proc(doc: ^Doc) {
 	for &entry in doc.log {
 		ops_destroy(entry.ops)
@@ -261,6 +268,7 @@ doc_collapse_history :: proc(doc: ^Doc) {
 	resize(&doc.log, 0)
 	doc.initial_root = doc.tree.root
 	doc.current = 0
+	doc.next_id = 1
 }
 
 // doc_apply validates `txn` against the current revision and applies

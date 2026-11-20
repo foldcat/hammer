@@ -29,6 +29,7 @@ IGNCR :: u32(0x080)
 ICRNL :: u32(0x100)
 IXON :: u32(0x400)
 OPOST :: u32(0x001)
+ONLCR :: u32(0x004)
 ISIG :: u32(0x001)
 ICANON :: u32(0x002)
 ECHO :: u32(0x008)
@@ -138,6 +139,23 @@ slave_set_raw :: proc(slave: linux.Fd) -> bool {
 	return termios_set(slave, &tio) == .NONE
 }
 
+// slave_set_terminal applies the interactive-terminal line discipline: cooked
+// input (echo, canonical input, control-character signals) and output
+// post-processing on (ONLCR translates the child's '\n' to "\r\n"). The tty
+// echoes each keystroke back to the master, so a plain shell (sh/dash) shows
+// typed text immediately; a line editor (readline) switches the slave to raw
+// mode itself while it reads.
+slave_set_terminal :: proc(slave: linux.Fd) -> bool {
+	tio := Termios{}
+	if errno := termios_get(slave, &tio); errno != .NONE {
+		return false
+	}
+	tio.iflag |= ICRNL
+	tio.oflag |= OPOST | ONLCR
+	tio.lflag |= ISIG | ICANON | ECHO | ECHONL | IEXTEN
+	return termios_set(slave, &tio) == .NONE
+}
+
 pty_set_winsize :: proc(master: linux.Fd, size: Winsize) -> linux.Errno {
 	raw := Winsize_Raw{row = size.rows, col = size.cols}
 	_, errno := ioctl_checked(master, TIOCSWINSZ, uintptr(&raw))
@@ -224,6 +242,10 @@ platform_pty_spawn :: proc(desc: Description, options: Pty_Options, allocator :=
 	case .Raw:
 		if !slave_set_raw(slave) {
 			return {}, errs.new(.IO, "process: cannot apply raw termios to pty slave", allocator = allocator)
+		}
+	case .Cooked:
+		if !slave_set_terminal(slave) {
+			return {}, errs.new(.IO, "process: cannot apply terminal termios to pty slave", allocator = allocator)
 		}
 	case .Sane:
 		if !slave_set_echo_off(slave) {

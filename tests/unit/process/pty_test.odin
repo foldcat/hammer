@@ -109,6 +109,29 @@ test_pty_sane_mode_echo_off_and_onlcr :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_pty_cooked_mode_echoes_input :: proc(t: ^testing.T) {
+	// Cooked mode (the interactive terminal): the tty echoes the parent's
+	// write back to the master, so a plain shell shows typed text. "ping"
+	// must appear twice — once from the tty echo, once from the helper's
+	// "echo:ping" reply — proving the input was echoed and then delivered.
+	pty, spawn_err := process.pty_spawn({command = {HELPER, "pty"}}, {termios = .Cooked}, context.allocator)
+	if !expect_ok(t, spawn_err) {
+		return
+	}
+	defer cleanup_pty(t, &pty)
+	_, _, write_err := process.pty_write(&pty, transmute([]byte)string("ping\n"), context.allocator)
+	expect_ok(t, write_err)
+	output := pty_read_all(t, &pty)
+	defer delete(output, context.allocator)
+	testing.expectf(
+		t,
+		strings.count(string(output), "ping") == 2,
+		"expected the tty to echo 'ping' once and the helper once; output %q",
+		string(output),
+	)
+}
+
+@(test)
 test_pty_initial_window_size :: proc(t: ^testing.T) {
 	pty, spawn_err := process.pty_spawn(
 		{command = {HELPER, "size"}},

@@ -5,6 +5,7 @@ import "core:log"
 import "core:strings"
 
 import command "core/command"
+import console "core/console"
 import errs "core/errs"
 import input "core/input"
 import process "core/process"
@@ -12,20 +13,29 @@ import rope "core/rope"
 import txn "core/txn"
 import view "core/view"
 
-// Terminal window (SPECS §12.5 model B, first cut — M10.06 slice 2).
+// Terminal window (SPECS §12.5 model B — M10.06 slice 2 / M10.07).
 //
 // `Win` opens a PTY-backed shell in a dedicated buffer. The child's output is
-// read from the PTY master, decoded through the console stream (ANSI consumed,
-// CR/backspace/erase progress collapsed), and appended to the buffer's rope via
-// the same bounded Output_Buffer used by job output windows. Typed input is
-// forwarded to the PTY as raw bytes. This is a line-oriented terminal: cursor
-// addressing, the alternate screen, resize, and raw input are M10.07.
+// read from the PTY master and decoded through a terminal grid (the model-B
+// console.Grid_Stream), which tracks cursor addressing, CR/backspace/erase
+// progress, and scrolling; the grid is drained into the buffer's document so
+// the visible screen — including a partial prompt line and echoed keystrokes —
+// updates in place each frame. Typed input is forwarded to the PTY as raw
+// bytes. The PTY slave runs in the cooked line discipline (echo on, output
+// post-processing on), so the tty echoes each keystroke for a plain shell
+// while a line editor (readline) switches the slave to raw mode itself.
+//
+// Alternate screen, resize (SIGWINCH), and per-run color rendering are still
+// deferred (M10.08).
 
 TERMINAL_READ_BYTES :: 4096
+TERMINAL_COLS :: 80
+TERMINAL_ROWS :: 24
 
 Editor_Terminal :: struct {
 	pty:         process.Pty,
-	output:      process.Output_Buffer,
+	grid:        console.Grid_Stream,
+	render:      [dynamic]byte, // scratch for building the transcript text
 	read_buffer: [TERMINAL_READ_BYTES]u8,
 	live:        bool, // child has not been reaped
 	eof:         bool, // master read reached end-of-stream
@@ -61,12 +71,16 @@ editor_command_win :: proc(cmd_context: ^command.Context, invocation: command.In
 }
 
 // editor_alloc_terminal_buffer spawns an interactive shell on a PTY and returns
-// a fresh .Terminal buffer whose document receives the decoded output.
+// a fresh .Terminal buffer whose document receives the grid transcript.
 editor_alloc_terminal_buffer :: proc(shell: string) -> (^Editor_Buffer, errs.Error) {
 	if editor.next_buffer_id == 0 {
 		return nil, errs.new(.Resource_Limit, "file: buffer ID space exhausted", allocator = permanent())
 	}
-	pty, spawn_err := process.pty_spawn({command = {shell}}, {}, permanent())
+	pty, spawn_err := process.pty_spawn(
+		{command = {shell}},
+		{termios = .Cooked, size = {cols = TERMINAL_COLS, rows = TERMINAL_ROWS}},
+		permanent(),
+	)
 	if !errs.ok(spawn_err) {
 		return nil, spawn_err
 	}
@@ -82,15 +96,17 @@ editor_alloc_terminal_buffer :: proc(shell: string) -> (^Editor_Buffer, errs.Err
 			editor_terminal_stop_destroy(&pty)
 			return nil, err
 		}
-		if err := process.output_init(&buffer.terminal.output, &buffer.doc, {}, permanent()); !errs.ok(err) {
+		if err := console.grid_stream_init(&buffer.terminal.grid, TERMINAL_ROWS, TERMINAL_COLS, 0, permanent()); !errs.ok(err) {
 			txn.doc_destroy(&buffer.doc)
 			buffer^ = {}
 			editor_terminal_stop_destroy(&pty)
 			return nil, err
 		}
+		buffer.terminal.render = make([dynamic]byte, permanent())
 		name, clone_err := strings.clone(shell, permanent())
 		if clone_err != nil {
-			process.output_destroy(&buffer.terminal.output)
+			delete(buffer.terminal.render)
+			console.grid_stream_destroy(&buffer.terminal.grid)
 			txn.doc_destroy(&buffer.doc)
 			buffer^ = {}
 			editor_terminal_stop_destroy(&pty)
@@ -126,15 +142,16 @@ editor_terminal_stop_destroy :: proc(pty: ^process.Pty) {
 	}
 }
 
-// editor_terminal_destroy releases the PTY and output buffer of a terminal
-// buffer. Called from editor_destroy_buffer.
+// editor_terminal_destroy releases the PTY, grid, and render scratch of a
+// terminal buffer. Called from editor_destroy_buffer.
 editor_terminal_destroy :: proc(buffer: ^Editor_Buffer) {
 	t := &buffer.terminal
 	if !t.done {
 		editor_terminal_stop_destroy(&t.pty)
 		t.done = true
 	}
-	process.output_destroy(&t.output)
+	delete(t.render)
+	console.grid_stream_destroy(&t.grid)
 }
 
 // editor_poll_terminals drains PTY output and finalizes exited terminals. It is
@@ -154,7 +171,7 @@ editor_poll_terminal :: proc(buffer: ^Editor_Buffer) {
 	if t.done {
 		return
 	}
-	// Drain available output into the buffer document.
+	// Drain available output into the terminal grid.
 	if t.pty.master.open {
 		for {
 			count, status, read_err := process.pty_read(&t.pty, t.read_buffer[:], permanent())
@@ -163,12 +180,8 @@ editor_poll_terminal :: proc(buffer: ^Editor_Buffer) {
 				break
 			}
 			if status == .Data && count > 0 {
-				was_dirty, follow := editor_terminal_output_snapshot(buffer)
-				append_err := process.output_append(&t.output, t.read_buffer[:count])
-				editor_terminal_output_apply(buffer, was_dirty, follow)
-				if !errs.ok(append_err) {
-					editor_report(append_err)
-					break
+				if feed_err := console.grid_stream_feed(&t.grid, t.read_buffer[:count]); !errs.ok(feed_err) {
+					editor_report(feed_err)
 				}
 				continue
 			}
@@ -178,6 +191,7 @@ editor_poll_terminal :: proc(buffer: ^Editor_Buffer) {
 			break
 		}
 	}
+	editor_terminal_sync(buffer)
 	// Reap the child without blocking.
 	if t.live {
 		status, exited, wait_err := process.pty_try_wait(&t.pty, permanent())
@@ -198,18 +212,12 @@ editor_poll_terminal :: proc(buffer: ^Editor_Buffer) {
 editor_terminal_finalize :: proc(buffer: ^Editor_Buffer) {
 	t := &buffer.terminal
 	t.done = true
-	was_dirty, follow := editor_terminal_output_snapshot(buffer)
-	if finish_err := process.output_finish(&t.output); !errs.ok(finish_err) {
-		editor_report(finish_err)
-	}
-	editor_terminal_output_apply(buffer, was_dirty, follow)
+	editor_terminal_sync(buffer)
 
-	marker := fmt.aprintf("[exited: %d]\n", t.status.code, allocator = context.temp_allocator)
+	marker := fmt.aprintf("\r\n[exited: %d]\r\n", t.status.code, allocator = context.temp_allocator)
 	defer delete(marker, context.temp_allocator)
-	if append_err := process.output_append(&t.output, transmute([]byte)marker); !errs.ok(append_err) {
-		editor_report(append_err)
-	}
-	editor_terminal_output_apply(buffer, was_dirty, follow)
+	console.grid_stream_feed(&t.grid, transmute([]byte)marker)
+	editor_terminal_sync(buffer)
 
 	if destroy_err := process.pty_destroy(&t.pty, permanent()); !errs.ok(destroy_err) {
 		editor_report(destroy_err)
@@ -224,37 +232,76 @@ editor_terminal_finalize :: proc(buffer: ^Editor_Buffer) {
 	)
 }
 
-editor_terminal_output_snapshot :: proc(buffer: ^Editor_Buffer) -> (was_dirty, follow: bool) {
-	was_dirty = txn.doc_revision(&buffer.doc) != buffer.saved_revision
+// editor_terminal_sync drains the terminal grid into the buffer document when
+// it changed, replacing the transcript and following the tail if the view was
+// already at the end.
+editor_terminal_sync :: proc(buffer: ^Editor_Buffer) {
+	t := &buffer.terminal
+	if !console.grid_dirty(&t.grid.grid) {
+		return
+	}
+	console.grid_clear_dirty(&t.grid.grid)
+
 	item := editor_first_view_for_buffer(buffer.id)
+	follow := false
 	if item != nil {
 		end := rope.tree_byte_count(&buffer.doc.tree)
 		follow = item.selection.anchor == end && item.selection.active == end
 	}
-	return
-}
 
-editor_terminal_output_apply :: proc(buffer: ^Editor_Buffer, was_dirty, follow: bool) {
-	t := &buffer.terminal
-	if !t.output.has_update {
+	resize(&t.render, 0)
+	console.grid_append_text(&t.grid.grid, &t.render)
+
+	doc := &buffer.doc
+	total := rope.tree_byte_count(&doc.tree)
+	transaction := txn.Transaction{
+		source = .Command_Output,
+		base_revision = txn.doc_revision(doc),
+		ops = []txn.Operation{txn.Replace{range = {0, total}, data = t.render[:]}},
+		after_selection = {anchor = len(t.render), active = len(t.render), affinity = .Left},
+	}
+	if err := txn.doc_apply(doc, &transaction, permanent()); !errs.ok(err) {
+		editor_report(err)
 		return
 	}
-	update := &t.output.update
-	item := editor_first_view_for_buffer(buffer.id)
-	if item == nil {
-		return
-	}
-	view.transform_after_edit(&editor.views, 0, buffer.id, update.transaction.ops, update.end)
-	if follow {
-		item.selection = update.transaction.after_selection
-	}
-	if update.trimmed > 0 {
-		line_count := rope.tree_line_count(&buffer.doc.tree)
+	txn.doc_collapse_history(doc)
+
+	if item != nil {
+		new_end := rope.tree_byte_count(&doc.tree)
+		if follow {
+			item.selection = {anchor = new_end, active = new_end, affinity = .Left}
+			editor_terminal_reveal_tail(item, doc)
+		} else {
+			item.selection.anchor = clamp(item.selection.anchor, 0, new_end)
+			item.selection.active = clamp(item.selection.active, 0, new_end)
+		}
+		line_count := rope.tree_line_count(&doc.tree)
 		item.first_line = clamp(item.first_line, 0, rope.Line_Index(max(0, line_count - 1)))
 	}
-	if !was_dirty {
-		buffer.saved_revision = txn.doc_revision(&buffer.doc)
+}
+
+// editor_terminal_reveal_tail scrolls the view so the last line (the shell's
+// current line, where typing happens) is visible at the bottom. Called only
+// when the view was already following the tail, so a user scrolled up to read
+// earlier output is not yanked back down.
+editor_terminal_reveal_tail :: proc(item: ^view.View, doc: ^txn.Doc) {
+	if item == nil || doc == nil {
+		return
 	}
+	geometry, _, ok := current_layout()
+	if !ok {
+		return
+	}
+	win, found := window_for_id(&geometry, item.window_id)
+	if !found {
+		return
+	}
+	_, _, text := editor_body_parts(item, doc, win.body)
+	visible := editor_visible_rows(text)
+	line_count := rope.tree_line_count(&doc.tree)
+	item.first_line = rope.Line_Index(max(0, line_count - visible))
+	item.first_row = 0
+	item.wheel_remainder = 0
 }
 
 // editor_active_terminal reports whether the active body is a live terminal.
