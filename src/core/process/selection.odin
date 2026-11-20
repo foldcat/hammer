@@ -30,6 +30,11 @@ Selection_Target :: struct {
 
 Selection_Pipe_Options :: struct {
 	output_bytes: int,
+	// empty_input closes stdin without feeding the selection. Used by the
+	// `<command` routing, which replaces the selection with command output
+	// while providing no input. The target range is still captured for the
+	// replacement and its stale-target validation.
+	empty_input:  bool,
 }
 
 // Selection_Pipe owns independent selection input and fixed-capacity stdout
@@ -75,12 +80,16 @@ selection_pipe_init :: proc(
 		return errs.newf(.Resource_Limit, "process: selection pipe output exceeds the %d-byte budget", MAX_SELECTION_OUTPUT_BYTES, allocator = allocator)
 	}
 	range := rope.Byte_Range{min(selection.anchor, selection.active), max(selection.anchor, selection.active)}
-	if range.end - range.start > MAX_SELECTION_INPUT_BYTES {
-		return errs.newf(.Resource_Limit, "process: selection pipe input exceeds the %d-byte budget", MAX_SELECTION_INPUT_BYTES, allocator = allocator)
-	}
-	input, read_err := rope.tree_read_all(&doc.tree, range, allocator)
-	if !errs.ok(read_err) {
-		return read_err
+	input: []byte
+	if !resolved.empty_input {
+		if range.end - range.start > MAX_SELECTION_INPUT_BYTES {
+			return errs.newf(.Resource_Limit, "process: selection pipe input exceeds the %d-byte budget", MAX_SELECTION_INPUT_BYTES, allocator = allocator)
+		}
+		read, read_err := rope.tree_read_all(&doc.tree, range, allocator)
+		if !errs.ok(read_err) {
+			return read_err
+		}
+		input = read
 	}
 	output, alloc_err := make([]byte, resolved.output_bytes, allocator)
 	if alloc_err != nil {

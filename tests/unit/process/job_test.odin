@@ -199,3 +199,13 @@ test_job_context_discard_runs_and_drains_without_output :: proc(t: ^testing.T) {
 	testing.expect(t, string(stderr[:]) == "stderr=\n")
 	expect_ok(t, process.job_release(&service, id))
 }
+
+@(test)
+test_job_state_names :: proc(t: ^testing.T) {
+	testing.expect(t, process.job_state_name(.Queued) == "queued")
+	testing.expect(t, process.job_state_name(.Starting) == "starting")
+	testing.expect(t, process.job_state_name(.Running) == "running")
+	testing.expect(t, process.job_state_name(.CancelRequested) == "stopping")
+	testing.expect(t, process.job_state_name(.Exited) == "exited")
+	testing.expect(t, process.job_state_name(.FailedToStart) == "failed")
+}

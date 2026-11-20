@@ -348,3 +348,24 @@ test_rejects_invalid_font_fields :: proc(t: ^testing.T) {
 	expect_fail(t, "tag_font_families: [\"\"]\n", "invalid input")
 	expect_fail(t, "console_font_families: [42]\n", "invalid input")
 }
+
+@(test)
+test_shell_config_and_validation :: proc(t: ^testing.T) {
+	// Shell is empty by default: external commands use direct exec.
+	builtin, builtin_err := config.builtin()
+	defer config.resolved_destroy(&builtin)
+	testing.expect(t, errs.ok(builtin_err))
+	testing.expect(t, builtin.Shell == "")
+
+	// An explicit shell is the trust-gate opt-in.
+	r, err := config.resolve_from_yaml("shell: \"/bin/sh\"\n")
+	defer config.resolved_destroy(&r)
+	testing.expect(t, errs.ok(err))
+	testing.expect(t, r.Shell == "/bin/sh")
+
+	src := config.generate_source(r)
+	defer delete(src)
+	testing.expect(t, strings.contains(src, `Shell                 = "/bin/sh"`))
+
+	expect_fail(t, "shell: 42\n", "invalid input")
+}

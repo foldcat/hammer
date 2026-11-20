@@ -20,6 +20,24 @@ Job_State :: enum u8 {
 	FailedToStart,
 }
 
+job_state_name :: proc(state: Job_State) -> string {
+	switch state {
+	case .Queued:
+		return "queued"
+	case .Starting:
+		return "starting"
+	case .Running:
+		return "running"
+	case .CancelRequested:
+		return "stopping"
+	case .Exited:
+		return "exited"
+	case .FailedToStart:
+		return "failed"
+	}
+	return "unknown"
+}
+
 Job :: struct {
 	id:              Job_ID,
 	attachment:      u64,

@@ -56,6 +56,11 @@ Config :: struct {
 	Ligatures:            bool,
 	Autopair:             Maybe(bool),
 	Wrap_Mode:            Wrap_Mode,
+	// Shell is the optional shell executable used to run `>`, `<`, `|`, and
+	// plain external commands (SPECS.md §12.2). Empty means the platform
+	// default (`sh` on Unix, `cmd.exe` on Windows). External commands always
+	// run through a shell; the user typed the command and chose to run it.
+	Shell:                string,
 	Theme:                Theme,
 }
 
@@ -72,6 +77,7 @@ Resolved :: struct {
 	Ligatures:             bool,
 	Autopair:              bool,
 	Wrap_Mode:             Wrap_Mode,
+	Shell:                 string,
 	Theme:                 Theme,
 	Source:                Source, // where the config came from
 }
@@ -103,11 +109,12 @@ MAX_LINE_HEIGHT :: 3.0
 MAX_FONT_FAMILIES :: 4
 MAX_FONT_FAMILY_LEN :: 64
 MAX_FONT_PATH_LEN :: 4096
+MAX_SHELL_LEN :: 4096
 
 // SCHEMA_VERSION is bumped whenever the generated-package shape
 // changes. The generated file carries the version it was staged with
 // and fails to compile against a mismatching schema.
-SCHEMA_VERSION :: 4
+SCHEMA_VERSION :: 5
 
 // parse_hex_color converts "#RRGGBB" into a [4]f32 RGBA color (alpha
 // forced to 1). Returns `.Invalid_Input` on a malformed string.
@@ -183,6 +190,12 @@ validate :: proc(c: Config) -> errs.Error {
 		return errs.newf(.Invalid_Input, "config: font_path is longer than %d bytes", MAX_FONT_PATH_LEN)
 	}
 	if err := validate_staged_string(c.Font_Path, "font_path"); !errs.ok(err) {
+		return err
+	}
+	if len(c.Shell) > MAX_SHELL_LEN {
+		return errs.newf(.Invalid_Input, "config: shell is longer than %d bytes", MAX_SHELL_LEN)
+	}
+	if err := validate_staged_string(c.Shell, "shell"); !errs.ok(err) {
 		return err
 	}
 	if c.Font_Size_Points != 0 {

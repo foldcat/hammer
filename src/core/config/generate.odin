@@ -88,6 +88,7 @@ resolved :: config.Resolved {{
     Ligatures             = %v,
     Autopair              = %v,
     Wrap_Mode             = %s,
+    Shell                 = "%s",
     Theme            = config.Theme{{
         Body_Bg      = [4]f32 {{%v, %v, %v, %v}},
         Body_Fg      = [4]f32 {{%v, %v, %v, %v}},
@@ -115,6 +116,7 @@ resolved :: config.Resolved {{
 		r.Ligatures,
 		r.Autopair,
 		wrap_kind,
+		r.Shell,
 		t.Body_Bg[0], t.Body_Bg[1], t.Body_Bg[2], t.Body_Bg[3],
 		t.Body_Fg[0], t.Body_Fg[1], t.Body_Fg[2], t.Body_Fg[3],
 		t.Tag_Bg[0], t.Tag_Bg[1], t.Tag_Bg[2], t.Tag_Bg[3],

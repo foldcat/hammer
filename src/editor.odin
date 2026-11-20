@@ -41,6 +41,7 @@ Buffer_Kind :: enum u8 {
 	Errors,
 	Job_Output,
 	Commands,
+	Jobs,
 }
 
 Editor_Buffer :: struct {
@@ -803,7 +804,7 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 	if buffer == nil {
 		return errs.new(.Internal, "get: window has no buffer", allocator = permanent())
 	}
-	if buffer.kind == .Errors || buffer.kind == .Job_Output || buffer.kind == .Commands {
+	if buffer.kind == .Errors || buffer.kind == .Job_Output || buffer.kind == .Commands || buffer.kind == .Jobs {
 		return errs.new(.Unsupported, "get: output windows cannot be reloaded", allocator = permanent())
 	}
 
@@ -1124,8 +1125,20 @@ editor_error_buffer :: proc() -> ^Editor_Buffer {
 editor_append_error :: proc(message: string) -> errs.Error {
 	line := fmt.aprintf("%s\n", message, allocator = context.temp_allocator)
 	defer delete(line, context.temp_allocator)
-	if len(line) > MAX_ERROR_WINDOW_BYTES {
-		return errs.newf(.Resource_Limit, "errors: message exceeds the %d-byte window limit", MAX_ERROR_WINDOW_BYTES, allocator = context.temp_allocator)
+	return editor_append_error_bytes(transmute([]byte)line)
+}
+
+// editor_append_error_bytes appends raw bytes to the +Errors buffer, creating
+// it if needed, and truncates oversized input to the window budget. It is the
+// single path used for both error messages and synchronous command output.
+editor_append_error_bytes :: proc(data: []byte) -> errs.Error {
+	if len(data) == 0 {
+		return {}
+	}
+	payload := data
+	if len(payload) > MAX_ERROR_WINDOW_BYTES {
+		log.warnf("errors: truncating %d bytes of output", len(payload) - MAX_ERROR_WINDOW_BYTES)
+		payload = payload[:MAX_ERROR_WINDOW_BYTES]
 	}
 	if buffer := editor_error_buffer(); buffer != nil {
 		item := editor_first_view_for_buffer(buffer.id)
@@ -1133,13 +1146,18 @@ editor_append_error :: proc(message: string) -> errs.Error {
 			return errs.new(.Internal, "errors: buffer has no view", allocator = context.temp_allocator)
 		}
 		start := rope.tree_byte_count(&buffer.doc.tree)
-		if len(line) > MAX_ERROR_WINDOW_BYTES - start {
-			return errs.newf(.Resource_Limit, "errors: window exceeds the %d-byte limit", MAX_ERROR_WINDOW_BYTES, allocator = context.temp_allocator)
+		budget := MAX_ERROR_WINDOW_BYTES - start
+		if budget <= 0 {
+			return errs.newf(.Resource_Limit, "errors: window is full (limit %d bytes)", MAX_ERROR_WINDOW_BYTES, allocator = context.temp_allocator)
+		}
+		if len(payload) > budget {
+			log.warnf("errors: truncating %d bytes of output", len(payload) - budget)
+			payload = payload[:budget]
 		}
 		was_dirty := txn.doc_revision(&buffer.doc) != buffer.saved_revision
-		end := start + len(line)
+		end := start + len(payload)
 		selection := txn.Selection{anchor = end, active = end, affinity = .Left}
-		ops := []txn.Operation{txn.Insert{pos = start, data = transmute([]byte)line}}
+		ops := []txn.Operation{txn.Insert{pos = start, data = payload}}
 		transaction := txn.Transaction {
 			source = .Command_Output,
 			base_revision = txn.doc_revision(&buffer.doc),
@@ -1154,13 +1172,13 @@ editor_append_error :: proc(message: string) -> errs.Error {
 		if !was_dirty {
 			buffer.saved_revision = txn.doc_revision(&buffer.doc)
 		}
-		log.infof("errors: appended window=%d buffer=%d bytes=%d", u64(item.window_id), u64(buffer.id), end)
+		log.infof("errors: appended window=%d buffer=%d bytes=%d", u64(item.window_id), u64(buffer.id), len(payload))
 		return {}
 	}
 	if editor.workspace.column_count == 0 {
 		return errs.new(.NotFound, "errors: no column is available", allocator = context.temp_allocator)
 	}
-	buffer, alloc_err := editor_alloc_buffer_content("", transmute([]byte)line, .Errors)
+	buffer, alloc_err := editor_alloc_buffer_content("", payload, .Errors)
 	if !errs.ok(alloc_err) {
 		return alloc_err
 	}
@@ -1169,7 +1187,7 @@ editor_append_error :: proc(message: string) -> errs.Error {
 	if !errs.ok(open_err) {
 		return open_err
 	}
-	log.infof("errors: opened window=%d buffer=%d bytes=%d", u64(item.window_id), u64(buffer.id), len(line))
+	log.infof("errors: opened window=%d buffer=%d bytes=%d", u64(item.window_id), u64(buffer.id), len(payload))
 	return {}
 }
 

@@ -148,6 +148,8 @@ editor_window_generated :: proc(item: ^view.View) -> string {
 			name = buffer.job_name
 		case .Commands:
 			name = "+Commands"
+		case .Jobs:
+			name = "+Jobs"
 		case .Directory:
 			if buffer.path != "" {
 				name = buffer.path

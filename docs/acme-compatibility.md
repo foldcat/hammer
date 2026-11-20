@@ -63,9 +63,10 @@ Acme behavior, not an implementation to copy mechanically.
   replacement and blocks dirty data loss; Delcol validates all buffers before
   removing any view; Putall saves each dirty named regular-file buffer once.
   A bounded parser and exact-name registry dispatch commands with revalidated
-  source and argument snapshots; unknown text never falls through to a shell.
-  `builtin-test` covers the window/file commands, while `compatibility-test`
-  exercises their neighbors in integrated window workflows.
+  source and argument snapshots; a command that matches no built-in or named
+  filter runs directly in the shell. `builtin-test` covers the window/file
+  commands, while `compatibility-test` exercises their neighbors in integrated
+  window workflows.
 
 ## Intentional modernization
 
@@ -92,15 +93,21 @@ Acme behavior, not an implementation to copy mechanically.
   `Cmd`/`Cmds` enumerates metadata and PATH availability without execution;
   project definitions load only after explicit `Cmds project` trust. Covered by
   command unit tests and the `builtin-test` discovery scenario.
+- `>`, `<`, and `|` prefix commands and plain unknown commands run through the
+  configured shell (default `sh`/`cmd.exe`), synchronously by default with
+  output appended to a single `+Errors` buffer; `Async <cmd>` runs through the
+  job service instead. There is no shell trust gate: the user typed the command
+  and chose to run it. Covered by `builtin-test` external-command scenarios.
+- `Jobs` lists running async jobs in a `+Jobs` buffer and `Kill <id>` stops one
+  by id (or by a button-1 chord selection). Covered by `builtin-test`.
 
 ## Unsupported or deferred behavior
 
-- Additional internal command coverage, the remaining Acme Edit commands,
-  product Look address integration, external command execution, and asynchronous
-  command output belong to M08/M09. Edit loops, display/file commands, pipes,
-  and other coverage beyond the implemented primitives and `s` remain deferred.
-  Other unregistered command names are not claimed as working merely because
-  they are recognized or visible in tags.
+- Additional internal command coverage, the remaining Acme Edit commands, and
+  product Look address integration remain deferred. Edit loops and
+  display/file commands beyond the implemented primitives and `s` remain
+  deferred. Other unregistered command names are not claimed as working merely
+  because they are recognized or visible in tags.
 - Per-view gutter toggles are represented in core state; no product command for
   changing them at runtime currently exists.
 - Persistent layout restoration, filesystem projection, local IPC automation,

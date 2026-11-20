@@ -3,10 +3,15 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:strconv"
+import "core:strings"
 
+import command "core/command"
+import editing "core/editing"
 import errs "core/errs"
 import layout "core/layout"
 import lifecycle "core/lifecycle"
+import mouse "core/mouse"
 import process "core/process"
 import rope "core/rope"
 import txn "core/txn"
@@ -414,5 +419,105 @@ editor_start_selection_test_job :: proc(helper: string) -> errs.Error {
 		return errs.new(.Internal, "job: selection test helper did not start", allocator = permanent())
 	}
 	log.infof("job: selection test helper started id=%d process=%d bytes=%d", u64(id), u64(job.handle.id), len(job.input))
+	return {}
+}
+
+// editor_jobs_report renders one line per running job. The result is owned by
+// the caller (allocated with context.temp_allocator); free it with delete.
+editor_jobs_report :: proc() -> string {
+	result := make([dynamic]byte, context.temp_allocator)
+	count := 0
+	for &job in editor.jobs.jobs {
+		if job.id == 0 || !process.job_active(&job) {
+			continue
+		}
+		count += 1
+		line := fmt.aprintf(
+			"id=%d state=%s command=%s\n",
+			u64(job.id),
+			process.job_state_name(job.state),
+			job.command,
+			allocator = context.temp_allocator,
+		)
+		if line == "" {
+			delete(result)
+			return ""
+		}
+		append(&result, ..transmute([]byte)line)
+		delete(line, context.temp_allocator)
+	}
+	if count == 0 {
+		line := fmt.aprintf("no running jobs\n", allocator = context.temp_allocator)
+		if line == "" {
+			delete(result)
+			return ""
+		}
+		append(&result, ..transmute([]byte)line)
+		delete(line, context.temp_allocator)
+	}
+	return string(result[:])
+}
+
+// editor_command_jobs opens a +Jobs buffer listing running jobs.
+editor_command_jobs :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	if invocation.argument != "" {
+		return errs.new(.Invalid_Input, "job: Jobs takes no arguments", allocator = permanent())
+	}
+	if editor.workspace.column_count == 0 {
+		return errs.new(.NotFound, "job: no column is available for the job list", allocator = permanent())
+	}
+	report := editor_jobs_report()
+	defer delete(report, context.temp_allocator)
+	buffer, alloc_err := editor_alloc_buffer_content("", transmute([]byte)report, .Jobs)
+	if !errs.ok(alloc_err) {
+		return alloc_err
+	}
+	column_id := editor.workspace.columns[editor.workspace.column_count - 1].id
+	item, open_err := editor_open_buffer_in_column(buffer, column_id)
+	if !errs.ok(open_err) {
+		return open_err
+	}
+	log.infof(
+		"job: listed %d running job(s) in window %d",
+		process.job_service_active_count(&editor.jobs),
+		u64(item.window_id),
+	)
+	return {}
+}
+
+// editor_command_kill stops the running job named by `Kill <id>`, or by the
+// button-1 chord selection when no argument is given.
+editor_command_kill :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	id_text := strings.trim_space(invocation.argument)
+	owned: []byte
+	if id_text == "" && cmd_context.argument_chord {
+		if selected, ok := editor_command_argument_target(&cmd_context.argument); ok {
+			range := editing.selection_range(selected.selection^)
+			data, read_err := mouse.read_action_text(selected.doc, range, context.temp_allocator)
+			if !errs.ok(read_err) {
+				return read_err
+			}
+			owned = data
+			id_text = strings.trim_space(string(data))
+		}
+	}
+	defer if owned != nil {
+		delete(owned, context.temp_allocator)
+	}
+	if id_text == "" {
+		return errs.new(.Invalid_Input, "job: Kill requires a numeric job id (Kill <id>)", allocator = permanent())
+	}
+	id, ok := strconv.parse_u64(id_text, 10)
+	if !ok {
+		return errs.newf(.Invalid_Input, "job: %q is not a job id", id_text, allocator = permanent())
+	}
+	stopped, stop_err := process.job_stop(&editor.jobs, process.Job_ID(id), mouse_now_ms())
+	if !errs.ok(stop_err) {
+		return stop_err
+	}
+	if !stopped {
+		return errs.newf(.NotFound, "job: no running job with id %d", id, allocator = permanent())
+	}
+	log.infof("job: Kill requested for id=%d", id)
 	return {}
 }

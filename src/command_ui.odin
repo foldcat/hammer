@@ -35,6 +35,8 @@ EDITOR_COMMANDS :: []command.Entry {
 	{name = "Snarf", handler = editor_command_snarf},
 	{name = "Wait", handler = editor_command_wait},
 	{name = "Stop", handler = editor_command_stop},
+	{name = "Jobs", handler = editor_command_jobs},
+	{name = "Kill", handler = editor_command_kill},
 	{name = "Paste", handler = editor_command_paste},
 	{name = "Look", handler = editor_command_look},
 }
@@ -120,10 +122,33 @@ editor_execute_mouse :: proc(action: mouse.Execute) {
 		return
 	}
 	defer delete(data, context.temp_allocator)
-	if strings.trim_space(string(data)) == "" {
+	command_text := strings.trim_space(string(data))
+	if command_text == "" {
 		return
 	}
-	invocation, parse_err := command.parse(string(data), context.temp_allocator)
+
+	// `Async <cmd>` runs the external command through the job service instead
+	// of blocking the editor. Async is only meaningful for external commands;
+	// built-ins and filters ignore it.
+	async := false
+	if strings.has_prefix(command_text, "Async") {
+		rest := command_text[len("Async"):]
+		if rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r' || rest[0] == '\n' {
+			async = true
+			command_text = strings.trim_space(rest)
+			if command_text == "" {
+				editor_report(errs.new(.Invalid_Input, "command: Async requires a command to run", allocator = permanent()))
+				return
+			}
+		}
+	}
+
+	if routing, pipe_text, is_pipe := command.pipe_parse(command_text); is_pipe {
+		editor_execute_external(target, range, routing, pipe_text, async)
+		return
+	}
+
+	invocation, parse_err := command.parse(command_text, context.temp_allocator)
 	if !errs.ok(parse_err) {
 		editor_report(parse_err)
 		return
@@ -138,7 +163,8 @@ editor_execute_mouse :: proc(action: mouse.Execute) {
 		errs.destroy(&dispatch_err)
 		filter_handled, filter_err := editor_invoke_filter(&cmd_context, invocation)
 		if !filter_handled {
-			log.warnf("mouse: command %q was not executed; no handler is registered", invocation.name)
+			// Unknown command: run it directly in the shell.
+			editor_execute_external(target, range, .Plain, command_text, async)
 			return
 		}
 		editor_report(filter_err)

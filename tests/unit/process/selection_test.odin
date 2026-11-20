@@ -308,3 +308,31 @@ test_selection_pipe_validates_identity_selection_and_budget :: proc(t: ^testing.
 	expect_kind(t, identity_err, .Conflict)
 	testing.expect(t, txn.doc_revision(&doc) == 0 && pipe.state == .Conflict)
 }
+
+@(test)
+test_selection_pipe_empty_input_replaces_without_stdin :: proc(t: ^testing.T) {
+	source: txn.Doc
+	expect_ok(t, txn.doc_init_from_bytes(&source, transmute([]byte)string("alpha beta\n"), {}, context.allocator))
+	defer txn.doc_destroy(&source)
+	diagnostics_doc: txn.Doc
+	expect_ok(t, txn.doc_init(&diagnostics_doc, {}, context.allocator))
+	defer txn.doc_destroy(&diagnostics_doc)
+	diagnostics: process.Output_Buffer
+	expect_ok(t, process.output_init(&diagnostics, &diagnostics_doc, {batch_bytes = 8, scrollback_bytes = 128}, context.allocator))
+	defer process.output_destroy(&diagnostics)
+	service: process.Job_Service
+	process.job_service_init(&service, {pump = {record_capacity = 4, chunk_bytes = 5}}, context.allocator)
+	defer expect_ok(t, process.job_service_destroy(&service))
+	selection := txn.Selection{anchor = 0, active = 11, affinity = .Right}
+	id, start_err := process.job_start_selection(&service, {command = {HELPER, "echo"}}, &source, selection, 51, 52, 53, {empty_input = true})
+	expect_ok(t, start_err)
+	job := process.job_find(&service, id)
+	testing.expect(t, job != nil && job.has_selection_pipe && len(job.input) == 0)
+	expect_ok(t, drive_selection_job(t, &service, id, &diagnostics))
+	testing.expect(t, job.selection_pipe.state == .Ready)
+	expect_ok(t, process.selection_pipe_apply(&job.selection_pipe, &source, 51, 52, u64(id)))
+	content := selection_test_text(t, &source)
+	defer delete(content, context.allocator)
+	testing.expectf(t, string(content) == "stdout=\n", "replacement %q", string(content))
+	expect_ok(t, process.job_release(&service, id))
+}

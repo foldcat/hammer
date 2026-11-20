@@ -111,6 +111,162 @@ def append_text(x11: X11, window: int, x: int, y: int, text: str) -> None:
     type_text(x11, text)
 
 
+def type_pipe_text(x11: X11, text: str) -> None:
+    """Types text including the pipe routing prefixes that need Shift."""
+    for character in text:
+        if character == "|":
+            x11.key(0xFFE1, True)
+            x11.tap(ord("\\"))
+            x11.key(0xFFE1, False)
+        elif character == "<":
+            x11.key(0xFFE1, True)
+            x11.tap(ord(","))
+            x11.key(0xFFE1, False)
+        elif character == ">":
+            x11.key(0xFFE1, True)
+            x11.tap(ord("."))
+            x11.key(0xFFE1, False)
+        elif character == "_":
+            x11.key(0xFFE1, True)
+            x11.tap(ord("-"))
+            x11.key(0xFFE1, False)
+        elif character.isupper() or character == "!":
+            x11.key(0xFFE1, True)
+            x11.tap(ord(character.lower()))
+            x11.key(0xFFE1, False)
+        else:
+            x11.tap(ord(character))
+
+
+def execute_pipe(x11: X11, window: int, command: str) -> None:
+    """Types and executes a pipe command in the window tag (no log wait)."""
+    click(x11, window, 1, 60, 52)
+    select_all(x11)
+    type_pipe_text(x11, command)
+    select_all(x11)
+    click(x11, window, 2, 60, 52)
+
+
+def run_external_case(
+    args: argparse.Namespace,
+    binary: Path,
+    sandbox: Path,
+    x11: X11,
+    job_helper: Path,
+    command: str,
+    body: str,
+    route_name: str,
+    content: bytes,
+    expect_replace: bool,
+) -> tuple[bytes, str]:
+    """Runs one synchronous external command in a fresh editor and returns the
+    file bytes and the log text."""
+    source = sandbox / f"route-{route_name}.txt"
+    source.write_bytes(content)
+    log_path = sandbox / f"route-{route_name}-hammer.log"
+    environment = os.environ.copy()
+    environment["HAMMER_LOG"] = ""
+    environment["PATH"] = f"{job_helper.parent}{os.pathsep}{environment.get('PATH', '')}"
+    environment["XDG_STATE_HOME"] = str(sandbox / f"route-{route_name}-state")
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                [str(binary), source.name],
+                cwd=sandbox,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+            )
+            window = x11.find_window(args.timeout)
+            x11.lib.XMapRaised(x11.display, window)
+            x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+            x11.lib.XSync(x11.display, 0)
+            time.sleep(0.3)
+            # Select the whole body as the pipe input/target.
+            click(x11, window, 1, 60, 100)
+            select_all(x11)
+            execute_pipe(x11, window, command)
+            wait_for_log(log_path, f'mouse: execute "{body}" routing={route_name} async=false', args.timeout)
+            if expect_replace:
+                wait_for_log(log_path, "shell: selection replaced", args.timeout)
+                execute(x11, window, "Putall", 10, 10, args.timeout, log_path, 1)
+                wait_for_log(log_path, f"file: saved {source.name}", args.timeout)
+            else:
+                wait_for_log(log_path, "errors: opened", args.timeout)
+                if "shell: selection replaced" in log_path.read_text(encoding="utf-8", errors="replace"):
+                    raise HarnessFailure(f"{command!r} replaced the selection instead of writing +Errors")
+            x11.tap(0xFF1B)
+            wait_for_exit(process, args.timeout, log_path)
+            process = None
+            return source.read_bytes(), log_path.read_text(encoding="utf-8", errors="replace")
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+
+
+def run_async_case(
+    args: argparse.Namespace,
+    binary: Path,
+    sandbox: Path,
+    x11: X11,
+    job_helper: Path,
+    command: str,
+    body: str,
+) -> bytes:
+    """Runs one `Async` pipe command in a fresh editor and returns the file bytes."""
+    source = sandbox / "route-async.txt"
+    content = "async α β\n".encode("utf-8")
+    source.write_bytes(content)
+    log_path = sandbox / "route-async-hammer.log"
+    environment = os.environ.copy()
+    environment["HAMMER_LOG"] = ""
+    environment["PATH"] = f"{job_helper.parent}{os.pathsep}{environment.get('PATH', '')}"
+    environment["XDG_STATE_HOME"] = str(sandbox / "route-async-state")
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                [str(binary), source.name],
+                cwd=sandbox,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+            )
+            window = x11.find_window(args.timeout)
+            x11.lib.XMapRaised(x11.display, window)
+            x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+            x11.lib.XSync(x11.display, 0)
+            time.sleep(0.3)
+            click(x11, window, 1, 60, 100)
+            select_all(x11)
+            execute_pipe(x11, window, command)
+            wait_for_log(log_path, f'mouse: execute "{body}" routing=pipe async=true', args.timeout)
+            wait_for_log(log_path, "shell: started async pipe id=", args.timeout)
+            wait_for_log(log_path, "job: selection replaced", args.timeout)
+            execute(x11, window, "Putall", 10, 10, args.timeout, log_path, 1)
+            wait_for_log(log_path, f"file: saved {source.name}", args.timeout)
+            x11.tap(0xFF1B)
+            wait_for_exit(process, args.timeout, log_path)
+            process = None
+            return source.read_bytes()
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
@@ -468,6 +624,82 @@ def main() -> int:
                 x11.tap(0xFF1B)
                 wait_for_exit(process, args.timeout, invoke_log_path)
                 process = None
+
+            # M09.13: external commands run in the shell — synchronously by
+            # default (output to +Errors), `Async <cmd>` for the job service.
+            route_content = "route α β\n".encode("utf-8")
+
+            plain_result, plain_log = run_external_case(args, binary, sandbox, x11, job_helper, f"{job_helper.name} echo", f"{job_helper.name} echo", "plain", route_content, False)
+            if plain_result != route_content:
+                raise HarnessFailure(f"plain command modified the source file: {plain_result!r}")
+            print("PASS: plain command runs synchronously in the shell and writes output to +Errors")
+
+            pipe_result, pipe_log = run_external_case(args, binary, sandbox, x11, job_helper, f"|{job_helper.name} pipe", f"{job_helper.name} pipe", "pipe", route_content, True)
+            if pipe_result != "filtered:route α β\n".encode("utf-8"):
+                raise HarnessFailure(f"| command wrote unexpected bytes: {pipe_result!r}")
+            print("PASS: | pipes the body selection through the shell and replaces it")
+
+            replace_result, _ = run_external_case(args, binary, sandbox, x11, job_helper, f"<{job_helper.name} echo", f"{job_helper.name} echo", "replace", route_content, True)
+            if replace_result != b"stdout=\n":
+                raise HarnessFailure(f"< command wrote unexpected bytes: {replace_result!r}")
+            print("PASS: < replaces the selection with command output over empty stdin")
+
+            feed_result, feed_log = run_external_case(args, binary, sandbox, x11, job_helper, f">{job_helper.name} echo", f"{job_helper.name} echo", "feed", route_content, False)
+            if feed_result != route_content:
+                raise HarnessFailure(f"> command modified the source file: {feed_result!r}")
+            print("PASS: > feeds the selection to +Errors without replacing it")
+
+            for log_text in (plain_log, pipe_log, feed_log):
+                if "pipe: echo" in log_text:
+                    raise HarnessFailure("external command echoed its command text")
+            print("PASS: external commands do not echo their command text")
+
+            async_result = run_async_case(args, binary, sandbox, x11, job_helper, f"Async |{job_helper.name} pipe", f"{job_helper.name} pipe")
+            if async_result != "filtered:async α β\n".encode("utf-8"):
+                raise HarnessFailure(f"Async pipe wrote unexpected bytes: {async_result!r}")
+            print("PASS: Async runs the command through the job service")
+
+            # M09.13: Jobs lists running async commands; Kill stops one by id.
+            jobs_source = sandbox / "jobs.txt"
+            jobs_source.write_bytes(b"jobs\n")
+            jobs_log_path = sandbox / "jobs-hammer.log"
+            jobs_env = os.environ.copy()
+            jobs_env["HAMMER_LOG"] = ""
+            jobs_env["PATH"] = f"{job_helper.parent}{os.pathsep}{jobs_env.get('PATH', '')}"
+            jobs_env["XDG_STATE_HOME"] = str(sandbox / "jobs-state")
+            with jobs_log_path.open("wb") as jobs_log:
+                process = subprocess.Popen(
+                    [str(binary), "jobs.txt"],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=jobs_log,
+                    stderr=subprocess.STDOUT,
+                    env=jobs_env,
+                )
+                jobs_window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, jobs_window)
+                x11.lib.XSetInputFocus(x11.display, jobs_window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                time.sleep(0.3)
+                execute_pipe(x11, jobs_window, f"Async {job_helper.name} ignore")
+                wait_for_log(jobs_log_path, "shell: started async command id=", args.timeout)
+                job_match = re.search(r"shell: started async command id=(\d+)", jobs_log_path.read_text(encoding="utf-8", errors="replace"))
+                if job_match is None:
+                    raise HarnessFailure("could not determine the async job id")
+                job_id = job_match.group(1)
+
+                execute(x11, jobs_window, "Jobs", 10, 10, args.timeout, jobs_log_path, 1)
+                wait_for_log(jobs_log_path, "job: listed 1 running job(s) in window", args.timeout)
+                execute(x11, jobs_window, f"Kill {job_id}", 10, 10, args.timeout, jobs_log_path, 1)
+                wait_for_log(jobs_log_path, f"job: Kill requested for id={job_id}", args.timeout)
+                wait_for_log(jobs_log_path, f"job: released id={job_id}", args.timeout)
+                execute(x11, jobs_window, "Jobs", 10, 10, args.timeout, jobs_log_path, 2)
+                wait_for_log(jobs_log_path, "job: listed 0 running job(s)", args.timeout)
+                print("PASS: Jobs lists running async commands and Kill stops one by id")
+                x11.tap(0xFF1B)
+                wait_for_exit(process, args.timeout, jobs_log_path)
+                process = None
+
             succeeded = True
             return 0
     finally:

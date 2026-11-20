@@ -34,6 +34,7 @@ config_destroy :: proc(c: ^Config, allocator := context.allocator) {
 	destroy_families(c.Tag_Font_Families, allocator)
 	destroy_families(c.Console_Font_Families, allocator)
 	delete(c.Font_Path, allocator)
+	delete(c.Shell, allocator)
 	c^ = Config{}
 }
 
@@ -46,6 +47,7 @@ resolved_destroy :: proc(r: ^Resolved, allocator := context.allocator) {
 	destroy_families(r.Tag_Font_Families, allocator)
 	destroy_families(r.Console_Font_Families, allocator)
 	delete(r.Font_Path, allocator)
+	delete(r.Shell, allocator)
 	r^ = Resolved{}
 }
 
@@ -99,6 +101,7 @@ resolved :: proc(c: Config, source: Source, allocator := context.allocator) -> (
 		Ligatures = c.Ligatures,
 		Autopair = c.Autopair.? or_else DEFAULT_AUTOPAIR,
 		Wrap_Mode = c.Wrap_Mode,
+		Shell = strings.clone(c.Shell, allocator),
 		Theme = c.Theme,
 		Source = source,
 	}
@@ -170,13 +173,14 @@ describe :: proc(r: Resolved, allocator := context.allocator) -> string {
 		families = "?"
 	}
 	return fmt.aprintf(
-		"config: source=%s, font_size=%.1fpt, line_height=%.2f, ligatures=%v, autopair=%v, wrap=%v, families=[%s], font_path=%q, body_bg=#%02x%02x%02x",
+		"config: source=%s, font_size=%.1fpt, line_height=%.2f, ligatures=%v, autopair=%v, wrap=%v, shell=%q, families=[%s], font_path=%q, body_bg=#%02x%02x%02x",
 		source_name(r.Source),
 		r.Font_Size_Points,
 		r.Line_Height,
 		r.Ligatures,
 		r.Autopair,
 		r.Wrap_Mode,
+		r.Shell,
 		families,
 		r.Font_Path,
 		u8(r.Theme.Body_Bg[0] * 255.0 + 0.5),
@@ -264,6 +268,12 @@ build_config :: proc(root: ^map_node, allocator := context.allocator) -> (Config
 			} else {
 				cfg.Autopair = enabled
 			}
+		case "shell":
+			scalar, is_scalar := node.(value)
+			if !is_scalar || scalar.kind != .String {
+				return cfg, errs.newf(.Invalid_Input, "config: line %d: shell must be a quoted string", root.lines[key])
+			}
+			cfg.Shell = strings.clone(scalar.text, allocator)
 		case "theme":
 			child, is_map := node.(^map_node)
 			if !is_map {
@@ -384,7 +394,7 @@ build_theme :: proc(theme: ^Theme, node: ^map_node, allocator := context.allocat
 // ignoring.
 is_reserved_key :: proc(key: string) -> bool {
 	switch key {
-	case "keybindings", "touchpad_bindings", "syntax_styles", "large_file_threshold", "history_budget", "recovery_interval", "shell", "clipboard_policy", "finder_exclusions", "terminal":
+	case "keybindings", "touchpad_bindings", "syntax_styles", "large_file_threshold", "history_budget", "recovery_interval", "clipboard_policy", "finder_exclusions", "terminal":
 		return true
 	}
 	return false
