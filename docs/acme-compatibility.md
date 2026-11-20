@@ -83,6 +83,11 @@ Acme behavior, not an implementation to copy mechanically.
   history conflicts preserve stdout in the job window, whose explicit `Apply`
   command replaces the source view's current selection rather than stale text.
   Covered by process unit tests and the `builtin-test` conflict scenario.
+- Quit decisions inspect running jobs separately from dirty buffers. `Wait`
+  allows jobs and output to finish, `Stop` cancels them before quitting, and
+  ordinary editing cancels exit. OS close uses the same guards and cannot bypass
+  either running jobs or unsaved work. Covered by lifecycle tests and real X11
+  window-close scenarios in `builtin-test`.
 
 ## Unsupported or deferred behavior
 

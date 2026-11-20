@@ -85,6 +85,7 @@ Editor :: struct {
 	workspace:              layout.Workspace,
 	active_window:          layout.Window_ID,
 	close_guard:            lifecycle.Close_Guard,
+	job_quit:               lifecycle.Job_Quit_Guard,
 	jobs:                   process.Job_Service,
 	job_outputs:            [process.MAX_JOBS]Editor_Job_Output,
 	job_output_cursor:      int,
@@ -272,6 +273,9 @@ editor_init :: proc(path := "") -> errs.Error {
 	if close_err := lifecycle.close_guard_init(&editor.close_guard, {}, permanent()); !errs.ok(close_err) {
 		return close_err
 	}
+	if job_quit_err := lifecycle.job_quit_guard_init(&editor.job_quit, permanent()); !errs.ok(job_quit_err) {
+		return job_quit_err
+	}
 	if workspace_err := editor_workspace_init(); !errs.ok(workspace_err) {
 		return workspace_err
 	}
@@ -378,6 +382,7 @@ editor_destroy :: proc() {
 			editor_destroy_column_tag(editor.column_tag_ids[column_index])
 		}
 	}
+	lifecycle.job_quit_guard_destroy(&editor.job_quit)
 	lifecycle.close_guard_destroy(&editor.close_guard)
 	for index in 0 ..< view.MAX_VIEWS {
 		editor_destroy_buffer(&editor.buffers[index])
@@ -423,6 +428,9 @@ editor_consume_input :: proc(event: input.Event) {
 		return
 	}
 	editor_cancel_close_review()
+	if editor.active_text_kind == .Body {
+		editor_cancel_job_quit()
+	}
 
 	switch a in action {
 	case editing.Insert_Text:
@@ -880,23 +888,38 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 
 editor_cancel_close_review :: proc() {
 	phase := editor.close_guard.phase
+	if phase == .Ready {
+		lifecycle.close_guard_reset(&editor.close_guard)
+		return
+	}
 	if phase != .Await_Decision && phase != .Reviewing && phase != .Saving && phase != .Save_Failed {
 		return
 	}
 	editor_report(lifecycle.close_decision(&editor.close_guard, .Cancel))
 }
 
+editor_cancel_job_quit :: proc() {
+	if !lifecycle.job_quit_guard_active(&editor.job_quit) {
+		return
+	}
+	origin := editor.job_quit.origin
+	editor_report(lifecycle.job_quit_decision(&editor.job_quit, .Cancel_Exit))
+	log.infof("job: quit canceled (origin=%v)", origin)
+}
+
 editor_request_close :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close_Origin) {
 	editor_cancel_close_review()
-	request := lifecycle.Close_Request {
-		kind = kind,
-		origin = origin,
-		buffer_id = u64(editor.buffer.id),
-		buffer_generation = editor.buffer.generation,
+	if kind != .Quit {
+		editor_cancel_job_quit()
 	}
-	if kind == .Quit {
-		request.buffer_id = 0
-		request.buffer_generation = 0
+	request := lifecycle.Close_Request{kind = kind, origin = origin}
+	if kind != .Quit {
+		if editor.buffer == nil {
+			editor_report(errs.new(.NotFound, "edit: close has no active buffer", allocator = permanent()))
+			return
+		}
+		request.buffer_id = u64(editor.buffer.id)
+		request.buffer_generation = editor.buffer.generation
 	}
 	snapshots: [view.MAX_VIEWS]lifecycle.Buffer_Snapshot
 	snapshot_count := 0
@@ -929,24 +952,41 @@ editor_request_close :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close
 		editor_report(err)
 		return
 	}
-	if lifecycle.close_guard_ready(&editor.close_guard) {
+	if kind == .Quit && !lifecycle.job_quit_guard_active(&editor.job_quit) {
+		lifecycle.job_quit_guard_reset(&editor.job_quit)
+		if err := lifecycle.job_quit_request(&editor.job_quit, origin, editor_job_quit_pending_count()); !errs.ok(err) {
+			editor_report(err)
+			return
+		}
+	}
+	close_ready := lifecycle.close_guard_ready(&editor.close_guard)
+	jobs_ready := kind != .Quit || lifecycle.job_quit_guard_ready(&editor.job_quit)
+	if close_ready && jobs_ready {
 		if kind == .Close_View {
-			editor_close_active_view()
+			editor_close_active_view(origin)
 		} else {
 			request_quit(.User_Request, "editor-close")
 		}
 		return
 	}
-	log.warn("edit: unsaved text; close blocked until it is saved or explicitly discarded")
+	if !close_ready {
+		log.warn("edit: unsaved text; close blocked until it is saved or explicitly discarded")
+	}
+	if kind == .Quit && editor.job_quit.phase == .Await_Decision {
+		log.warnf(
+			"job: quit blocked on %d job(s); Wait allows completion, Stop cancels jobs, or editing cancels exit",
+			editor_job_quit_pending_count(),
+		)
+	}
 }
 
-editor_close_active_view :: proc() {
+editor_close_active_view :: proc(origin: lifecycle.Close_Origin) {
 	item := editor_active_view()
 	if item == nil {
 		return
 	}
 	if editor.views.view_count <= 1 {
-		request_quit(.User_Request, "editor-close-last-view")
+		editor_request_close(.Quit, origin)
 		return
 	}
 	window_id := item.window_id
@@ -1056,7 +1096,7 @@ editor_request_close_column :: proc(column_id: layout.Column_ID) -> errs.Error {
 	}
 	log.infof("view: deleted column %d; %d columns and %d views remain", u64(column_id), editor.workspace.column_count, editor.views.view_count)
 	if editor.views.view_count == 0 {
-		request_quit(.User_Request, "editor-close-last-column")
+		editor_request_close(.Quit, .Tag_Command)
 	}
 	return {}
 }

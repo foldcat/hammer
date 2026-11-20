@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,51 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
 from x11_harness import HarnessFailure, X11, wait_for_exit  # noqa: E402
+
+
+class ClientMessageData(ctypes.Union):
+    _fields_ = [("b", ctypes.c_char * 20), ("s", ctypes.c_short * 10), ("l", ctypes.c_long * 5)]
+
+
+class ClientMessageEvent(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p),
+        ("window", ctypes.c_ulong),
+        ("message_type", ctypes.c_ulong),
+        ("format", ctypes.c_int),
+        ("data", ClientMessageData),
+    ]
+
+
+class XEvent(ctypes.Union):
+    _fields_ = [("client", ClientMessageEvent), ("pad", ctypes.c_long * 24)]
+
+
+def request_close(x11: X11, window: int) -> None:
+    x11.lib.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    x11.lib.XInternAtom.restype = ctypes.c_ulong
+    x11.lib.XSendEvent.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.c_int,
+        ctypes.c_long,
+        ctypes.POINTER(XEvent),
+    ]
+    protocols = x11.lib.XInternAtom(x11.display, b"WM_PROTOCOLS", 0)
+    delete = x11.lib.XInternAtom(x11.display, b"WM_DELETE_WINDOW", 0)
+    event = XEvent()
+    event.client.type = 33
+    event.client.display = x11.display
+    event.client.window = window
+    event.client.message_type = protocols
+    event.client.format = 32
+    event.client.data.l[0] = delete
+    event.client.data.l[1] = 0
+    x11.lib.XSendEvent(x11.display, window, 0, 0, ctypes.byref(event))
+    x11.lib.XSync(x11.display, 0)
 
 
 def wait_for_log(log_path: Path, needle: str, timeout: float, occurrence: int = 1) -> None:
@@ -192,18 +238,33 @@ def main() -> int:
             wait_for_log(log_path, f"job: released id={flood_id}", args.timeout)
             print("PASS: flood output drains through the job output window")
 
+            request_close(x11, window)
+            wait_for_log(log_path, "job: quit blocked on 1 job(s)", args.timeout)
+            run("Wait", 10, 10)
+            wait_for_log(log_path, "job: quit waiting for jobs and output to complete", args.timeout)
+            click(x11, window, 1, 60, 100)
+            type_text(x11, "x")
+            wait_for_log(log_path, "job: quit canceled (origin=OS_Close)", args.timeout)
+            time.sleep(0.3)
+            if process.poll() is not None:
+                raise HarnessFailure("editing did not cancel the pending job quit")
+            x11.key(0xFFE3, True)
+            x11.tap(ord("z"))
+            x11.key(0xFFE3, False)
+            print("PASS: Wait keeps the editor open and ordinary editing cancels exit")
+
+            request_close(x11, window)
+            wait_for_log(log_path, "job: quit blocked on 1 job(s)", args.timeout, 2)
             run("Stop", 10, 10)
-            wait_for_log(log_path, "job: Stop requested for 1 job(s)", args.timeout)
+            wait_for_log(log_path, "job: Stop requested for 1 job(s) during quit", args.timeout)
             stop_deadline = time.monotonic() + args.timeout
             while Path(f"/proc/{job_pid}").exists() and time.monotonic() < stop_deadline:
                 time.sleep(0.05)
             if Path(f"/proc/{job_pid}").exists():
                 raise HarnessFailure(f"Stop did not reap test job {job_pid}")
-            print("PASS: Stop terminates and reaps the running job")
-
-            x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)
             process = None
+            print("PASS: Stop cancels and reaps running jobs before resuming quit")
 
             pipe_source.write_bytes("pipe α β\n".encode("utf-8"))
             pipe_log_path = sandbox / "pipe-hammer.log"
@@ -211,7 +272,7 @@ def main() -> int:
             pipe_environment.pop("HAMMER_TEST_IGNORE_JOB")
             pipe_environment.pop("HAMMER_TEST_FLOOD_JOB")
             pipe_environment["HAMMER_TEST_PIPE_JOB"] = str(job_helper)
-            pipe_environment.pop("HAMMER_TEST_PIPE_DELAY", None)
+            pipe_environment["HAMMER_TEST_PIPE_DELAY"] = "1"
             pipe_environment["XDG_STATE_HOME"] = str(sandbox / "pipe-state")
             with pipe_log_path.open("wb") as pipe_log:
                 process = subprocess.Popen(
@@ -227,12 +288,19 @@ def main() -> int:
                 x11.lib.XSetInputFocus(x11.display, pipe_window, 1, 0)
                 x11.lib.XSync(x11.display, 0)
                 wait_for_log(pipe_log_path, "job: selection test helper started", args.timeout)
+                x11.tap(0xFF1B)
+                wait_for_log(pipe_log_path, "job: quit blocked on 1 job(s)", args.timeout)
+                execute(x11, pipe_window, "Wait", 10, 10, args.timeout, pipe_log_path, 1)
                 wait_for_log(pipe_log_path, "job: selection replaced", args.timeout)
+                wait_for_log(pipe_log_path, "edit: unsaved text; close blocked", args.timeout)
+                time.sleep(0.3)
+                if process.poll() is not None:
+                    raise HarnessFailure("job completion bypassed the dirty-buffer quit review")
                 execute(x11, pipe_window, "Putall", 10, 10, args.timeout, pipe_log_path, 1)
                 wait_for_log(pipe_log_path, "file: saved pipe.txt", args.timeout)
                 if pipe_source.read_bytes() != "filtered:pipe α β\n".encode("utf-8"):
                     raise HarnessFailure(f"selection pipe wrote unexpected bytes: {pipe_source.read_bytes()!r}")
-                print("PASS: selection stdin is filtered and stdout replaces the selection in the real editor")
+                print("PASS: Wait drains selection output and still enforces the dirty-buffer quit review")
                 x11.tap(0xFF1B)
                 wait_for_exit(process, args.timeout, pipe_log_path)
                 process = None

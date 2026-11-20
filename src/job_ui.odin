@@ -6,6 +6,7 @@ import "core:os"
 
 import errs "core/errs"
 import layout "core/layout"
+import lifecycle "core/lifecycle"
 import process "core/process"
 import rope "core/rope"
 import txn "core/txn"
@@ -226,6 +227,32 @@ editor_job_preserve_conflict :: proc(state: ^Editor_Job_Output, job: ^process.Jo
 		job.attachment,
 		state.buffer.conflict_pipe.output_len,
 	)
+}
+
+editor_job_quit_pending_count :: proc() -> int {
+	pending := 0
+	for &job in editor.jobs.jobs {
+		if job.id != 0 {
+			pending += 1
+		}
+	}
+	return pending
+}
+
+editor_poll_job_quit :: proc() {
+	phase := editor.job_quit.phase
+	if phase != .Waiting && phase != .Cancelling {
+		return
+	}
+	if err := lifecycle.job_quit_poll(&editor.job_quit, editor_job_quit_pending_count()); !errs.ok(err) {
+		editor_report(err)
+		return
+	}
+	if lifecycle.job_quit_guard_ready(&editor.job_quit) {
+		origin := editor.job_quit.origin
+		log.infof("job: quit job decisions complete (origin=%v)", origin)
+		editor_request_close(.Quit, origin)
+	}
 }
 
 editor_poll_jobs :: proc() {

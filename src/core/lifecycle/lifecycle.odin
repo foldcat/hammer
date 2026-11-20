@@ -2,8 +2,8 @@
 //
 // M01.01 implements the transitions and fatal-error plumbing. Close_Guard in
 // close.odin (M04.06–M04.07) supplies dirty-buffer and save-failure decisions
-// inside Quitting; running-job review (M09.08) plugs in without changing this
-// shape.
+// inside Quitting; Job_Quit_Guard in job_quit.odin (M09.08) tracks running-job
+// decisions separately without changing this shape.
 //
 // Transitions are programmer invariants: calling a transition from the
 // wrong phase is a bug and asserts. `request_quit` is deliberately

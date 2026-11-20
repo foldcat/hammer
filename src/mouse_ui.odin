@@ -341,6 +341,7 @@ editor_scroll :: proc(event: input.Scroll) {
 	if !selecting {
 		editor_cancel_pointer_gesture()
 		editor_cancel_close_review()
+		editor_cancel_job_quit()
 	}
 	if valid_dx {
 		if item.wrap_mode == .Soft {
@@ -426,6 +427,7 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 		layout.begin_drag(&editor.workspace, area, event.pos) {
 		editor.typing_group = 0
 		editor_cancel_close_review()
+		editor_cancel_job_quit()
 		return
 	}
 	#partial switch area.kind {
@@ -836,6 +838,7 @@ editor_mouse_clipboard_result :: proc(
 }
 
 editor_look_mouse :: proc(action: mouse.Look) {
+	editor_cancel_job_quit()
 	target := editor_text_target_by_id(action.target)
 	if target.doc == nil || target.selection == nil {
 		return

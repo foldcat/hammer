@@ -8,6 +8,7 @@ import edit "core/edit"
 import editing "core/editing"
 import errs "core/errs"
 import layout "core/layout"
+import lifecycle "core/lifecycle"
 import mouse "core/mouse"
 import process "core/process"
 import rope "core/rope"
@@ -30,6 +31,7 @@ EDITOR_COMMANDS :: []command.Entry {
 	{name = "Redo", handler = editor_command_redo},
 	{name = "Cut", handler = editor_command_cut},
 	{name = "Snarf", handler = editor_command_snarf},
+	{name = "Wait", handler = editor_command_wait},
 	{name = "Stop", handler = editor_command_stop},
 	{name = "Paste", handler = editor_command_paste},
 	{name = "Look", handler = editor_command_look},
@@ -123,6 +125,9 @@ editor_execute_mouse :: proc(action: mouse.Execute) {
 	if !errs.ok(parse_err) {
 		editor_report(parse_err)
 		return
+	}
+	if invocation.name != "Wait" && invocation.name != "Stop" && invocation.name != "Exit" {
+		editor_cancel_job_quit()
 	}
 	log.infof("mouse: execute %q target=%d argument_chord=%v", invocation.name, u64(action.target), action.with_argument)
 	cmd_context := editor_command_context(target, range, action.with_argument)
@@ -488,9 +493,31 @@ editor_command_snarf :: proc(cmd_context: ^command.Context, invocation: command.
 	return {}
 }
 
+editor_command_wait :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
+	if invocation.argument != "" {
+		return errs.new(.Invalid_Input, "job: Wait takes no arguments", allocator = permanent())
+	}
+	if err := lifecycle.job_quit_decision(&editor.job_quit, .Wait); !errs.ok(err) {
+		return err
+	}
+	log.info("job: quit waiting for jobs and output to complete")
+	return {}
+}
+
 editor_command_stop :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
 	if invocation.argument != "" {
 		return errs.new(.Invalid_Input, "job: Stop takes no arguments", allocator = permanent())
+	}
+	phase := editor.job_quit.phase
+	if phase == .Await_Decision || phase == .Waiting || phase == .Cancelling {
+		if phase != .Cancelling {
+			if err := lifecycle.job_quit_decision(&editor.job_quit, .Cancel_Jobs); !errs.ok(err) {
+				return err
+			}
+		}
+		stopped := process.job_stop_all(&editor.jobs, mouse_now_ms())
+		log.infof("job: Stop requested for %d job(s) during quit", stopped)
+		return {}
 	}
 	attachment := u64(cmd_context.source.window_id)
 	stopped := 0

@@ -224,6 +224,7 @@ frame :: proc "c" () {
 	sync_dpi_changes()
 	editor_poll_edit()
 	editor_poll_jobs()
+	editor_poll_job_quit()
 	editor_poll_clipboard()
 	editor_poll_scrollbar()
 
@@ -273,6 +274,9 @@ event :: proc "c" (ev: ^sapp.Event) {
 		}
 	case .QUIT_REQUESTED:
 		editor_request_close(.Quit, .OS_Close)
+		if !lifecycle.app_is_quitting(&app) {
+			sapp.cancel_quit()
+		}
 	case .UNFOCUSED, .ICONIFIED, .SUSPENDED:
 		editor_cancel_pointer_gesture()
 	case .RESIZED:
