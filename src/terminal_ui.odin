@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:os"
 import "core:strings"
 
 import command "core/command"
@@ -47,7 +48,21 @@ Editor_Terminal :: struct {
 	status:      process.Exit_Status,
 }
 
-// editor_command_win opens a terminal window running the configured shell.
+// editor_terminal_shell resolves the shell for a new terminal window: the
+// configured shell, else the user's login shell ($SHELL), else the platform
+// default (sh on Unix, cmd.exe on Windows). M10.07e replaces the /bin/sh
+// fallback with the system default shell (the one set by `chsh`).
+editor_terminal_shell :: proc() -> string {
+	if cfg.Shell != "" {
+		return cfg.Shell
+	}
+	if shell, found := os.lookup_env("SHELL", context.temp_allocator); found && shell != "" {
+		return shell
+	}
+	return command.pipe_default_shell()
+}
+
+// editor_command_win opens a terminal window running the resolved shell.
 editor_command_win :: proc(cmd_context: ^command.Context, invocation: command.Invocation) -> errs.Error {
 	if invocation.argument != "" {
 		return errs.new(.Invalid_Input, "terminal: Win takes no arguments", allocator = permanent())
@@ -57,10 +72,7 @@ editor_command_win :: proc(cmd_context: ^command.Context, invocation: command.In
 	if column_id == 0 {
 		return errs.new(.NotFound, "view: no column is available for Win", allocator = permanent())
 	}
-	shell := cfg.Shell
-	if shell == "" {
-		shell = command.pipe_default_shell()
-	}
+	shell := editor_terminal_shell()
 	buffer, alloc_err := editor_alloc_terminal_buffer(shell)
 	if !errs.ok(alloc_err) {
 		return alloc_err

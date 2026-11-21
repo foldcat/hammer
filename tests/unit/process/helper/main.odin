@@ -214,6 +214,8 @@ main :: proc() {
 		code = size()
 	case "ansi":
 		code = ansi()
+	case "envcheck":
+		code = envcheck()
 	case:
 		code = 2
 	}

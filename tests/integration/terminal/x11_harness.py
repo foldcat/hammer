@@ -104,6 +104,12 @@ def main() -> int:
             wait_for_log(log_path, "terminal: opened", args.timeout)
             print("PASS: Win opens a PTY-backed terminal window")
 
+            # M10.07e: the terminal spawns the system default shell ($SHELL),
+            # not /bin/sh. The open log records the resolved shell verbatim.
+            expected_shell = os.environ.get("SHELL") or "sh"
+            wait_for_log(log_path, f'shell="{expected_shell}"', args.timeout)
+            print(f"PASS: the terminal spawns the system default shell ({expected_shell})")
+
             wait_for_log(log_path, "terminal: resize", args.timeout)
             print("PASS: the terminal grid resizes to the window (SIGWINCH)")
 

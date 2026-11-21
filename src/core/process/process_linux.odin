@@ -208,16 +208,32 @@ build_exec :: proc(desc: Description, scratch, allocator: runtime.Allocator) -> 
 		argv[index] = converted
 	}
 
-	envp, envp_err := make([]cstring, len(environment) + 1, scratch)
+	// An inherited environment can carry malformed entries — e.g. Odin's
+	// os.environ currently appends a trailing empty string, and a hostile
+	// parent could pass a name with no '=' separator. Strict consumers
+	// (Neovim's environ(), libc setenv validation) reject those, so keep only
+	// well-formed "KEY=VALUE" pairs with a nonempty key.
+	valid_entries := 0
+	for entry in environment {
+		if strings.index_byte(entry, '=') > 0 {
+			valid_entries += 1
+		}
+	}
+	envp, envp_err := make([]cstring, valid_entries + 1, scratch)
 	if envp_err != nil {
 		return {}, errs.new(.Resource_Limit, "process: cannot allocate environment vector", allocator = allocator)
 	}
-	for entry, index in environment {
+	env_index := 0
+	for entry in environment {
+		if strings.index_byte(entry, '=') <= 0 {
+			continue
+		}
 		converted, convert_err := strings.clone_to_cstring(entry, scratch)
 		if convert_err != nil {
 			return {}, errs.new(.Resource_Limit, "process: cannot copy environment vector", allocator = allocator)
 		}
-		envp[index] = converted
+		envp[env_index] = converted
+		env_index += 1
 	}
 
 	working_dir: cstring

@@ -185,3 +185,20 @@ test_pty_missing_executable_returns_no_pty :: proc(t: ^testing.T) {
 	expect_kind(t, err, .NotFound)
 	testing.expect(t, pty.process == 0 && !pty.master.open)
 }
+
+@(test)
+test_pty_inherited_environment_has_no_malformed_entries :: proc(t: ^testing.T) {
+	// A nil environment inherits the parent's. Odin's os.environ appends a
+	// trailing empty string; build_exec must drop it before exec, because a
+	// child that sees an empty/malformed env entry can crash (Neovim's
+	// environ() asserts every entry has a '=').
+	pty, spawn_err := process.pty_spawn({command = {HELPER, "envcheck"}}, {termios = .Raw}, context.allocator)
+	if !expect_ok(t, spawn_err) {
+		return
+	}
+	defer cleanup_pty(t, &pty)
+	output := pty_read_all(t, &pty)
+	defer delete(output, context.allocator)
+	testing.expectf(t, strings.contains(string(output), "malformed=0"), "expected no malformed env entries; output %q", string(output))
+	testing.expectf(t, !strings.contains(string(output), "total=0"), "expected a nonempty environment; output %q", string(output))
+}
