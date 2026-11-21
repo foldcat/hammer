@@ -725,6 +725,8 @@ grid_csi :: proc(g: ^Grid, csi: Csi_Event) {
 		grid_insert_chars(g, csi_count(csi, 0))
 	case 'P': // DCH — delete characters
 		grid_delete_chars(g, csi_count(csi, 0))
+	case 'X': // ECH — erase characters (bce)
+		grid_erase_chars(g, csi_count(csi, 0))
 	case 'S': // SU — scroll up
 		for _ in 0 ..< csi_count(csi, 0) {
 			grid_scroll_up(g)
@@ -761,14 +763,14 @@ grid_erase_line :: proc(g: ^Grid, mode: int) {
 	switch mode {
 	case 0: // cursor to end of line
 		for col in g.cursor_col ..< g.cols {
-			cell_ptr(g, row, col)^ = Cell{}
+			cell_ptr(g, row, col)^ = Cell{r = 0, style = g.style, link = -1}
 		}
 	case 1: // start of line to cursor
 		for col in 0 ..= min(g.cursor_col, g.cols - 1) {
-			cell_ptr(g, row, col)^ = Cell{}
+			cell_ptr(g, row, col)^ = Cell{r = 0, style = g.style, link = -1}
 		}
 	case 2: // whole line
-		grid_clear_row(g, row)
+		grid_fill_row(g, row, g.style)
 	}
 }
 
@@ -777,16 +779,16 @@ grid_erase_display :: proc(g: ^Grid, mode: int) {
 	case 0: // cursor to end of screen
 		grid_erase_line(g, 0)
 		for row in g.cursor_row + 1 ..< g.rows {
-			grid_clear_row(g, row)
+			grid_fill_row(g, row, g.style)
 		}
 	case 1: // start of screen to cursor
 		grid_erase_line(g, 1)
 		for row in 0 ..< g.cursor_row {
-			grid_clear_row(g, row)
+			grid_fill_row(g, row, g.style)
 		}
 	case 2: // whole screen
 		for row in 0 ..< g.rows {
-			grid_clear_row(g, row)
+			grid_fill_row(g, row, g.style)
 		}
 	case 3: // clear scrollback (xterm extension)
 		for line in g.scrollback {
@@ -796,9 +798,28 @@ grid_erase_display :: proc(g: ^Grid, mode: int) {
 	}
 }
 
-grid_clear_row :: proc(g: ^Grid, row: int) {
+// grid_fill_row fills one row with blank cells carrying `style`. Erase
+// operations (bce — background color erase) pass the current style so the
+// background survives an erase; scrolling passes the default style so a
+// newly-scrolled blank line has no background.
+grid_fill_row :: proc(g: ^Grid, row: int, style: Style) {
 	for col in 0 ..< g.cols {
-		cell_ptr(g, row, col)^ = Cell{}
+		cell_ptr(g, row, col)^ = Cell{r = 0, style = style, link = -1}
+	}
+}
+
+// grid_clear_row clears a row to the default style (no background). Used by
+// scrolling, which must not carry the current SGR background into the new line.
+grid_clear_row :: proc(g: ^Grid, row: int) {
+	grid_fill_row(g, row, Style{})
+}
+
+// grid_erase_chars erases n cells at the cursor, filling them with the current
+// background (ECH, CSI X). The cursor does not move.
+grid_erase_chars :: proc(g: ^Grid, n: int) {
+	row := g.cursor_row
+	for col in g.cursor_col ..< min(g.cursor_col + n, g.cols) {
+		cell_ptr(g, row, col)^ = Cell{r = 0, style = g.style, link = -1}
 	}
 }
 
@@ -839,7 +860,7 @@ grid_insert_lines :: proc(g: ^Grid, n: int) {
 		for r := bottom; r > row; r -= 1 {
 			copy(g.cells[r * g.cols:(r + 1) * g.cols], g.cells[(r - 1) * g.cols:r * g.cols])
 		}
-		grid_clear_row(g, row)
+		grid_fill_row(g, row, g.style)
 	}
 }
 
@@ -857,7 +878,7 @@ grid_delete_lines :: proc(g: ^Grid, n: int) {
 		for r := row; r < bottom; r += 1 {
 			copy(g.cells[r * g.cols:(r + 1) * g.cols], g.cells[(r + 1) * g.cols:(r + 2) * g.cols])
 		}
-		grid_clear_row(g, bottom)
+		grid_fill_row(g, bottom, g.style)
 	}
 }
 
@@ -867,7 +888,7 @@ grid_insert_chars :: proc(g: ^Grid, n: int) {
 		for col := g.cols - 1; col > g.cursor_col; col -= 1 {
 			cell_ptr(g, row, col)^ = cell_at(g, row, col - 1)
 		}
-		cell_ptr(g, row, g.cursor_col)^ = Cell{}
+		cell_ptr(g, row, g.cursor_col)^ = Cell{r = 0, style = g.style, link = -1}
 	}
 }
 
@@ -877,7 +898,7 @@ grid_delete_chars :: proc(g: ^Grid, n: int) {
 		for col := g.cursor_col; col < g.cols - 1; col += 1 {
 			cell_ptr(g, row, col)^ = cell_at(g, row, col + 1)
 		}
-		cell_ptr(g, row, g.cols - 1)^ = Cell{}
+		cell_ptr(g, row, g.cols - 1)^ = Cell{r = 0, style = g.style, link = -1}
 	}
 }
 
@@ -949,9 +970,12 @@ grid_row_last_col :: proc(g: ^Grid, row: int) -> int {
 }
 
 // grid_row_last_col_stride is grid_row_last_col with an explicit column stride.
+// A cell counts as content if it has a rune or a non-default background, so an
+// erased-but-colored trailing region still renders its background fill.
 grid_row_last_col_stride :: proc(g: ^Grid, row, cols: int) -> int {
 	for col := cols - 1; col >= 0; col -= 1 {
-		if cell_at_stride(g, row, col, cols).r != 0 {
+		cell := cell_at_stride(g, row, col, cols)
+		if cell.r != 0 || cell.style.bg.kind != .Default {
 			return col
 		}
 	}

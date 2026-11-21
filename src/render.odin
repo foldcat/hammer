@@ -160,10 +160,19 @@ render_frame :: proc() {
 				text_window := placed.window
 				text_window.body = text
 				styles: []console.Style_Run
+				is_terminal := false
 				if buffer := editor_buffer_for_view(item); buffer != nil && buffer.kind == .Terminal {
 					styles = buffer.terminal.styles[:]
+					is_terminal = true
 				}
-				text_render_document(text_window, gutter, item.line_numbers, doc, item.selection, item.first_line, item.first_row, body_active, 0, item.wrap_mode, &item.horizontal_offset, styles, phys, &verts)
+				// A terminal body draws its own block cursor (render_terminal_cursor)
+				// at the grid cursor position. The editor's text caret and IME
+				// preedit would be a second, conflicting cursor (visible as a stray
+				// vertical "line" at the end of the transcript), so they are
+				// suppressed for terminal bodies. Selection highlighting (used by
+				// Ctrl+Shift+C copy) still applies.
+				text_active := body_active && !is_terminal
+				text_render_document(text_window, gutter, item.line_numbers, doc, item.selection, item.first_line, item.first_row, text_active, 0, item.wrap_mode, &item.horizontal_offset, styles, phys, &verts)
 				if buffer := editor_buffer_for_view(item); buffer != nil && buffer.kind == .Terminal && buffer.terminal.live {
 					render_terminal_cursor(buffer, item, text, phys, &cursor_verts)
 				}

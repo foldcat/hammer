@@ -347,3 +347,53 @@ test_grid_cursor_visibility_and_position :: proc(t: ^testing.T) {
 	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?25h"))
 	testing.expect(t, console.grid_cursor_visible(&s.grid))
 }
+
+@(test)
+test_grid_erase_characters :: proc(t: ^testing.T) {
+	// CSI X (ECH) erases n characters in place without moving the cursor.
+	expect_grid(t, 24, 80, transmute([]byte)string("abcde\x1b[2G\x1b[2X\r\n"), "a  de")
+}
+
+@(test)
+test_grid_erase_fills_background :: proc(t: ^testing.T) {
+	// bce: erasing the screen under a set background fills the erased cells with
+	// that background, so the full screen renders as colored spaces.
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 2, 4, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[44m\x1b[2J"))
+	out := make([dynamic]byte, context.allocator)
+	defer delete(out)
+	runs := make([dynamic]console.Style_Run, context.allocator)
+	defer delete(runs)
+	console.grid_append_styled(&s.grid, &out, &runs)
+	testing.expectf(t, string(out[:]) == "    \n    ", "got %q", string(out[:]))
+	testing.expect(t, len(runs) == 2)
+	if len(runs) == 2 {
+		testing.expect(t, runs[0].start == 0 && runs[0].end == 4)
+		testing.expect(t, runs[0].style.bg.kind == .Basic && runs[0].style.bg.index == 4)
+		testing.expect(t, runs[1].start == 5 && runs[1].end == 9)
+		testing.expect(t, runs[1].style.bg.kind == .Basic && runs[1].style.bg.index == 4)
+	}
+}
+
+@(test)
+test_grid_erase_line_fills_background :: proc(t: ^testing.T) {
+	// bce: "ab" then erase-to-end-of-line under a set background emits the
+	// trailing erased cells as background-colored spaces (Neovim's redraw).
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 1, 6, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[44mab\x1b[K"))
+	out := make([dynamic]byte, context.allocator)
+	defer delete(out)
+	runs := make([dynamic]console.Style_Run, context.allocator)
+	defer delete(runs)
+	console.grid_append_styled(&s.grid, &out, &runs)
+	testing.expectf(t, string(out[:]) == "ab    ", "got %q", string(out[:]))
+	testing.expect(t, len(runs) == 1)
+	if len(runs) == 1 {
+		testing.expect(t, runs[0].start == 0 && runs[0].end == 6)
+		testing.expect(t, runs[0].style.bg.kind == .Basic && runs[0].style.bg.index == 4)
+	}
+}
