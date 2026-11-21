@@ -1,5 +1,6 @@
 package main
 
+import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:os"
@@ -41,6 +42,17 @@ Editor_Terminal :: struct {
 	render:      [dynamic]byte, // scratch for building the transcript text
 	styles:      [dynamic]console.Style_Run, // per-byte style spans of render
 	read_buffer: [TERMINAL_READ_BYTES]u8,
+	// Incremental-sync bookkeeping: the document is scrollback + visible
+	// screen. scroll_bytes is the byte offset where the visible screen begins;
+	// scroll_run_count is how many leading entries of `styles` describe the
+	// scrollback (the visible-screen runs follow and are rebuilt each frame).
+	// synced_scrollback_len/total mirror the grid's scrollback length and
+	// monotonic append counter at the last sync, so a sync can tell a pure
+	// append (grow by k) from a front trim or alternate-screen swap.
+	scroll_bytes:           int,
+	scroll_run_count:       int,
+	synced_scrollback_len:  int,
+	synced_scrollback_total: u64,
 	live:        bool, // child has not been reaped
 	eof:         bool, // master read reached end-of-stream
 	done:        bool, // pty destroyed and output finalized
@@ -115,14 +127,19 @@ editor_alloc_terminal_buffer :: proc(shell: string) -> (^Editor_Buffer, errs.Err
 			editor_terminal_stop_destroy(&pty)
 			return nil, err
 		}
-		if err := console.grid_stream_init(&buffer.terminal.grid, TERMINAL_ROWS, TERMINAL_COLS, 0, permanent()); !errs.ok(err) {
+		// The grid and its scratch buffers churn (scrollback lines are
+		// allocated and trimmed, cells are rebuilt on resize, style runs grow),
+		// so they must use a free-capable allocator. The permanent arena cannot
+		// free individual allocations (AGENTS.md §10.5); using it here would
+		// leak every scrolled-off line for the life of the process.
+		if err := console.grid_stream_init(&buffer.terminal.grid, TERMINAL_ROWS, TERMINAL_COLS, 0, runtime.heap_allocator()); !errs.ok(err) {
 			txn.doc_destroy(&buffer.doc)
 			buffer^ = {}
 			editor_terminal_stop_destroy(&pty)
 			return nil, err
 		}
-		buffer.terminal.render = make([dynamic]byte, permanent())
-		buffer.terminal.styles = make([dynamic]console.Style_Run, permanent())
+		buffer.terminal.render = make([dynamic]byte, runtime.heap_allocator())
+		buffer.terminal.styles = make([dynamic]console.Style_Run, runtime.heap_allocator())
 		name, clone_err := strings.clone(shell, permanent())
 		if clone_err != nil {
 			delete(buffer.terminal.styles)
@@ -259,23 +276,135 @@ editor_terminal_finalize :: proc(buffer: ^Editor_Buffer) {
 }
 
 // editor_terminal_sync drains the terminal grid into the buffer document when
-// it changed, replacing the transcript and following the tail if the view was
-// already at the end.
+// it changed. It is incremental: when only the visible screen changed (the
+// common case — a keystroke, a cursor move, a partial redraw), only the small
+// visible tail of the document is rebuilt; when new scrollback lines scrolled
+// off, they are appended; only a front trim, alternate-screen switch, or
+// scrollback clear falls back to rebuilding the whole transcript. This keeps
+// the per-frame cost proportional to the visible screen instead of the whole
+// scrollback.
 editor_terminal_sync :: proc(buffer: ^Editor_Buffer) {
 	t := &buffer.terminal
-	if !console.grid_dirty(&t.grid.grid) {
+	g := &t.grid.grid
+	if !console.grid_dirty(g) {
 		return
 	}
-	console.grid_clear_dirty(&t.grid.grid)
+	console.grid_clear_dirty(g)
 
+	doc := &buffer.doc
 	item := editor_first_view_for_buffer(buffer.id)
 	follow := t.following
+	cur_len := console.grid_scrollback_len(g)
+	cur_total := console.grid_scrollback_total(g)
+
+	switch {
+	case cur_total == t.synced_scrollback_total && cur_len == t.synced_scrollback_len:
+		// Scrollback unchanged: rebuild only the visible screen.
+		editor_terminal_sync_visible(buffer, doc)
+	case cur_total > t.synced_scrollback_total && cur_len - t.synced_scrollback_len == int(cur_total - t.synced_scrollback_total):
+		// Pure append: new scrollback lines scrolled off, no front trim.
+		editor_terminal_sync_append(buffer, doc, t.synced_scrollback_len, cur_len)
+	case:
+		// Front trim, alternate-screen switch, or scrollback clear.
+		editor_terminal_sync_full(buffer, doc)
+	}
+
+	t.synced_scrollback_len = cur_len
+	t.synced_scrollback_total = cur_total
+	editor_terminal_sync_finish(buffer, doc, item, follow)
+}
+
+// editor_terminal_sync_visible rebuilds the visible-screen tail of the document
+// in place. The scrollback bytes and style runs are unchanged.
+editor_terminal_sync_visible :: proc(buffer: ^Editor_Buffer, doc: ^txn.Doc) {
+	t := &buffer.terminal
+	g := &t.grid.grid
+
+	resize(&t.render, 0)
+	resize(&t.styles, t.scroll_run_count)
+	run_start := len(t.styles)
+	console.grid_append_visible_styled(g, &t.render, &t.styles)
+	for i in run_start ..< len(t.styles) {
+		t.styles[i].start += t.scroll_bytes
+		t.styles[i].end += t.scroll_bytes
+	}
+
+	new_total := t.scroll_bytes + len(t.render)
+	total := rope.tree_byte_count(&doc.tree)
+	transaction := txn.Transaction{
+		source = .Command_Output,
+		base_revision = txn.doc_revision(doc),
+		ops = []txn.Operation{txn.Replace{range = {t.scroll_bytes, total}, data = t.render[:]}},
+		after_selection = {anchor = new_total, active = new_total, affinity = .Left},
+	}
+	if err := txn.doc_apply(doc, &transaction, permanent()); !errs.ok(err) {
+		editor_report(err)
+		return
+	}
+	txn.doc_collapse_history(doc)
+}
+
+// editor_terminal_sync_append inserts newly scrolled-off lines at the end of
+// the scrollback region and rebuilds the visible-screen tail that follows them.
+// start..end are the scrollback lines newly appended since the last sync.
+editor_terminal_sync_append :: proc(buffer: ^Editor_Buffer, doc: ^txn.Doc, start, end: int) {
+	t := &buffer.terminal
+	g := &t.grid.grid
+
+	scroll_text := make([dynamic]byte, context.temp_allocator)
+	resize(&t.styles, t.scroll_run_count)
+	run_start := len(t.styles)
+	console.grid_append_scrollback_styled(g, &scroll_text, &t.styles, start)
+	for i in run_start ..< len(t.styles) {
+		t.styles[i].start += t.scroll_bytes
+		t.styles[i].end += t.scroll_bytes
+	}
+	t.scroll_run_count = len(t.styles)
+
+	new_scroll_bytes := t.scroll_bytes + len(scroll_text)
+	resize(&t.render, 0)
+	visible_run_start := len(t.styles)
+	console.grid_append_visible_styled(g, &t.render, &t.styles)
+	for i in visible_run_start ..< len(t.styles) {
+		t.styles[i].start += new_scroll_bytes
+		t.styles[i].end += new_scroll_bytes
+	}
+
+	total := rope.tree_byte_count(&doc.tree)
+	ops := []txn.Operation{
+		txn.Insert{pos = t.scroll_bytes, data = scroll_text[:]},
+		txn.Replace{range = {t.scroll_bytes, total}, data = t.render[:]},
+	}
+	new_total := new_scroll_bytes + len(t.render)
+	transaction := txn.Transaction{
+		source = .Command_Output,
+		base_revision = txn.doc_revision(doc),
+		ops = ops,
+		after_selection = {anchor = new_total, active = new_total, affinity = .Left},
+	}
+	if err := txn.doc_apply(doc, &transaction, permanent()); !errs.ok(err) {
+		editor_report(err)
+		return
+	}
+	txn.doc_collapse_history(doc)
+	t.scroll_bytes = new_scroll_bytes
+}
+
+// editor_terminal_sync_full rebuilds the whole transcript (scrollback + visible
+// screen) and replaces the document. Used when the scrollback is trimmed,
+// swapped (alternate screen), or cleared, where incremental tracking is not
+// worth the complexity.
+editor_terminal_sync_full :: proc(buffer: ^Editor_Buffer, doc: ^txn.Doc) {
+	t := &buffer.terminal
+	g := &t.grid.grid
 
 	resize(&t.render, 0)
 	resize(&t.styles, 0)
-	console.grid_append_styled(&t.grid.grid, &t.render, &t.styles)
+	console.grid_append_scrollback_styled(g, &t.render, &t.styles, 0)
+	t.scroll_bytes = len(t.render)
+	t.scroll_run_count = len(t.styles)
+	console.grid_append_visible_styled(g, &t.render, &t.styles)
 
-	doc := &buffer.doc
 	total := rope.tree_byte_count(&doc.tree)
 	transaction := txn.Transaction{
 		source = .Command_Output,
@@ -288,19 +417,25 @@ editor_terminal_sync :: proc(buffer: ^Editor_Buffer) {
 		return
 	}
 	txn.doc_collapse_history(doc)
+}
 
-	if item != nil {
-		new_end := rope.tree_byte_count(&doc.tree)
-		if follow {
-			item.selection = {anchor = new_end, active = new_end, affinity = .Left}
-			editor_terminal_reveal_tail(item, doc)
-		} else {
-			item.selection.anchor = clamp(item.selection.anchor, 0, new_end)
-			item.selection.active = clamp(item.selection.active, 0, new_end)
-		}
-		line_count := rope.tree_line_count(&doc.tree)
-		item.first_line = clamp(item.first_line, 0, rope.Line_Index(max(0, line_count - 1)))
+// editor_terminal_sync_finish updates the view selection and scroll position
+// after a sync: follow the tail when pinned, else clamp the selection to the
+// new document end.
+editor_terminal_sync_finish :: proc(buffer: ^Editor_Buffer, doc: ^txn.Doc, item: ^view.View, follow: bool) {
+	if item == nil {
+		return
 	}
+	new_end := rope.tree_byte_count(&doc.tree)
+	if follow {
+		item.selection = {anchor = new_end, active = new_end, affinity = .Left}
+		editor_terminal_reveal_tail(item, doc)
+	} else {
+		item.selection.anchor = clamp(item.selection.anchor, 0, new_end)
+		item.selection.active = clamp(item.selection.active, 0, new_end)
+	}
+	line_count := rope.tree_line_count(&doc.tree)
+	item.first_line = clamp(item.first_line, 0, rope.Line_Index(max(0, line_count - 1)))
 }
 
 // editor_terminal_reveal_tail scrolls the view so the last line (the shell's

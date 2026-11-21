@@ -258,6 +258,36 @@ test_multi_op_ordering :: proc(t: ^testing.T) {
 	}
 }
 
+// test_insert_at_replace_start pins the terminal's incremental-sync pattern: a
+// single transaction that inserts new scrollback bytes exactly at the start of
+// a replace of the visible tail. The apply order (range before insert at the
+// same position) must place the inserted bytes between the kept prefix and the
+// replacement.
+@(test)
+test_insert_at_replace_start :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	testing.expect(t, errs.ok(txn.doc_init(&doc, {chunk_size = 4})))
+	defer txn.doc_destroy(&doc)
+
+	// "SCROLL\nVISIBLE" = scrollback "SCROLL\n" (7 bytes) + visible "VISIBLE".
+	seed: txn.Transaction
+	seed = {source = .Command_Output, base_revision = 0, ops = {insert_op(0, "SCROLL\nVISIBLE")}}
+	testing.expect(t, errs.ok(txn.doc_apply(&doc, &seed)))
+
+	tr: txn.Transaction
+	tr = {
+		source = .Command_Output,
+		base_revision = txn.doc_revision(&doc),
+		ops = {insert_op(7, "MORE\n"), replace_op(7, 14, "NEW")},
+	}
+	testing.expect(t, errs.ok(txn.doc_apply(&doc, &tr)))
+
+	got := doc_flatten(t, &doc)
+	defer delete(got, context.allocator)
+	testing.expectf(t, string(got) == "SCROLL\nMORE\nNEW", "got %q", string(got))
+	expect_doc_ok(t, &doc, "after insert-at-replace-start")
+}
+
 // test_validation pins the operation checks: bounds, overlaps, and
 // duplicate insert positions are .Invalid_Input with no mutation.
 @(test)

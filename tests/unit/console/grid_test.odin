@@ -397,3 +397,96 @@ test_grid_erase_line_fills_background :: proc(t: ^testing.T) {
 		testing.expect(t, runs[0].style.bg.kind == .Basic && runs[0].style.bg.index == 4)
 	}
 }
+
+@(test)
+test_grid_append_styled_split :: proc(t: ^testing.T) {
+	// grid_append_scrollback_styled + grid_append_visible_styled produce the
+	// same transcript and style runs as grid_append_styled, so an incremental
+	// sync can re-serialize only the part that changed.
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 2, 80, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[31mred\x1b[0m\r\nblue\r\ngreen"))
+
+	whole := make([dynamic]byte, context.allocator)
+	defer delete(whole)
+	whole_runs := make([dynamic]console.Style_Run, context.allocator)
+	defer delete(whole_runs)
+	console.grid_append_styled(&s.grid, &whole, &whole_runs)
+
+	split := make([dynamic]byte, context.allocator)
+	defer delete(split)
+	split_runs := make([dynamic]console.Style_Run, context.allocator)
+	defer delete(split_runs)
+	console.grid_append_scrollback_styled(&s.grid, &split, &split_runs, 0)
+	console.grid_append_visible_styled(&s.grid, &split, &split_runs)
+
+	testing.expectf(t, string(split[:]) == string(whole[:]), "split %q != whole %q", string(split[:]), string(whole[:]))
+	testing.expect(t, len(split_runs) == len(whole_runs), "run count differs")
+	if len(split_runs) == len(whole_runs) {
+		for i in 0 ..< len(split_runs) {
+			testing.expectf(
+				t,
+				split_runs[i] == whole_runs[i],
+				"run %d: split %v != whole %v",
+				i,
+				split_runs[i],
+				whole_runs[i],
+			)
+		}
+	}
+}
+
+@(test)
+test_grid_scrollback_total :: proc(t: ^testing.T) {
+	// scrollback_total counts lines appended to the active scrollback and
+	// resets when the scrollback is replaced (alternate screen) or cleared.
+	g: console.Grid
+	console.grid_init(&g, 2, 80, 0, context.allocator)
+	defer console.grid_destroy(&g)
+
+	events := collect_events(transmute([]byte)string("a\r\nb\r\nc\r\nd\r\n"))
+	defer delete_events(events)
+	console.grid_feed(&g, events[:])
+	// rows=2, so "a", "b", and "c" scrolled off before "d" landed.
+	testing.expect(t, console.grid_scrollback_total(&g) == 3)
+	testing.expect(t, console.grid_scrollback_len(&g) == 3)
+
+	// Entering the alternate screen swaps in a fresh scrollback.
+	alt := collect_events(transmute([]byte)string("\x1b[?1049h"))
+	defer delete_events(alt)
+	console.grid_feed(&g, alt[:])
+	testing.expect(t, console.grid_scrollback_total(&g) == 0)
+	testing.expect(t, console.grid_scrollback_len(&g) == 0)
+
+	// Leaving restores the main scrollback but resets the counter.
+	leave := collect_events(transmute([]byte)string("\x1b[?1049l"))
+	defer delete_events(leave)
+	console.grid_feed(&g, leave[:])
+	testing.expect(t, console.grid_scrollback_total(&g) == 0)
+	testing.expect(t, console.grid_scrollback_len(&g) == 3)
+
+	// Erase-display mode 3 clears the scrollback and resets the counter.
+	clear := collect_events(transmute([]byte)string("\x1b[3J"))
+	defer delete_events(clear)
+	console.grid_feed(&g, clear[:])
+	testing.expect(t, console.grid_scrollback_total(&g) == 0)
+	testing.expect(t, console.grid_scrollback_len(&g) == 0)
+}
+
+@(test)
+test_grid_scrollback_trim_frees :: proc(t: ^testing.T) {
+	// With a small max_scrollback, feeding many lines trims the front; the
+	// trimmed lines' text/runs must be freed. The test runner's tracking
+	// allocator flags any leak, so a clean pass pins the trim-free path.
+	g: console.Grid
+	console.grid_init(&g, 2, 80, 4, context.allocator)
+	defer console.grid_destroy(&g)
+
+	events := collect_events(transmute([]byte)string("a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng\r\nh\r\ni\r\nj\r\n"))
+	defer delete_events(events)
+	console.grid_feed(&g, events[:])
+
+	testing.expect(t, console.grid_scrollback_len(&g) == 4)
+	testing.expect(t, console.grid_scrollback_total(&g) == 9)
+}

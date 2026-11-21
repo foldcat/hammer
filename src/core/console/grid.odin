@@ -69,7 +69,14 @@ Grid :: struct {
 	// Each Line owns its text (runs/links are empty).
 	scrollback:     [dynamic]Line,
 	max_scrollback: int,
-	dirty:          bool,
+	// scrollback_total is a monotonic count of lines ever appended to the
+	// active scrollback. It resets to 0 whenever the scrollback is replaced
+	// (alternate-screen switch, erase-display mode 3), so a caller can detect
+	// both appends (total grows) and replacement (total shrinks) without
+	// tracking line identity. It is distinct from len(scrollback), which stays
+	// capped at max_scrollback while the front is trimmed.
+	scrollback_total: u64,
+	dirty:            bool,
 	// cursor_visible tracks DECTCEM (CSI ?25h/l): whether the terminal cursor
 	// is rendered. It defaults to true.
 	cursor_visible: bool,
@@ -226,6 +233,15 @@ grid_scrollback_len :: proc(g: ^Grid) -> int {
 	return len(g.scrollback)
 }
 
+// grid_scrollback_total reports the monotonic count of lines ever appended to
+// the active scrollback (see Grid.scrollback_total).
+grid_scrollback_total :: proc(g: ^Grid) -> u64 {
+	if g == nil {
+		return 0
+	}
+	return g.scrollback_total
+}
+
 // grid_feed consumes parsed ANSI events, updating the screen. It marks the
 // grid dirty whenever it receives any event (a no-op control is still a change
 // the caller must re-render; callers batch a frame's worth of output).
@@ -290,17 +306,64 @@ grid_append_styled :: proc(g: ^Grid, out: ^[dynamic]byte, runs: ^[dynamic]Style_
 	if g == nil {
 		return
 	}
-	for line in g.scrollback {
+	grid_append_scrollback_styled(g, out, runs, 0)
+	grid_append_visible_styled(g, out, runs)
+}
+
+// grid_append_scrollback_styled appends scrollback lines [start, len) to out
+// (each followed by '\n') and their coalesced style runs to runs. The run
+// offsets are relative to out's current length, matching grid_append_styled.
+grid_append_scrollback_styled :: proc(g: ^Grid, out: ^[dynamic]byte, runs: ^[dynamic]Style_Run, start: int) {
+	if g == nil {
+		return
+	}
+	for line in g.scrollback[start:] {
 		grid_append_line_styled(out, runs, line.text, line.runs)
 		append(out, '\n')
 	}
+}
+
+// grid_append_visible_styled appends the visible screen rows up to the last
+// non-empty one to out (each but the last followed by '\n') and their coalesced
+// style runs to runs, with offsets relative to out's current length. Rows are
+// serialized straight from the cells (no per-row Line allocation), so the
+// visible screen can be rebuilt every frame without allocating.
+grid_append_visible_styled :: proc(g: ^Grid, out: ^[dynamic]byte, runs: ^[dynamic]Style_Run) {
+	if g == nil {
+		return
+	}
 	last_row := grid_last_non_empty_row(g)
 	for row in 0 ..= last_row {
-		line := grid_row_line(g, row)
-		grid_append_line_styled(out, runs, line.text, line.runs)
-		line_destroy(line, g.allocator)
+		grid_append_row_styled(g, out, runs, row)
 		if row < last_row {
 			append(out, '\n')
+		}
+	}
+}
+
+// grid_append_row_styled encodes one screen row's cells (empty cells become
+// spaces, trailing empties trimmed) into out and extends runs with a coalesced
+// Style_Run per contiguous same-style cell range. Runs are appended relative to
+// out's current length.
+grid_append_row_styled :: proc(g: ^Grid, out: ^[dynamic]byte, runs: ^[dynamic]Style_Run, row: int) {
+	last := grid_row_last_col(g, row)
+	if last < 0 {
+		return
+	}
+	for col in 0 ..= last {
+		cell := cell_at(g, row, col)
+		r := cell.r
+		if r == 0 {
+			r = ' '
+		}
+		buf: [4]byte
+		n := encode_utf8(r, buf[:])
+		start := len(out)
+		append(out, ..buf[:n])
+		if len(runs) > 0 && runs[len(runs) - 1].end == start && style_equal(runs[len(runs) - 1].style, cell.style) {
+			runs[len(runs) - 1].end = len(out)
+		} else {
+			append(runs, Style_Run{start = start, end = len(out), style = cell.style})
 		}
 	}
 }
@@ -428,6 +491,7 @@ grid_switch_alternate :: proc(g: ^Grid, on: bool) {
 		g.saved_wrap_pending = g.wrap_pending
 		g.cells = make([dynamic]Cell, g.rows * g.cols, g.allocator)
 		g.scrollback = make([dynamic]Line, g.allocator)
+		g.scrollback_total = 0
 		g.cursor_row = 0
 		g.cursor_col = 0
 		g.wrap_pending = false
@@ -442,6 +506,7 @@ grid_switch_alternate :: proc(g: ^Grid, on: bool) {
 		delete(g.cells)
 		g.cells = g.saved_cells
 		g.scrollback = g.saved_scrollback
+		g.scrollback_total = 0
 		g.cursor_row = g.saved_cursor_row
 		g.cursor_col = g.saved_cursor_col
 		g.wrap_pending = g.saved_wrap_pending
@@ -795,6 +860,7 @@ grid_erase_display :: proc(g: ^Grid, mode: int) {
 			line_destroy(line, g.allocator)
 		}
 		resize(&g.scrollback, 0)
+		g.scrollback_total = 0
 	}
 }
 
@@ -910,6 +976,7 @@ grid_scroll_up :: proc(g: ^Grid) {
 	if top == 0 && bottom == g.rows - 1 {
 		line := grid_row_line(g, 0)
 		append(&g.scrollback, line)
+		g.scrollback_total += 1
 		if len(g.scrollback) > g.max_scrollback {
 			line_destroy(g.scrollback[0], g.allocator)
 			ordered_remove(&g.scrollback, 0)

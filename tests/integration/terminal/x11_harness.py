@@ -119,6 +119,11 @@ def main() -> int:
             type_text(x11, "printf '\\033[31mCOLOR\\033[0m\\n'")
             x11.tap(0xFF0D)
             time.sleep(0.4)
+            # Generate enough output to scroll into the scrollback, exercising
+            # the incremental append path (M10.07d).
+            type_text(x11, "seq 1 300")
+            x11.tap(0xFF0D)
+            time.sleep(0.8)
             type_text(x11, "clear")
             x11.tap(0xFF0D)
             time.sleep(0.4)
