@@ -445,6 +445,34 @@ test_sgr_combined_and_unknown :: proc(t: ^testing.T) {
 	testing.expect(t, !s.bold)
 }
 
+// --- Color resolution ---------------------------------------------------
+
+@(test)
+test_color_rgb_resolution :: proc(t: ^testing.T) {
+	// Default resolves to "no color".
+	_, has := console.color_rgb(console.Color{})
+	testing.expect(t, !has)
+	// Basic colors 0..15.
+	expect_rgb := proc(t: ^testing.T, color: console.Color, r, g, b: u8) {
+		resolved, ok := console.color_rgb(color)
+		testing.expect(t, ok)
+		testing.expectf(t, resolved == [3]u8{r, g, b}, "expected %d,%d,%d got %v", r, g, b, resolved)
+	}
+	expect_rgb(t, console.Color{kind = .Basic, index = 0}, 0x00, 0x00, 0x00)
+	expect_rgb(t, console.Color{kind = .Basic, index = 1}, 0xcd, 0x00, 0x00)
+	expect_rgb(t, console.Color{kind = .Basic, index = 9}, 0xff, 0x00, 0x00)
+	expect_rgb(t, console.Color{kind = .Basic, index = 15}, 0xff, 0xff, 0xff)
+	// 256-palette: cube and grayscale.
+	expect_rgb(t, console.Color{kind = .Palette, index = 16}, 0x00, 0x00, 0x00)
+	expect_rgb(t, console.Color{kind = .Palette, index = 21}, 0x00, 0x00, 0xff)
+	expect_rgb(t, console.Color{kind = .Palette, index = 196}, 0xff, 0x00, 0x00)
+	expect_rgb(t, console.Color{kind = .Palette, index = 231}, 0xff, 0xff, 0xff)
+	expect_rgb(t, console.Color{kind = .Palette, index = 232}, 0x08, 0x08, 0x08)
+	expect_rgb(t, console.Color{kind = .Palette, index = 255}, 0xee, 0xee, 0xee)
+	// True color passes through.
+	expect_rgb(t, console.Color{kind = .RGB, rgb = {10, 20, 30}}, 10, 20, 30)
+}
+
 // --- Parser -------------------------------------------------------------
 
 @(test)

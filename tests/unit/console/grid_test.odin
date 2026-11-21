@@ -241,6 +241,50 @@ test_grid_resize_while_in_alternate_screen :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_grid_append_styled :: proc(t: ^testing.T) {
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 24, 80, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[31mred\x1b[0m blue\r\n"))
+	out := make([dynamic]byte, context.allocator)
+	defer delete(out)
+	runs := make([dynamic]console.Style_Run, context.allocator)
+	defer delete(runs)
+	console.grid_append_styled(&s.grid, &out, &runs)
+	testing.expectf(t, string(out[:]) == "red blue", "got %q", string(out[:]))
+	testing.expect(t, len(runs) == 2)
+	if len(runs) == 2 {
+		testing.expect(t, runs[0].start == 0 && runs[0].end == 3)
+		testing.expect(t, runs[0].style.fg.kind == .Basic && runs[0].style.fg.index == 1)
+		testing.expect(t, runs[1].start == 3 && runs[1].end == 8)
+		testing.expect(t, runs[1].style.fg.kind == .Default)
+	}
+}
+
+@(test)
+test_grid_append_styled_scrollback :: proc(t: ^testing.T) {
+	// Styled lines that scroll into the scrollback keep their colors.
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 2, 80, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[32mgreen\x1b[0m\r\nblue\r\n"))
+	out := make([dynamic]byte, context.allocator)
+	defer delete(out)
+	runs := make([dynamic]console.Style_Run, context.allocator)
+	defer delete(runs)
+	console.grid_append_styled(&s.grid, &out, &runs)
+	testing.expectf(t, string(out[:]) == "green\nblue", "got %q", string(out[:]))
+	// "green" is green (fg basic 2) on the scrolled-off line; "blue" default.
+	testing.expect(t, len(runs) == 2)
+	if len(runs) == 2 {
+		testing.expect(t, runs[0].start == 0 && runs[0].end == 5)
+		testing.expect(t, runs[0].style.fg.kind == .Basic && runs[0].style.fg.index == 2)
+		testing.expect(t, runs[1].start == 6 && runs[1].end == 10)
+		testing.expect(t, runs[1].style.fg.kind == .Default)
+	}
+}
+
+@(test)
 test_grid_cursor_visibility_and_position :: proc(t: ^testing.T) {
 	s: console.Grid_Stream
 	console.grid_stream_init(&s, 24, 80, 0, context.allocator)

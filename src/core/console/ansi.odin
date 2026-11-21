@@ -40,6 +40,61 @@ Color :: struct {
 	rgb:   [3]u8,
 }
 
+// ANSI_BASIC is the standard xterm/VGA 16-color palette (indices 0..15), used
+// for SGR basic (30..37/40..47) and bright (90..97/100..107) colors.
+ANSI_BASIC := [16][3]u8 {
+	{0x00, 0x00, 0x00}, // 0 black
+	{0xcd, 0x00, 0x00}, // 1 red
+	{0x00, 0xcd, 0x00}, // 2 green
+	{0xcd, 0xcd, 0x00}, // 3 yellow
+	{0x00, 0x00, 0xee}, // 4 blue
+	{0xcd, 0x00, 0xcd}, // 5 magenta
+	{0x00, 0xcd, 0xcd}, // 6 cyan
+	{0xe5, 0xe5, 0xe5}, // 7 white
+	{0x7f, 0x7f, 0x7f}, // 8 bright black
+	{0xff, 0x00, 0x00}, // 9 bright red
+	{0x00, 0xff, 0x00}, // 10 bright green
+	{0xff, 0xff, 0x00}, // 11 bright yellow
+	{0x5c, 0x5c, 0xff}, // 12 bright blue
+	{0xff, 0x00, 0xff}, // 13 bright magenta
+	{0x00, 0xff, 0xff}, // 14 bright cyan
+	{0xff, 0xff, 0xff}, // 15 bright white
+}
+
+// color_rgb resolves an SGR color to 24-bit RGB. `has_color` is false for
+// `.Default`, which the caller resolves to the terminal's default
+// foreground/background. Basic indices clamp to 0..15; palette indices use the
+// standard xterm 256-color cube/grayscale.
+color_rgb :: proc(color: Color) -> (rgb: [3]u8, has_color: bool) {
+	switch color.kind {
+	case .Default:
+		return {}, false
+	case .Basic:
+		return ANSI_BASIC[color.index & 15], true
+	case .Palette:
+		return palette_rgb(color.index), true
+	case .RGB:
+		return color.rgb, true
+	}
+	return {}, false
+}
+
+// palette_rgb maps a 256-palette index to 24-bit RGB: 0..15 are the basic
+// colors, 16..231 the 6×6×6 color cube, and 232..255 a grayscale ramp.
+palette_rgb :: proc(index: u8) -> [3]u8 {
+	switch {
+	case index < 16:
+		return ANSI_BASIC[index]
+	case index < 232:
+		cube := [6]u8{0, 95, 135, 175, 215, 255}
+		n := int(index) - 16
+		return [3]u8{cube[n / 36], cube[(n % 36) / 6], cube[n % 6]}
+	case:
+		value := u8(8 + (int(index) - 232) * 10)
+		return [3]u8{value, value, value}
+	}
+}
+
 // Style is the resolved SGR rendering state. The zero value is the SGR reset
 // state: default colors, all attributes off.
 Style :: struct {

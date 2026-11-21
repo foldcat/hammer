@@ -38,6 +38,7 @@ Editor_Terminal :: struct {
 	pty:         process.Pty,
 	grid:        console.Grid_Stream,
 	render:      [dynamic]byte, // scratch for building the transcript text
+	styles:      [dynamic]console.Style_Run, // per-byte style spans of render
 	read_buffer: [TERMINAL_READ_BYTES]u8,
 	live:        bool, // child has not been reaped
 	eof:         bool, // master read reached end-of-stream
@@ -109,8 +110,10 @@ editor_alloc_terminal_buffer :: proc(shell: string) -> (^Editor_Buffer, errs.Err
 			return nil, err
 		}
 		buffer.terminal.render = make([dynamic]byte, permanent())
+		buffer.terminal.styles = make([dynamic]console.Style_Run, permanent())
 		name, clone_err := strings.clone(shell, permanent())
 		if clone_err != nil {
+			delete(buffer.terminal.styles)
 			delete(buffer.terminal.render)
 			console.grid_stream_destroy(&buffer.terminal.grid)
 			txn.doc_destroy(&buffer.doc)
@@ -158,6 +161,7 @@ editor_terminal_destroy :: proc(buffer: ^Editor_Buffer) {
 		t.done = true
 	}
 	delete(t.render)
+	delete(t.styles)
 	console.grid_stream_destroy(&t.grid)
 }
 
@@ -256,7 +260,8 @@ editor_terminal_sync :: proc(buffer: ^Editor_Buffer) {
 	follow := t.following
 
 	resize(&t.render, 0)
-	console.grid_append_text(&t.grid.grid, &t.render)
+	resize(&t.styles, 0)
+	console.grid_append_styled(&t.grid.grid, &t.render, &t.styles)
 
 	doc := &buffer.doc
 	total := rope.tree_byte_count(&doc.tree)
@@ -540,4 +545,59 @@ terminal_encode_rune :: proc(r: rune, out: []byte) -> int {
 		out[3] = u8(0x80 | (r & 0x3f))
 		return 4
 	}
+}
+
+// --- Terminal style color resolution (M10.07c) ---------------------------
+
+// terminal_style_fg resolves a console style's foreground to the renderer's
+// RGBA, falling back to the theme's body foreground for the default color.
+terminal_style_fg :: proc(style: console.Style) -> [4]f32 {
+	if rgb, has := console.color_rgb(style.fg); has {
+		return {f32(rgb[0]) / 255, f32(rgb[1]) / 255, f32(rgb[2]) / 255, 1}
+	}
+	return cfg.Theme.Body_Fg
+}
+
+// terminal_style_bg resolves a console style's background; ok is false for the
+// default color (no background fill is drawn).
+terminal_style_bg :: proc(style: console.Style) -> ([4]f32, bool) {
+	if rgb, has := console.color_rgb(style.bg); has {
+		return {f32(rgb[0]) / 255, f32(rgb[1]) / 255, f32(rgb[2]) / 255, 1}, true
+	}
+	return {}, false
+}
+
+// terminal_run_at returns the style run containing byte offset off, if any.
+// Runs are sorted by start and never overlap.
+terminal_run_at :: proc(styles: []console.Style_Run, off: int) -> (console.Style, bool) {
+	lo := 0
+	hi := len(styles)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		run := styles[mid]
+		if off < run.start {
+			hi = mid
+		} else if off >= run.end {
+			lo = mid + 1
+		} else {
+			return run.style, true
+		}
+	}
+	return {}, false
+}
+
+// terminal_first_run_before returns the index of the first style run that can
+// overlap [line_start, ...) — the first run with end > line_start.
+terminal_first_run_before :: proc(styles: []console.Style_Run, line_start: int) -> int {
+	lo := 0
+	hi := len(styles)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if styles[mid].end <= line_start {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
 }

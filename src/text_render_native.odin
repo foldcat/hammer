@@ -9,6 +9,7 @@ import "core:math"
 import sg "sokol:gfx"
 
 import config "core/config"
+import console "core/console"
 import coords "core/coords"
 import errs "core/errs"
 import "core/ime"
@@ -162,7 +163,7 @@ text_render_begin :: proc() {
 	text_draws = make([dynamic]Glyph_Draw, context.temp_allocator)
 }
 
-text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbers: bool, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, first_row: int, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbers: bool, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, first_row: int, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, styles: []console.Style_Run, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	if doc == nil || text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 || first_row < 0 {
 		return
 	}
@@ -241,6 +242,7 @@ text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbe
 			wrap_mode,
 			horizontal_offset,
 			skip_rows,
+			styles,
 			fb,
 			quads,
 		)
@@ -298,6 +300,7 @@ text_render_line :: proc(
 	wrap_mode: config.Wrap_Mode,
 	horizontal_offset: ^f32,
 	skip_rows: int,
+	styles: []console.Style_Run,
 	fb: coords.Physical_Size,
 	quads: ^[dynamic]Vertex,
 ) -> int {
@@ -396,7 +399,10 @@ text_render_line :: proc(
 		if !composing {
 			text_render_selection(visible.text, expansion, selection, start, end, body, row_top, line_height, row, x_offset, fb, quads)
 		}
-		text_collect_glyphs(visible.text, font_list, body.x * state.dpi.scale, row_baseline, row, x_offset, fb, cfg.Theme.Body_Fg)
+		if len(styles) > 0 {
+			text_render_backgrounds(visible.text, expansion, styles, start, end, body, row_top, line_height, row, x_offset, fb, quads)
+		}
+		text_collect_glyphs(visible.text, font_list, body.x * state.dpi.scale, row_baseline, row, x_offset, styles, start, fb, cfg.Theme.Body_Fg)
 
 		if composing && preedit_start < preedit_end && preedit_start <= visible.end {
 			preedit_end = min(preedit_end, visible.end)
@@ -523,6 +529,57 @@ text_render_selection :: proc(
 	}
 }
 
+// text_render_backgrounds draws the non-default background fills of terminal
+// style runs that intersect this line. It mirrors text_render_selection but
+// iterates style runs (SPECS §12.7: styles stored separately from text). Runs
+// with a default background are skipped, so a plain shell draws nothing here.
+text_render_backgrounds :: proc(
+	text: shaping.Text,
+	expansion: shaping.Tab_Expansion,
+	styles: []console.Style_Run,
+	line_start, line_end: int,
+	body: layout.Rect,
+	line_top, line_height: f32,
+	row: shaping.Wrap_Row,
+	x_offset: f32,
+	fb: coords.Physical_Size,
+	quads: ^[dynamic]Vertex,
+) {
+	index := terminal_first_run_before(styles, line_start)
+	for index < len(styles) && styles[index].start < line_end {
+		run := styles[index]
+		index += 1
+		bg, has_bg := terminal_style_bg(run.style)
+		if !has_bg {
+			continue
+		}
+		source_start := max(run.start, line_start) - line_start
+		source_end := min(run.end, line_end) - line_start
+		start, start_ok := shaping.tab_display_offset(expansion, source_start)
+		end, end_ok := shaping.tab_display_offset(expansion, source_end)
+		if !start_ok || !end_ok {
+			continue
+		}
+		start = min(start, measurement_end(text))
+		end = min(end, measurement_end(text))
+		if start >= end {
+			continue
+		}
+		spans, err := shaping.selection_spans(text, start, end, state.dpi.scale, context.temp_allocator)
+		if !errs.ok(err) {
+			text_render_error(err)
+			continue
+		}
+		for span in spans {
+			span_start := max(span.start, row.start)
+			span_end := min(span.end, row.end)
+			if span_start < span_end {
+				text_append_quad(quads, body.x + x_offset + span_start, line_top, span_end - span_start, line_height, body, bg, fb)
+			}
+		}
+	}
+}
+
 measurement_end :: proc(text: shaping.Text) -> int {
 	end := 0
 	for run in text.runs {
@@ -551,7 +608,7 @@ text_render_line_number :: proc(gutter: layout.Rect, line_index: int, pixel_size
 	font_storage: [shaping.MAX_FONTS]shaping.Font
 	font_list := product_shaping_fonts(&font_storage)
 	text_draw_body = gutter
-	text_collect_glyphs(visible.text, font_list, origin_x, baseline, {start = 0, end = advance}, 0, fb, LINE_NUMBER_COLOR)
+	text_collect_glyphs(visible.text, font_list, origin_x, baseline, {start = 0, end = advance}, 0, nil, 0, fb, LINE_NUMBER_COLOR)
 }
 
 text_collect_glyphs :: proc(
@@ -560,6 +617,8 @@ text_collect_glyphs :: proc(
 	origin_x, baseline: f32,
 	row: shaping.Wrap_Row,
 	x_offset: f32,
+	styles: []console.Style_Run,
+	line_start: int,
 	fb: coords.Physical_Size,
 	color: [4]f32,
 ) {
@@ -594,11 +653,17 @@ text_collect_glyphs :: proc(
 			if x + f32(entry.rect.width) < 0 || y + f32(entry.rect.height) < 0 || x >= fb.width || y >= fb.height {
 				continue
 			}
+			glyph_color := color
+			if len(styles) > 0 {
+				if style, found := terminal_run_at(styles, line_start + glyph.cluster); found {
+					glyph_color = terminal_style_fg(style)
+				}
+			}
 			if len(text_draws) == 0 || text_draws[len(text_draws) - 1].page != entry.page ||
 				text_draws[len(text_draws) - 1].body != text_draw_body {
 				append(&text_draws, Glyph_Draw{page = entry.page, start = len(text_vertices), body = text_draw_body})
 			}
-			text_append_glyph(x, y, entry, fb, color)
+			text_append_glyph(x, y, entry, fb, glyph_color)
 			text_draws[len(text_draws) - 1].count += 6
 		}
 	}

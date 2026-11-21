@@ -159,7 +159,11 @@ render_frame :: proc() {
 				}
 				text_window := placed.window
 				text_window.body = text
-				text_render_document(text_window, gutter, item.line_numbers, doc, item.selection, item.first_line, item.first_row, body_active, 0, item.wrap_mode, &item.horizontal_offset, phys, &verts)
+				styles: []console.Style_Run
+				if buffer := editor_buffer_for_view(item); buffer != nil && buffer.kind == .Terminal {
+					styles = buffer.terminal.styles[:]
+				}
+				text_render_document(text_window, gutter, item.line_numbers, doc, item.selection, item.first_line, item.first_row, body_active, 0, item.wrap_mode, &item.horizontal_offset, styles, phys, &verts)
 				if buffer := editor_buffer_for_view(item); buffer != nil && buffer.kind == .Terminal && buffer.terminal.live {
 					render_terminal_cursor(buffer, item, text, phys, &cursor_verts)
 				}
@@ -193,7 +197,7 @@ tag_content_rect :: proc(tag, control: layout.Rect) -> layout.Rect {
 
 text_render_tag :: proc(rect: layout.Rect, doc: ^txn.Doc, selection: txn.Selection, active: bool, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	win := layout.Window{body = rect}
-	text_render_document(win, {}, false, doc, selection, 0, 0, active, rect.height, .Truncate, nil, fb, quads)
+	text_render_document(win, {}, false, doc, selection, 0, 0, active, rect.height, .Truncate, nil, nil, fb, quads)
 }
 
 current_layout :: proc() -> (layout.Geometry, coords.Physical_Size, bool) {

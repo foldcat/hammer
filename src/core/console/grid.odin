@@ -32,6 +32,17 @@ MAX_GRID_COLS :: 1024
 DEFAULT_SCROLLBACK_LINES :: 10000
 MAX_SCROLLBACK_LINES :: 1_000_000
 
+// Style_Run is a span of the styled transcript (SPECS §12.7: styles stored
+// separately from text). start/end are byte offsets into the text emitted by
+// grid_append_styled; `style` is the resolved SGR style for every byte in the
+// span. Runs are emitted in order and never overlap; newline bytes fall between
+// runs (they are line separators, not styled cells).
+Style_Run :: struct {
+	start: int,
+	end:   int,
+	style: Style,
+}
+
 // Grid is a fixed rows×cols terminal screen plus a bounded scrollback. It is a
 // fixed-location value: keep it at one address and do not copy it.
 Grid :: struct {
@@ -217,6 +228,46 @@ grid_append_text :: proc(g: ^Grid, out: ^[dynamic]byte) {
 		if row < last_row {
 			append(out, '\n')
 		}
+	}
+}
+
+// grid_append_styled is grid_append_text plus a parallel style-run list: out
+// receives the same bytes, and runs receives Style_Run spans (byte offsets into
+// out) covering every styled byte. Scrollback lines carry their coalesced runs;
+// visible rows are built with grid_row_line. Callers that only need plain text
+// use grid_append_text.
+grid_append_styled :: proc(g: ^Grid, out: ^[dynamic]byte, runs: ^[dynamic]Style_Run) {
+	if g == nil {
+		return
+	}
+	for line in g.scrollback {
+		grid_append_line_styled(out, runs, line.text, line.runs)
+		append(out, '\n')
+	}
+	last_row := grid_last_non_empty_row(g)
+	for row in 0 ..= last_row {
+		line := grid_row_line(g, row)
+		grid_append_line_styled(out, runs, line.text, line.runs)
+		line_destroy(line, g.allocator)
+		if row < last_row {
+			append(out, '\n')
+		}
+	}
+}
+
+// grid_append_line_styled appends text (UTF-8) and style runs for one line.
+// `text` and `runs` are parallel: runs' lengths are in runes and cover text.
+grid_append_line_styled :: proc(out: ^[dynamic]byte, runs: ^[dynamic]Style_Run, text: []rune, run_list: []Run) {
+	rune_index := 0
+	for run in run_list {
+		start := len(out)
+		for _ in 0 ..< run.length {
+			buf: [4]byte
+			n := encode_utf8(text[rune_index], buf[:])
+			append(out, ..buf[:n])
+			rune_index += 1
+		}
+		append(runs, Style_Run{start = start, end = len(out), style = run.style})
 	}
 }
 
@@ -624,21 +675,30 @@ grid_row_line :: proc(g: ^Grid, row: int) -> Line {
 	return grid_row_line_stride(g, row, g.cols)
 }
 
-// grid_row_line_stride is grid_row_line with an explicit column stride.
+// grid_row_line_stride is grid_row_line with an explicit column stride. The
+// returned Line carries coalesced style runs (one Run per contiguous cell
+// range sharing a style), so scrollback lines keep their colors.
 grid_row_line_stride :: proc(g: ^Grid, row, cols: int) -> Line {
 	last := grid_row_last_col_stride(g, row, cols)
 	if last < 0 {
 		return Line{}
 	}
 	text := make([]rune, last + 1, g.allocator)
+	runs := make([dynamic]Run, g.allocator)
 	for col in 0 ..= last {
-		r := cell_at_stride(g, row, col, cols).r
+		cell := cell_at_stride(g, row, col, cols)
+		r := cell.r
 		if r == 0 {
 			r = ' '
 		}
 		text[col] = r
+		if len(runs) > 0 && style_equal(runs[len(runs) - 1].style, cell.style) {
+			runs[len(runs) - 1].length += 1
+		} else {
+			append(&runs, Run{length = 1, style = cell.style})
+		}
 	}
-	return Line{text = text}
+	return Line{text = text, runs = runs[:]}
 }
 
 // grid_row_last_col returns the index of the last non-empty cell in row, or -1.
