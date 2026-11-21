@@ -8,7 +8,27 @@ package icu
 import "core:c"
 
 when ODIN_OS == .Linux {
-	foreign import lib "system:icuuc"
+	// Static ICU (e.g. a Gentoo ICU built with USE=static-libs) bakes the
+	// icuuc/icudata archives into the product so a mismatched system
+	// libicuuc cannot fail at load time with errors such as "undefined
+	// symbol: ubrk_close". make.odin stages the archives into build/static
+	// and defines HAMMER_STATIC_ICU when they are available; otherwise the
+	// bindings keep the dynamic system:icuuc linkage. The archives are
+	// referenced by a relative path from this package directory to the
+	// generated build tree.
+	STATIC_ICU :: #config(HAMMER_STATIC_ICU, false)
+	when STATIC_ICU {
+		foreign import lib {
+			"../../../build/static/libicuuc.a",
+			"../../../build/static/libicudata.a",
+			// ICU is built as C++: the static archives reference the C++
+			// runtime ABI (vtables, operator delete). libstdc++ is a core
+			// system library and stays dynamically linked.
+			"system:stdc++",
+		}
+	} else {
+		foreign import lib "system:icuuc"
+	}
 } else when ODIN_OS == .Windows {
 	foreign import lib "system:icu.lib"
 } else {

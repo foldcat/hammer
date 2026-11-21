@@ -165,6 +165,15 @@ ICU_VERSION :: "78.3"
 FONTCONFIG_VERSION :: "2.18.3"
 SHADERC_VERSION :: "shaderc-2026.3"
 
+// Generated static-library staging directory for text dependencies. Static
+// archives located on the system are symlinked here (build/ is gitignored) so
+// the bindings can reference them by a stable relative path.
+STATIC_TEXT_DIR :: OUT_DIR + "/static"
+
+// Release linker flags: strip the symbol table and debug sections, which also
+// removes the embedded source-file and compilation-directory paths.
+RELEASE_LD_FLAGS :: "-extra-linker-flags:-Wl,-s"
+
 CORE_TEST_PACKAGES := []string {
 	"tests/unit/errs",
 	"tests/unit/logging",
@@ -966,27 +975,29 @@ main :: proc() {
 		}
 	}
 
-	cmd_args: []string
+	// Static text dependencies (Linux): bake ICU into the product when its
+	// static archives are available so a mismatched system ICU cannot fail
+	// the product at load time.
+	static_flags := ""
+	when ODIN_OS == .Linux {
+		static_flags = static_icu_flags()
+	}
+
+	cmd_args: [dynamic]string
+	defer delete(cmd_args)
 	inherit_stdio := false
 	switch mode {
 	case "run":
 		fmt.println("[Build] Running project (Debug)...")
-		cmd_args = []string{"odin", "run", SRC_DIR, SOKOL_COLLECTION, "-vet", "-debug"}
+		append(&cmd_args, "odin", "run", SRC_DIR, SOKOL_COLLECTION, "-vet", "-debug")
 		inherit_stdio = true
 	case "build":
 		fmt.println("[Build] Building project (Debug) -> " + BINARY_PATH + "...")
-		cmd_args = []string {
-			"odin",
-			"build",
-			SRC_DIR,
-			SOKOL_COLLECTION,
-			"-vet",
-			"-out:" + BINARY_PATH,
-			"-debug",
-		}
+		append(&cmd_args, "odin", "build", SRC_DIR, SOKOL_COLLECTION, "-vet", "-out:" + BINARY_PATH, "-debug")
 	case "release":
 		fmt.println("[Build] Building project (Release) -> " + BINARY_PATH + "...")
-		cmd_args = []string {
+		append(
+			&cmd_args,
 			"odin",
 			"build",
 			SRC_DIR,
@@ -995,21 +1006,18 @@ main :: proc() {
 			"-out:" + BINARY_PATH,
 			"-o:speed",
 			"-no-bounds-check",
-		}
+			RELEASE_LD_FLAGS,
+		)
 	case:
 		fmt.println("[Build] Building project (Debug default) -> " + BINARY_PATH + "...")
-		cmd_args = []string {
-			"odin",
-			"build",
-			SRC_DIR,
-			SOKOL_COLLECTION,
-			"-vet",
-			"-out:" + BINARY_PATH,
-			"-debug",
-		}
+		append(&cmd_args, "odin", "build", SRC_DIR, SOKOL_COLLECTION, "-vet", "-out:" + BINARY_PATH, "-debug")
 	}
 
-	run_odin(cmd_args, inherit_stdio)
+	if static_flags != "" {
+		append(&cmd_args, static_flags)
+	}
+
+	run_odin(cmd_args[:], inherit_stdio)
 }
 
 // --- Configuration staging (M01.02) ------------------------------------
@@ -1334,6 +1342,65 @@ text_deps_present :: proc() -> bool {
 		FONTCONFIG_VERSION,
 		SHADERC_VERSION,
 	)
+	return true
+}
+
+// static_icu_flags stages the ICU static archives (icuuc + icudata) into
+// build/static and returns the build define that switches the ICU bindings to
+// static linking. It returns "" when the archives are unavailable (for
+// example, a Gentoo ICU built without USE=static-libs), in which case the
+// bindings keep their dynamic system:icuuc linkage. The staged archives are
+// referenced by a relative path from src/text/icu, so the product binary no
+// longer depends on a matching libicuuc.so being present at run time.
+//
+// HarfBuzz, FreeType, and fontconfig remain dynamically linked for now: their
+// static archives are not available on this system, and HarfBuzz's static
+// closure (glib, graphite2, pcre2, ...) is not yet audited.
+static_icu_flags :: proc() -> string {
+	libdir, ok := tool_output([]string{"pkg-config", "--variable=libdir", "icu-uc"})
+	if !ok || libdir == "" {
+		fmt.println("[Setup] cannot locate the ICU library directory; linking ICU dynamically")
+		return ""
+	}
+
+	archives := []string{"icuuc", "icudata"}
+	for name in archives {
+		src := fmt.tprintf("%s/lib%s.a", libdir, name)
+		if !os.exists(src) {
+			fmt.printf("[Setup] static ICU unavailable (missing %s); linking ICU dynamically\n", src)
+			return ""
+		}
+	}
+
+	os.make_directory_all(STATIC_TEXT_DIR)
+	for name in archives {
+		src := fmt.tprintf("%s/lib%s.a", libdir, name)
+		dst := fmt.tprintf("%s/lib%s.a", STATIC_TEXT_DIR, name)
+		if !stage_static_archive(src, dst) {
+			return ""
+		}
+	}
+	fmt.println("[Setup] static ICU available; linking ICU into the product")
+	return "-define:HAMMER_STATIC_ICU=true"
+}
+
+// stage_static_archive makes `dst` resolve to `src` (a copy on Windows, a
+// symlink elsewhere). It is idempotent and never follows a stale target.
+stage_static_archive :: proc(src, dst: string) -> bool {
+	if os.exists(dst) {
+		return true
+	}
+	when ODIN_OS == .Windows {
+		if err := os.copy_file(dst, src); err != nil {
+			fmt.eprintf("[Setup] cannot copy %s to %s: %v\n", src, dst, err)
+			return false
+		}
+	} else {
+		if err := os.symlink(src, dst); err != nil {
+			fmt.eprintf("[Setup] cannot symlink %s: %v\n", dst, err)
+			return false
+		}
+	}
 	return true
 }
 
