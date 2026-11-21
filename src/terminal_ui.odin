@@ -6,8 +6,10 @@ import "core:strings"
 
 import command "core/command"
 import console "core/console"
+import coords "core/coords"
 import errs "core/errs"
 import input "core/input"
+import layout "core/layout"
 import process "core/process"
 import rope "core/rope"
 import txn "core/txn"
@@ -40,6 +42,7 @@ Editor_Terminal :: struct {
 	live:        bool, // child has not been reaped
 	eof:         bool, // master read reached end-of-stream
 	done:        bool, // pty destroyed and output finalized
+	following:   bool, // view is pinned to the tail (new output scrolls to it)
 	status:      process.Exit_Status,
 }
 
@@ -65,6 +68,9 @@ editor_command_win :: proc(cmd_context: ^command.Context, invocation: command.In
 	if !errs.ok(open_err) {
 		return open_err
 	}
+	// A terminal is a fixed monospace grid: no line numbers, no soft wrap.
+	item.wrap_mode = .Truncate
+	item.line_numbers = false
 	editor_activate_window(item.window_id)
 	log.infof("terminal: opened window=%d buffer=%d shell=%q", u64(item.window_id), u64(buffer.id), shell)
 	return {}
@@ -114,6 +120,7 @@ editor_alloc_terminal_buffer :: proc(shell: string) -> (^Editor_Buffer, errs.Err
 		}
 		buffer.terminal.pty = pty
 		buffer.terminal.live = true
+		buffer.terminal.following = true
 		buffer.job_name = name
 		editor.next_buffer_id += 1
 		editor.buffer_count += 1
@@ -171,6 +178,9 @@ editor_poll_terminal :: proc(buffer: ^Editor_Buffer) {
 	if t.done {
 		return
 	}
+	// Match the grid to the window's text area and notify the child (SIGWINCH)
+	// when the size changed.
+	editor_terminal_resize_if_needed(buffer)
 	// Drain available output into the terminal grid.
 	if t.pty.master.open {
 		for {
@@ -243,11 +253,7 @@ editor_terminal_sync :: proc(buffer: ^Editor_Buffer) {
 	console.grid_clear_dirty(&t.grid.grid)
 
 	item := editor_first_view_for_buffer(buffer.id)
-	follow := false
-	if item != nil {
-		end := rope.tree_byte_count(&buffer.doc.tree)
-		follow = item.selection.anchor == end && item.selection.active == end
-	}
+	follow := t.following
 
 	resize(&t.render, 0)
 	console.grid_append_text(&t.grid.grid, &t.render)
@@ -304,6 +310,88 @@ editor_terminal_reveal_tail :: proc(item: ^view.View, doc: ^txn.Doc) {
 	item.wheel_remainder = 0
 }
 
+// editor_terminal_resize_if_needed reflows the terminal grid and notifies the
+// child (SIGWINCH on Unix) when the window's text area no longer matches the
+// grid's rows×cols. It runs once per frame for live terminals. Cell dimensions
+// are derived from the body font, matching the grid's monospace assumption.
+editor_terminal_resize_if_needed :: proc(buffer: ^Editor_Buffer) {
+	t := &buffer.terminal
+	item := editor_first_view_for_buffer(buffer.id)
+	if item == nil {
+		return
+	}
+	geometry, _, ok := current_layout()
+	if !ok {
+		return
+	}
+	win, found := window_for_id(&geometry, item.window_id)
+	if !found {
+		return
+	}
+	_, _, text := editor_body_parts(item, &buffer.doc, win.body)
+	line_height := coords.points_to_logical_px(state.dpi.points) * cfg.Line_Height
+	cell_width := text_measure_advance("M")
+	if line_height <= 0 || cell_width <= 0 || text.width <= 0 || text.height <= 0 {
+		return
+	}
+	cols := clamp(int(text.width / cell_width), 1, console.MAX_GRID_COLS)
+	rows := clamp(int(text.height / line_height), 1, console.MAX_GRID_ROWS)
+	if cols == console.grid_cols(&t.grid.grid) && rows == console.grid_rows(&t.grid.grid) {
+		return
+	}
+	console.grid_resize(&t.grid.grid, rows, cols)
+	if resize_err := process.pty_resize(
+		&t.pty,
+		{cols = u16(cols), rows = u16(rows)},
+		permanent(),
+	); !errs.ok(resize_err) {
+		editor_report(resize_err)
+	} else {
+		log.infof("terminal: resize buffer=%d cols=%d rows=%d", u64(buffer.id), cols, rows)
+	}
+}
+
+// editor_terminal_sync_follow updates the terminal's tail-following flag from
+// whether the bottom line is currently visible. The flag is what keeps new
+// output pinned to the tail (editor_terminal_sync) versus letting the user
+// read earlier scrollback undisturbed.
+editor_terminal_sync_follow :: proc(buffer: ^Editor_Buffer, item: ^view.View, text_rect: layout.Rect) {
+	if buffer == nil || item == nil {
+		return
+	}
+	doc := &buffer.doc
+	visible := editor_visible_rows(text_rect)
+	line_count := rope.tree_line_count(&doc.tree)
+	buffer.terminal.following = int(item.first_line) + visible >= line_count
+}
+
+// editor_terminal_scrollback scrolls a live terminal's view by one screen
+// (up=true scrolls into older scrollback, up=false toward the tail) and
+// updates the follow flag. It returns true when the event was consumed as
+// navigation rather than forwarded to the child.
+editor_terminal_scrollback :: proc(buffer: ^Editor_Buffer, up: bool) -> bool {
+	item := editor_first_view_for_buffer(buffer.id)
+	if item == nil {
+		return false
+	}
+	geometry, _, ok := current_layout()
+	if !ok {
+		return false
+	}
+	win, found := window_for_id(&geometry, item.window_id)
+	if !found {
+		return false
+	}
+	_, _, text := editor_body_parts(item, &buffer.doc, win.body)
+	delta := editor_visible_rows(text)
+	if up {
+		delta = -delta
+	}
+	editor_scroll_visual_rows(item, &buffer.doc, text, delta)
+	editor_terminal_sync_follow(buffer, item, text)
+	return true
+}
+
 // editor_active_terminal reports whether the active body is a live terminal.
 editor_active_terminal :: proc() -> bool {
 	if editor.active_text_kind != .Body {
@@ -345,6 +433,24 @@ editor_terminal_input :: proc(event: input.Event) -> bool {
 		}
 		editor_terminal_write_bytes(t, transmute([]byte)e.text)
 	case input.Key_Down:
+		// Ctrl+Shift+C copies the terminal's selection (the terminal
+		// convention) instead of sending a control byte to the shell.
+		if e.key == .C && e.modifiers == {.Ctrl, .Shift} {
+			editor_copy_selection()
+			return true
+		}
+		// Shift+PageUp/PageDown navigate the scrollback without reaching the
+		// shell, so a user can read earlier output while the shell stays live.
+		if .Shift in e.modifiers {
+			#partial switch e.key {
+			case .Page_Up:
+				editor_terminal_scrollback(buffer, true)
+				return true
+			case .Page_Down:
+				editor_terminal_scrollback(buffer, false)
+				return true
+			}
+		}
 		editor_terminal_write_key(t, e.key, e.modifiers)
 	case input.Key_Up:
 		// Consumed; key releases carry nothing to forward.

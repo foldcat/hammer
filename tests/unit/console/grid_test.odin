@@ -173,3 +173,84 @@ test_grid_echo_command_chunked :: proc(t: ^testing.T) {
 	console.grid_append_text(&s.grid, &out)
 	testing.expectf(t, string(out[:]) == "sh-5.3$ echo terminal-ok\nterminal-ok\nsh-5.3$ ", "got %q", string(out[:]))
 }
+
+@(test)
+test_grid_alternate_screen :: proc(t: ^testing.T) {
+	// Entering the alternate screen clears it; leaving restores the main screen.
+	expect_grid(t, 24, 80, transmute([]byte)string("main\r\n\x1b[?1049hALT\x1b[?1049l"), "main")
+	// Content written while in the alternate screen does not leak into main.
+	expect_grid(t, 24, 80, transmute([]byte)string("one\r\ntwo\r\n\x1b[?1049hvi\r\n\x1b[?1049l"), "one\ntwo")
+}
+
+@(test)
+test_grid_alternate_screen_preserves_scrollback :: proc(t: ^testing.T) {
+	// The main screen's scrollback survives an alternate-screen round trip.
+	expect_grid(
+		t,
+		2,
+		80,
+		transmute([]byte)string("one\r\ntwo\r\nthree\r\n\x1b[?1049hX\x1b[?1049l"),
+		"one\ntwo\nthree",
+	)
+}
+
+@(test)
+test_grid_resize_rewraps :: proc(t: ^testing.T) {
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 2, 8, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("abcdefgh\r\n"))
+	// A single full line re-wraps into two lines at the narrower width.
+	console.grid_resize(&s.grid, 2, 4)
+	out := make([dynamic]byte, context.allocator)
+	defer delete(out)
+	console.grid_append_text(&s.grid, &out)
+	testing.expectf(t, string(out[:]) == "abcd\nefgh", "got %q", string(out[:]))
+}
+
+@(test)
+test_grid_resize_shrinks_height_into_scrollback :: proc(t: ^testing.T) {
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 3, 80, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("a\r\nb\r\nc\r\n"))
+	console.grid_resize(&s.grid, 1, 80)
+	out := make([dynamic]byte, context.allocator)
+	defer delete(out)
+	console.grid_append_text(&s.grid, &out)
+	testing.expectf(t, string(out[:]) == "a\nb\nc", "got %q", string(out[:]))
+}
+
+@(test)
+test_grid_resize_while_in_alternate_screen :: proc(t: ^testing.T) {
+	// Resizing while the alternate screen is active must also reflow the parked
+	// main screen, so exiting the alternate screen restores it at the new size
+	// (well-formed, no stale-dimension mismatch).
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 2, 80, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	console.grid_stream_feed(&s, transmute([]byte)string("hello\r\n"))
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?1049h"))
+	console.grid_stream_feed(&s, transmute([]byte)string("vi"))
+	console.grid_resize(&s.grid, 2, 3)
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?1049l"))
+	out := make([dynamic]byte, context.allocator)
+	defer delete(out)
+	console.grid_append_text(&s.grid, &out)
+	testing.expectf(t, string(out[:]) == "hel\nlo", "got %q", string(out[:]))
+}
+
+@(test)
+test_grid_cursor_visibility_and_position :: proc(t: ^testing.T) {
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 24, 80, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	testing.expect(t, console.grid_cursor_visible(&s.grid))
+	console.grid_stream_feed(&s, transmute([]byte)string("hello"))
+	testing.expect(t, console.grid_cursor_row(&s.grid) == 0)
+	testing.expect(t, console.grid_cursor_col(&s.grid) == 5)
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?25l"))
+	testing.expect(t, !console.grid_cursor_visible(&s.grid))
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?25h"))
+	testing.expect(t, console.grid_cursor_visible(&s.grid))
+}

@@ -17,6 +17,7 @@ import "core:log"
 
 import sg "sokol:gfx"
 
+import console "core/console"
 import "core/errs"
 import coords "core/coords"
 import layout "core/layout"
@@ -52,10 +53,14 @@ Vertex :: struct {
 
 QUAD_VERTEX_COUNT :: 12
 MAX_QUADS_PER_DRAW :: 4096
+// MAX_CURSOR_QUADS bounds the overlay quads drawn after the text pass (the
+// terminal block cursor). A few live terminals is well within this bound.
+MAX_CURSOR_QUADS :: 64
 SCROLLBAR_THUMB_COLOR :: [4]f32{82.0 / 255.0, 82.0 / 255.0, 82.0 / 255.0, 1}
 
 render_pipeline: sg.Pipeline
 render_vertex_buffer: sg.Buffer
+render_cursor_buffer: sg.Buffer
 
 // render_setup creates the shader, pipeline, and vertex buffer. Called
 // once from init after sg.setup. A failed shader compile or pipeline
@@ -92,6 +97,11 @@ render_setup :: proc() {
 		size = MAX_QUADS_PER_DRAW * 6 * size_of(Vertex),
 		label = "hammer-quad-buffer",
 	})
+	render_cursor_buffer = sg.make_buffer({
+		usage = {vertex_buffer = true, write_transient = true},
+		size = MAX_CURSOR_QUADS * 6 * size_of(Vertex),
+		label = "hammer-cursor-buffer",
+	})
 	text_render_setup()
 }
 
@@ -102,6 +112,7 @@ render_frame :: proc() {
 	}
 
 	verts := make([dynamic]Vertex, 0, context.temp_allocator)
+	cursor_verts := make([dynamic]Vertex, 0, context.temp_allocator)
 	pad := workspace_metrics().pad
 	global_tag := geometry.global_tag
 	global_tag.x += pad
@@ -149,11 +160,17 @@ render_frame :: proc() {
 				text_window := placed.window
 				text_window.body = text
 				text_render_document(text_window, gutter, item.line_numbers, doc, item.selection, item.first_line, item.first_row, body_active, 0, item.wrap_mode, &item.horizontal_offset, phys, &verts)
+				if buffer := editor_buffer_for_view(item); buffer != nil && buffer.kind == .Terminal && buffer.terminal.live {
+					render_terminal_cursor(buffer, item, text, phys, &cursor_verts)
+				}
 			}
 		}
 	}
 	draw_quads(verts[:])
 	text_render_draw(phys)
+	// The terminal cursor is drawn after the glyphs so it covers the character
+	// under it (a block cursor sits on top of the cell, not behind it).
+	draw_cursor_quads(cursor_verts[:])
 
 	when ODIN_OS == .Linux {
 		if win, found := window_for_id(&geometry, editor.active_window); found {
@@ -261,6 +278,36 @@ render_append_quad :: proc(verts: ^[dynamic]Vertex, rect: layout.Rect, color: [4
 	quad_vertices(verts[start:], rect, color, fb)
 }
 
+// render_terminal_cursor draws a block cursor at a live terminal's grid cursor
+// position. The grid is monospaced: each cell is one body-font advance wide and
+// one line high, and the transcript document is the grid's scrollback followed
+// by its visible rows (screen row r is document line scrollback_len + r).
+// Terminals use truncate wrap and no line numbers, so that line mapping is 1:1.
+render_terminal_cursor :: proc(buffer: ^Editor_Buffer, item: ^view.View, text: layout.Rect, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+	g := &buffer.terminal.grid.grid
+	if !console.grid_cursor_visible(g) {
+		return
+	}
+	line_height := coords.points_to_logical_px(state.dpi.points) * cfg.Line_Height
+	cell_width := text_measure_advance("M")
+	if line_height <= 0 || cell_width <= 0 {
+		return
+	}
+	row := console.grid_cursor_row(g)
+	col := console.grid_cursor_col(g)
+	doc_line := console.grid_scrollback_len(g) + row
+	if doc_line < int(item.first_line) {
+		return // the cursor's line is scrolled above the viewport
+	}
+	visual_row := doc_line - int(item.first_line)
+	if visual_row >= editor_visible_rows(text) {
+		return // the cursor's line is scrolled below the viewport
+	}
+	x := text.x + f32(col) * cell_width - item.horizontal_offset
+	y := text.y + TEXT_PADDING + f32(visual_row) * line_height
+	render_append_quad(quads, {x, y, cell_width, line_height}, cfg.Theme.Caret, fb)
+}
+
 draw_quads :: proc(verts: []Vertex) {
 	if len(verts) == 0 || len(verts) % 6 != 0 || len(verts) > MAX_QUADS_PER_DRAW * 6 ||
 		render_pipeline.id == 0 || render_vertex_buffer.id == 0 {
@@ -273,6 +320,24 @@ draw_quads :: proc(verts: []Vertex) {
 	})
 	sg.apply_pipeline(render_pipeline)
 	sg.apply_bindings({vertex_buffers = {0 = render_vertex_buffer}})
+	sg.draw(0, len(verts), 1)
+}
+
+// draw_cursor_quads draws the overlay quads (the terminal block cursor) after
+// the text pass. It uses a dedicated buffer because a transient buffer cannot
+// be written again once it has been bound earlier in the frame.
+draw_cursor_quads :: proc(verts: []Vertex) {
+	if len(verts) == 0 || len(verts) % 6 != 0 || len(verts) > MAX_CURSOR_QUADS * 6 ||
+		render_pipeline.id == 0 || render_cursor_buffer.id == 0 {
+		return
+	}
+	sg.write_buffer_transient({
+		src = {data = {ptr = raw_data(verts), size = len(verts) * size_of(Vertex)}},
+		dst = {buffer = render_cursor_buffer},
+		size = len(verts) * size_of(Vertex),
+	})
+	sg.apply_pipeline(render_pipeline)
+	sg.apply_bindings({vertex_buffers = {0 = render_cursor_buffer}})
 	sg.draw(0, len(verts), 1)
 }
 

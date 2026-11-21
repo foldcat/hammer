@@ -364,6 +364,9 @@ editor_scroll :: proc(event: input.Scroll) {
 		doc := &editor_buffer_for_view(item).doc
 		_, _, text := editor_body_parts(item, doc, win.body)
 		editor_wheel_vertical(item, doc, text, event.dy)
+		if buffer := editor_buffer_for_view(item); buffer != nil && buffer.kind == .Terminal && buffer.terminal.live {
+			editor_terminal_sync_follow(buffer, item, text)
+		}
 	}
 	if selecting {
 		editor_continue_selection_at(event.pos)

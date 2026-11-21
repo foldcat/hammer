@@ -98,7 +98,7 @@ event_equal :: proc(a, b: console.Event) -> bool {
 		return ok && style_equal(x.style, y.style)
 	case console.Csi_Event:
 		y, ok := b.(console.Csi_Event)
-		if !ok || x.final != y.final || x.param_count != y.param_count {
+		if !ok || x.final != y.final || x.param_count != y.param_count || x.private != y.private {
 			return false
 		}
 		for i in 0 ..< int(x.param_count) {
@@ -518,6 +518,22 @@ test_parser_escape_and_csi_sequences :: proc(t: ^testing.T) {
 	if len(events) == 2 {
 		expect_csi(t, events[0], 'J', 2)
 		expect_csi(t, events[1], 'l', 25)
+	}
+}
+
+@(test)
+test_parser_dec_private_csi :: proc(t: ^testing.T) {
+	// DEC private CSI sequences carry the private marker; plain CSI does not.
+	events := collect_events(transmute([]byte)string("\x1b[?1049h\x1b[?25l\x1b[2J"))
+	defer delete_events(events)
+	testing.expect(t, len(events) == 3)
+	if len(events) == 3 {
+		csi0, ok0 := events[0].(console.Csi_Event)
+		testing.expect(t, ok0 && csi0.final == 'h' && csi0.private && csi0.param_count == 1 && csi0.params[0] == 1049)
+		csi1, ok1 := events[1].(console.Csi_Event)
+		testing.expect(t, ok1 && csi1.final == 'l' && csi1.private && csi1.params[0] == 25)
+		csi2, ok2 := events[2].(console.Csi_Event)
+		testing.expect(t, ok2 && csi2.final == 'J' && !csi2.private && csi2.params[0] == 2)
 	}
 }
 

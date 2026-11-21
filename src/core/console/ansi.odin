@@ -176,10 +176,14 @@ Style_Event :: struct {
 
 // Csi_Event reports a recognized, non-SGR CSI sequence (final byte and its
 // parameters). M10.03 interprets erase/movement sequences from these events.
+// `private` marks a DEC private sequence (CSI ? ...), which the parser
+// otherwise drops; the grid uses it for the alternate screen (?1049h/l) and
+// cursor visibility (?25h/l).
 Csi_Event :: struct {
 	final:       rune,
 	params:      [MAX_SGR_PARAMS]u32,
 	param_count: u8,
+	private:     bool,
 }
 
 // Control_Event is a C0/C1 control character (other than ESC). `rune` is the
@@ -225,6 +229,7 @@ Parser :: struct {
 	param_count: u8,
 	value:       u32,
 	has_value:   bool,
+	private:     bool, // saw the '?' DEC private marker in this CSI sequence
 	// OSC payload accumulation.
 	osc:          [MAX_OSC_PAYLOAD]rune,
 	osc_len:      int,
@@ -317,6 +322,7 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 				p.param_count = 0
 				p.value = 0
 				p.has_value = false
+				p.private = false
 			case ']':
 				p.state = .Osc
 				p.osc_len = 0
@@ -350,6 +356,7 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 						final = final,
 						params = p.params,
 						param_count = p.param_count,
+						private = p.private,
 					}
 				}
 				written += 1
@@ -358,12 +365,15 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 			}
 			if r >= 0x30 && r <= 0x3f {
 				// Parameter bytes: digits accumulate; ';' and ':' separate;
-				// private markers ('<', '=', '>', '?') are ignored.
+				// '?' marks a DEC private sequence (reported via Csi_Event.private);
+				// the other private markers ('<', '=', '>') are ignored.
 				switch {
 				case r >= 0x30 && r <= 0x39:
 					accumulate_param(p, r)
 				case r == ';', r == ':':
 					push_param(p)
+				case r == '?':
+					p.private = true
 				}
 				i += 1
 				continue

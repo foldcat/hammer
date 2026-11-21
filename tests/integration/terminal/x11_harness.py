@@ -104,6 +104,9 @@ def main() -> int:
             wait_for_log(log_path, "terminal: opened", args.timeout)
             print("PASS: Win opens a PTY-backed terminal window")
 
+            wait_for_log(log_path, "terminal: resize", args.timeout)
+            print("PASS: the terminal grid resizes to the window (SIGWINCH)")
+
             type_text(x11, "echo terminal-ok")
             x11.tap(0xFF0D)
             time.sleep(0.4)

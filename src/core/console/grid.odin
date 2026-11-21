@@ -16,8 +16,9 @@
 // The Grid does not render: callers drain it into text with `grid_append_text`
 // (scrollback plus the visible screen). Styles are carried on cells but not
 // emitted as text here; per-run color rendering is a later milestone (SPECS
-// §12.7). The alternate screen (CSI ?1049h/l) and resize are deferred: the
-// parser drops private CSI markers, and window sizing lives in the view layer.
+// §12.7). The alternate screen (CSI ?1049h/l), DECTCEM cursor visibility
+// (CSI ?25h/l), and resize (grid_resize) are implemented; window sizing itself
+// lives in the view layer.
 package console
 
 import "base:runtime"
@@ -48,6 +49,18 @@ Grid :: struct {
 	scrollback:     [dynamic]Line,
 	max_scrollback: int,
 	dirty:          bool,
+	// cursor_visible tracks DECTCEM (CSI ?25h/l): whether the terminal cursor
+	// is rendered. It defaults to true.
+	cursor_visible: bool,
+	// Alternate screen (CSI ?1049h/l). While using_alternate is true, `cells`
+	// and `scrollback` hold the alternate screen and `saved_*` hold the saved
+	// main screen (swapped back on exit).
+	using_alternate:    bool,
+	saved_cells:        [dynamic]Cell,
+	saved_scrollback:   [dynamic]Line,
+	saved_cursor_row:   int,
+	saved_cursor_col:   int,
+	saved_wrap_pending: bool,
 }
 
 // grid_init prepares an empty grid. rows/cols are clamped to their bounds;
@@ -82,11 +95,13 @@ grid_init :: proc(
 		cells = make([dynamic]Cell, r * c, allocator),
 		scrollback = make([dynamic]Line, allocator),
 		max_scrollback = m,
+		cursor_visible = true,
 	}
 	return {}
 }
 
-// grid_destroy releases the cell buffer and the scrollback lines.
+// grid_destroy releases the cell buffer and the scrollback lines (both the
+// active screen and any saved main screen).
 grid_destroy :: proc(g: ^Grid) {
 	if g == nil {
 		return
@@ -96,6 +111,11 @@ grid_destroy :: proc(g: ^Grid) {
 	}
 	delete(g.scrollback)
 	delete(g.cells)
+	for line in g.saved_scrollback {
+		line_destroy(line, g.allocator)
+	}
+	delete(g.saved_scrollback)
+	delete(g.saved_cells)
 	g^ = {}
 }
 
@@ -117,6 +137,36 @@ grid_rows :: proc(g: ^Grid) -> int {
 }
 grid_cols :: proc(g: ^Grid) -> int {
 	return g.cols
+}
+
+// grid_cursor_row / grid_cursor_col report the terminal cursor's 0-based
+// screen position (clamped to the screen by all cursor movement).
+grid_cursor_row :: proc(g: ^Grid) -> int {
+	if g == nil {
+		return 0
+	}
+	return g.cursor_row
+}
+grid_cursor_col :: proc(g: ^Grid) -> int {
+	if g == nil {
+		return 0
+	}
+	return g.cursor_col
+}
+
+// grid_cursor_visible reports whether the terminal cursor is shown (DECTCEM).
+grid_cursor_visible :: proc(g: ^Grid) -> bool {
+	return g != nil && g.cursor_visible
+}
+
+// grid_scrollback_len reports how many completed lines have scrolled off the
+// top of the active screen. The transcript is scrollback + visible rows, so a
+// visible screen row r maps to document line scrollback_len + r.
+grid_scrollback_len :: proc(g: ^Grid) -> int {
+	if g == nil {
+		return 0
+	}
+	return len(g.scrollback)
 }
 
 // grid_feed consumes parsed ANSI events, updating the screen. It marks the
@@ -170,6 +220,127 @@ grid_append_text :: proc(g: ^Grid, out: ^[dynamic]byte) {
 	}
 }
 
+// --- Resize and alternate screen -----------------------------------------
+
+// grid_resize reflows the grid to rows×cols, re-wrapping the visible screen at
+// the new width and preserving scrollback. It clamps to the same bounds as
+// grid_init and is a no-op when the size is unchanged. Resize only reflows the
+// local grid; notifying the child of the new window size (SIGWINCH on Unix) is
+// the caller's job. When the screen grows, blank rows are left at the bottom
+// (scrollback lines are not pulled back in); the child's SIGWINCH redraw
+// repaints authoritatively. Each source row is re-emitted as a hard line, so
+// soft-wrapped runs are not re-joined — the grid does not track wrap flags.
+// When the alternate screen is active, the parked main screen is reflowed too
+// so it is still well-formed (and at the right size) on exit.
+grid_resize :: proc(g: ^Grid, rows, cols: int) {
+	if g == nil {
+		return
+	}
+	r := clamp(rows, 1, MAX_GRID_ROWS)
+	c := clamp(cols, 1, MAX_GRID_COLS)
+	if r == g.rows && c == g.cols {
+		return
+	}
+	old_rows := g.rows
+	old_cols := g.cols
+	g.rows = r
+	g.cols = c
+
+	grid_reflow_active(g, old_rows, old_cols)
+	if g.using_alternate {
+		grid_swap_active_and_saved(g)
+		grid_reflow_active(g, old_rows, old_cols)
+		grid_swap_active_and_saved(g)
+	}
+}
+
+// grid_reflow_active reflows the active screen (g.cells and g.scrollback) from
+// old_rows×old_cols to the current g.rows×g.cols, re-wrapping each source row
+// and preserving scrollback. It snapshots using the old column stride before
+// reallocating cells at the new size.
+grid_reflow_active :: proc(g: ^Grid, old_rows, old_cols: int) {
+	last := grid_last_non_empty_row_stride(g, old_rows, old_cols)
+	visible := make([dynamic]Line, 0, max(0, last + 1), g.allocator)
+	for row in 0 ..= last {
+		append(&visible, grid_row_line_stride(g, row, old_cols))
+	}
+	old_cursor_row := g.cursor_row
+	old_cursor_col := g.cursor_col
+
+	// Rebuild the cell buffer at the new size, preserving scrollback.
+	delete(g.cells)
+	g.cells = make([dynamic]Cell, g.rows * g.cols, g.allocator)
+	g.cursor_row = 0
+	g.cursor_col = 0
+	g.wrap_pending = false
+
+	for line, index in visible {
+		g.cursor_col = 0
+		g.wrap_pending = false
+		grid_write(g, line.text)
+		if index < len(visible) - 1 {
+			grid_line_feed(g)
+		}
+		line_destroy(line, g.allocator)
+	}
+	delete(visible)
+
+	// Best-effort cursor restoration (clamped); the child's SIGWINCH redraw
+	// repositions it authoritatively.
+	g.cursor_row = clamp(old_cursor_row, 0, g.rows - 1)
+	g.cursor_col = clamp(old_cursor_col, 0, g.cols - 1)
+	g.wrap_pending = false
+	g.dirty = true
+}
+
+// grid_swap_active_and_saved exchanges the active screen with the parked main
+// screen (the alternate-screen save). Ownership of each cell/scrollback buffer
+// moves with the swap; no allocation is performed.
+grid_swap_active_and_saved :: proc(g: ^Grid) {
+	g.cells, g.saved_cells = g.saved_cells, g.cells
+	g.scrollback, g.saved_scrollback = g.saved_scrollback, g.scrollback
+	g.cursor_row, g.saved_cursor_row = g.saved_cursor_row, g.cursor_row
+	g.cursor_col, g.saved_cursor_col = g.saved_cursor_col, g.cursor_col
+	g.wrap_pending, g.saved_wrap_pending = g.saved_wrap_pending, g.wrap_pending
+}
+
+// grid_switch_alternate enters (on=true) or leaves (on=false) the alternate
+// screen (CSI ?1049h/l). Entering saves the main screen and presents a cleared
+// screen with the cursor home; leaving discards the alternate screen and
+// restores the main screen. It is a no-op when already in the target state.
+grid_switch_alternate :: proc(g: ^Grid, on: bool) {
+	if g == nil || on == g.using_alternate {
+		return
+	}
+	if on {
+		g.saved_cells = g.cells
+		g.saved_scrollback = g.scrollback
+		g.saved_cursor_row = g.cursor_row
+		g.saved_cursor_col = g.cursor_col
+		g.saved_wrap_pending = g.wrap_pending
+		g.cells = make([dynamic]Cell, g.rows * g.cols, g.allocator)
+		g.scrollback = make([dynamic]Line, g.allocator)
+		g.cursor_row = 0
+		g.cursor_col = 0
+		g.wrap_pending = false
+		g.using_alternate = true
+	} else {
+		for line in g.scrollback {
+			line_destroy(line, g.allocator)
+		}
+		delete(g.scrollback)
+		delete(g.cells)
+		g.cells = g.saved_cells
+		g.scrollback = g.saved_scrollback
+		g.cursor_row = g.saved_cursor_row
+		g.cursor_col = g.saved_cursor_col
+		g.wrap_pending = g.saved_wrap_pending
+		g.saved_cells = {}
+		g.saved_scrollback = {}
+		g.using_alternate = false
+	}
+}
+
 // --- Internals -----------------------------------------------------------
 
 cell_ptr :: proc(g: ^Grid, row, col: int) -> ^Cell {
@@ -178,6 +349,12 @@ cell_ptr :: proc(g: ^Grid, row, col: int) -> ^Cell {
 
 cell_at :: proc(g: ^Grid, row, col: int) -> Cell {
 	return g.cells[row * g.cols + col]
+}
+
+// cell_at_stride reads a cell using an explicit column stride, for snapshots
+// taken against a screen whose width differs from g.cols (reflow).
+cell_at_stride :: proc(g: ^Grid, row, col, cols: int) -> Cell {
+	return g.cells[row * cols + col]
 }
 
 // grid_write writes printable runes at the cursor with the current style,
@@ -314,6 +491,16 @@ grid_csi :: proc(g: ^Grid, csi: Csi_Event) {
 		for _ in 0 ..< csi_param(csi, 0, 1) {
 			grid_scroll_down(g)
 		}
+	case 'h', 'l': // SM/RM — set/reset mode (DEC private via CSI ? ...)
+		if csi.private {
+			set := csi.final == 'h'
+			switch csi_param(csi, 0, 0) {
+			case 25: // DECTCEM — show/hide the terminal cursor
+				g.cursor_visible = set
+			case 1049: // alternate screen buffer
+				grid_switch_alternate(g, set)
+			}
+		}
 	case:
 		// Unrecognized or unsupported CSI is ignored deterministically.
 	}
@@ -434,13 +621,18 @@ grid_scroll_down :: proc(g: ^Grid) {
 // grid_row_line builds a scrollback Line (text only) from a screen row, with
 // trailing empty cells trimmed.
 grid_row_line :: proc(g: ^Grid, row: int) -> Line {
-	last := grid_row_last_col(g, row)
+	return grid_row_line_stride(g, row, g.cols)
+}
+
+// grid_row_line_stride is grid_row_line with an explicit column stride.
+grid_row_line_stride :: proc(g: ^Grid, row, cols: int) -> Line {
+	last := grid_row_last_col_stride(g, row, cols)
 	if last < 0 {
 		return Line{}
 	}
 	text := make([]rune, last + 1, g.allocator)
 	for col in 0 ..= last {
-		r := cell_at(g, row, col).r
+		r := cell_at_stride(g, row, col, cols).r
 		if r == 0 {
 			r = ' '
 		}
@@ -451,8 +643,13 @@ grid_row_line :: proc(g: ^Grid, row: int) -> Line {
 
 // grid_row_last_col returns the index of the last non-empty cell in row, or -1.
 grid_row_last_col :: proc(g: ^Grid, row: int) -> int {
-	for col := g.cols - 1; col >= 0; col -= 1 {
-		if cell_at(g, row, col).r != 0 {
+	return grid_row_last_col_stride(g, row, g.cols)
+}
+
+// grid_row_last_col_stride is grid_row_last_col with an explicit column stride.
+grid_row_last_col_stride :: proc(g: ^Grid, row, cols: int) -> int {
+	for col := cols - 1; col >= 0; col -= 1 {
+		if cell_at_stride(g, row, col, cols).r != 0 {
 			return col
 		}
 	}
@@ -462,8 +659,14 @@ grid_row_last_col :: proc(g: ^Grid, row: int) -> int {
 // grid_last_non_empty_row returns the last row with any non-empty cell, or -1
 // when the whole screen is empty.
 grid_last_non_empty_row :: proc(g: ^Grid) -> int {
-	for row := g.rows - 1; row >= 0; row -= 1 {
-		if grid_row_last_col(g, row) >= 0 {
+	return grid_last_non_empty_row_stride(g, g.rows, g.cols)
+}
+
+// grid_last_non_empty_row_stride is grid_last_non_empty_row with an explicit
+// row count and column stride (for reflow snapshots taken at the old size).
+grid_last_non_empty_row_stride :: proc(g: ^Grid, rows, cols: int) -> int {
+	for row := rows - 1; row >= 0; row -= 1 {
+		if grid_row_last_col_stride(g, row, cols) >= 0 {
 			return row
 		}
 	}

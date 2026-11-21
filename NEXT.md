@@ -6,4 +6,4 @@ some traps in `/docs/notes` and you may read them as you need.
 
 Do not add notes to this file. Only update the current task below:
 
-## Current task: M10.07b Implement terminal resize (SIGWINCH), the alternate screen, a rendered terminal cursor, and scrollback navigation.
+## Current task: M10.07c Implement terminal text & background color.
