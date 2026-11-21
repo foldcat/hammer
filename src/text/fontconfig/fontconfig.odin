@@ -11,7 +11,15 @@ when ODIN_OS != .Linux {
 	#panic("hammer fontconfig bindings currently require Linux")
 }
 
-foreign import lib "system:fontconfig"
+// STATIC_TEXT is defined by make.odin for release builds that stage the full
+// static text stack (see make.odin static_text_flags). The archive is a stable
+// relative path from this package directory to the generated build tree.
+STATIC_TEXT :: #config(HAMMER_STATIC_TEXT, false)
+when STATIC_TEXT {
+	foreign import lib { "../../../build/static/libfontconfig.a" }
+} else {
+	foreign import lib "system:fontconfig"
+}
 
 EXPECTED_VERSION :: 21803
 

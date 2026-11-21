@@ -166,13 +166,31 @@ FONTCONFIG_VERSION :: "2.18.3"
 SHADERC_VERSION :: "shaderc-2026.3"
 
 // Generated static-library staging directory for text dependencies. Static
-// archives located on the system are symlinked here (build/ is gitignored) so
-// the bindings can reference them by a stable relative path.
+// archives (system libs staged by symlink, vendored HarfBuzz/fontconfig copied
+// here) are referenced by the bindings through a stable relative path.
 STATIC_TEXT_DIR :: OUT_DIR + "/static"
 
 // Release linker flags: strip the symbol table and debug sections, which also
-// removes the embedded source-file and compilation-directory paths.
-RELEASE_LD_FLAGS :: "-extra-linker-flags:-Wl,-s"
+// removes the embedded source-file and compilation-directory paths. Combined
+// with the static text group flags (when available) into a single
+// -extra-linker-flags argument by the release build case below.
+RELEASE_STRIP_FLAGS :: "-Wl,-s"
+
+// Vendored static text dependencies. HarfBuzz and fontconfig are downloaded at
+// their pinned tags, sha256-verified, and built with meson+ninja into build/
+// (gitignored), mirroring the pinned Sokol C sources. FreeType and ICU use the
+// system static archives (staged by symlink). The bindings reference every
+// archive as build/static/lib<name>.a.
+HARFBUZZ_SRC_TAG :: "12.3.2"
+HARFBUZZ_SRC_URL :: "https://github.com/harfbuzz/harfbuzz/releases/download/" + HARFBUZZ_SRC_TAG + "/harfbuzz-" + HARFBUZZ_SRC_TAG + ".tar.xz"
+HARFBUZZ_SRC_SHA256 :: "6f6db164359a2da5a84ef826615b448b33e6306067ad829d85d5b0bf936f1bb8"
+
+FONTCONFIG_SRC_TAG :: "2.18.3"
+FONTCONFIG_SRC_URL :: "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/archive/" + FONTCONFIG_SRC_TAG + "/fontconfig-" + FONTCONFIG_SRC_TAG + ".tar.gz"
+FONTCONFIG_SRC_SHA256 :: "9ae01e1d53acdef56010c5451cd34aa41d325b2faccd8606448d8fa01b2496b3"
+
+HB_SRC_DIR :: OUT_DIR + "/harfbuzz-" + HARFBUZZ_SRC_TAG
+FC_SRC_DIR :: OUT_DIR + "/fontconfig-" + FONTCONFIG_SRC_TAG
 
 CORE_TEST_PACKAGES := []string {
 	"tests/unit/errs",
@@ -975,14 +993,6 @@ main :: proc() {
 		}
 	}
 
-	// Static text dependencies (Linux): bake ICU into the product when its
-	// static archives are available so a mismatched system ICU cannot fail
-	// the product at load time.
-	static_flags := ""
-	when ODIN_OS == .Linux {
-		static_flags = static_icu_flags()
-	}
-
 	cmd_args: [dynamic]string
 	defer delete(cmd_args)
 	inherit_stdio := false
@@ -996,25 +1006,22 @@ main :: proc() {
 		append(&cmd_args, "odin", "build", SRC_DIR, SOKOL_COLLECTION, "-vet", "-out:" + BINARY_PATH, "-debug")
 	case "release":
 		fmt.println("[Build] Building project (Release) -> " + BINARY_PATH + "...")
-		append(
-			&cmd_args,
-			"odin",
-			"build",
-			SRC_DIR,
-			SOKOL_COLLECTION,
-			"-vet",
-			"-out:" + BINARY_PATH,
-			"-o:speed",
-			"-no-bounds-check",
-			RELEASE_LD_FLAGS,
-		)
+		append(&cmd_args, "odin", "build", SRC_DIR, SOKOL_COLLECTION, "-vet", "-out:" + BINARY_PATH, "-o:speed", "-no-bounds-check")
+		// Release-only: bake the text stack (HarfBuzz, fontconfig, FreeType,
+		// ICU) into the product so a mismatched system copy of any of them
+		// cannot fail the shipped binary at load time. The strip and static
+		// group flags are merged into a single -extra-linker-flags argument.
+		ld_flags := RELEASE_STRIP_FLAGS
+		when ODIN_OS == .Linux {
+			if static_flags := static_text_flags(); static_flags != "" {
+				append(&cmd_args, "-define:HAMMER_STATIC_TEXT=true")
+				ld_flags = fmt.tprintf("%s %s", RELEASE_STRIP_FLAGS, static_flags)
+			}
+		}
+		append(&cmd_args, fmt.tprintf("-extra-linker-flags:%s", ld_flags))
 	case:
 		fmt.println("[Build] Building project (Debug default) -> " + BINARY_PATH + "...")
 		append(&cmd_args, "odin", "build", SRC_DIR, SOKOL_COLLECTION, "-vet", "-out:" + BINARY_PATH, "-debug")
-	}
-
-	if static_flags != "" {
-		append(&cmd_args, static_flags)
 	}
 
 	run_odin(cmd_args[:], inherit_stdio)
@@ -1345,43 +1352,235 @@ text_deps_present :: proc() -> bool {
 	return true
 }
 
-// static_icu_flags stages the ICU static archives (icuuc + icudata) into
-// build/static and returns the build define that switches the ICU bindings to
-// static linking. It returns "" when the archives are unavailable (for
-// example, a Gentoo ICU built without USE=static-libs), in which case the
-// bindings keep their dynamic system:icuuc linkage. The staged archives are
-// referenced by a relative path from src/text/icu, so the product binary no
-// longer depends on a matching libicuuc.so being present at run time.
+// static_text_flags stages the static text archives (HarfBuzz, fontconfig,
+// FreeType, ICU) into build/static and returns the linker flags that link them
+// into the product as a single archive group. It returns "" when any piece is
+// unavailable (a system ICU/FreeType built without static libraries, or a
+// missing meson/ninja), in which case the bindings keep their dynamic
+// system:<lib> linkages.
 //
-// HarfBuzz, FreeType, and fontconfig remain dynamically linked for now: their
-// static archives are not available on this system, and HarfBuzz's static
-// closure (glib, graphite2, pcre2, ...) is not yet audited.
-static_icu_flags :: proc() -> string {
-	libdir, ok := tool_output([]string{"pkg-config", "--variable=libdir", "icu-uc"})
-	if !ok || libdir == "" {
-		fmt.println("[Setup] cannot locate the ICU library directory; linking ICU dynamically")
+// HarfBuzz and fontconfig are downloaded at their pinned tags, sha256-verified,
+// and built with meson+ninja into build/ (gitignored). FreeType and ICU use the
+// system static archives, staged by symlink. The archive group uses
+// --start-group/--end-group because HarfBuzz and fontconfig both depend on
+// FreeType, while Odin emits foreign-import libraries in a fixed order that
+// does not honor that dependency.
+static_text_flags :: proc() -> string {
+	if !stage_system_static("freetype2", "freetype") {
+		return ""
+	}
+	if !stage_system_static("icu-uc", "icuuc") {
+		return ""
+	}
+	if !stage_system_static("icu-uc", "icudata") {
+		return ""
+	}
+	if !build_harfbuzz() {
+		return ""
+	}
+	if !build_fontconfig() {
 		return ""
 	}
 
-	archives := []string{"icuuc", "icudata"}
-	for name in archives {
-		src := fmt.tprintf("%s/lib%s.a", libdir, name)
-		if !os.exists(src) {
-			fmt.printf("[Setup] static ICU unavailable (missing %s); linking ICU dynamically\n", src)
-			return ""
-		}
-	}
+	fmt.println("[Setup] static text dependencies available; linking them into the product")
+	return fmt.tprintf(
+		"-Wl,--start-group %s/libharfbuzz.a %s/libfontconfig.a %s/libfreetype.a %s/libicuuc.a %s/libicudata.a -Wl,--end-group -lexpat -lbz2 -lpng16 -lz -lstdc++",
+		STATIC_TEXT_DIR,
+		STATIC_TEXT_DIR,
+		STATIC_TEXT_DIR,
+		STATIC_TEXT_DIR,
+		STATIC_TEXT_DIR,
+	)
+}
 
+// stage_system_static locates the system static archive lib<name>.a for the
+// pkg-config module `pkg` and symlinks it into build/static. Returns false when
+// the archive is unavailable.
+stage_system_static :: proc(pkg, name: string) -> bool {
+	libdir, ok := tool_output([]string{"pkg-config", "--variable=libdir", pkg})
+	if !ok || libdir == "" {
+		fmt.printf("[Setup] cannot locate %s; linking text dependencies dynamically\n", pkg)
+		return false
+	}
+	src := fmt.tprintf("%s/lib%s.a", libdir, name)
+	if !os.exists(src) {
+		fmt.printf("[Setup] static %s unavailable (missing %s); linking text dependencies dynamically\n", name, src)
+		return false
+	}
 	os.make_directory_all(STATIC_TEXT_DIR)
-	for name in archives {
-		src := fmt.tprintf("%s/lib%s.a", libdir, name)
-		dst := fmt.tprintf("%s/lib%s.a", STATIC_TEXT_DIR, name)
-		if !stage_static_archive(src, dst) {
-			return ""
+	return stage_static_archive(src, fmt.tprintf("%s/lib%s.a", STATIC_TEXT_DIR, name))
+}
+
+// build_harfbuzz downloads, verifies, and builds the pinned HarfBuzz static
+// library into build/static/libharfbuzz.a (freetype-enabled, all other optional
+// backends disabled so its only static dependency is FreeType).
+build_harfbuzz :: proc() -> bool {
+	lib := STATIC_TEXT_DIR + "/libharfbuzz.a"
+	if staged_archive_ok("harfbuzz", HARFBUZZ_SRC_TAG) {
+		return true
+	}
+	if !fetch_source(HARFBUZZ_SRC_URL, HARFBUZZ_SRC_SHA256, HB_SRC_DIR, "harfbuzz-" + HARFBUZZ_SRC_TAG + ".tar.xz") {
+		return false
+	}
+	build_dir := HB_SRC_DIR + "/_build"
+	if !os.exists(fmt.tprintf("%s/build.ninja", build_dir)) {
+		if !run_tool([]string {
+			"meson",
+			"setup",
+			build_dir,
+			HB_SRC_DIR,
+			"--default-library=static",
+			"--buildtype=release",
+			"-Dglib=disabled",
+			"-Dgobject=disabled",
+			"-Dcairo=disabled",
+			"-Dchafa=disabled",
+			"-Dicu=disabled",
+			"-Dgraphite=disabled",
+			"-Dgraphite2=disabled",
+			"-Dfreetype=enabled",
+			"-Dtests=disabled",
+			"-Dintrospection=disabled",
+			"-Ddocs=disabled",
+			"-Dutilities=disabled",
+			"-Dbenchmark=disabled",
+		}) {
+			fmt.eprintln("[Setup] harfbuzz meson setup failed")
+			return false
 		}
 	}
-	fmt.println("[Setup] static ICU available; linking ICU into the product")
-	return "-define:HAMMER_STATIC_ICU=true"
+	if !run_tool([]string{"ninja", "-C", build_dir}) {
+		fmt.eprintln("[Setup] harfbuzz build failed")
+		return false
+	}
+	if !stage_built_archive(fmt.tprintf("%s/src/libharfbuzz.a", build_dir), lib) {
+		return false
+	}
+	return write_archive_tag("harfbuzz", HARFBUZZ_SRC_TAG)
+}
+
+// build_fontconfig downloads, verifies, and builds the pinned fontconfig static
+// library into build/static/libfontconfig.a (expat XML backend; FreeType is its
+// only static dependency).
+build_fontconfig :: proc() -> bool {
+	lib := STATIC_TEXT_DIR + "/libfontconfig.a"
+	if staged_archive_ok("fontconfig", FONTCONFIG_SRC_TAG) {
+		return true
+	}
+	if !fetch_source(FONTCONFIG_SRC_URL, FONTCONFIG_SRC_SHA256, FC_SRC_DIR, "fontconfig-" + FONTCONFIG_SRC_TAG + ".tar.gz") {
+		return false
+	}
+	build_dir := FC_SRC_DIR + "/_build"
+	if !os.exists(fmt.tprintf("%s/build.ninja", build_dir)) {
+		if !run_tool([]string {
+			"meson",
+			"setup",
+			build_dir,
+			FC_SRC_DIR,
+			"--default-library=static",
+			"--buildtype=release",
+			"-Ddoc=disabled",
+			"-Dtests=disabled",
+			"-Dtools=disabled",
+			"-Dnls=disabled",
+			"-Dcache-build=disabled",
+			"-Dxml-backend=expat",
+			// Match the system fontconfig's runtime paths so the vendored copy
+			// reads /etc/fonts/fonts.conf and /etc/fonts/conf.d instead of the
+			// meson default /usr/local/etc/fonts.
+			"-Dbaseconfig-dir=/etc/fonts",
+			"-Dconfig-dir=/etc/fonts/conf.d",
+			"-Dtemplate-dir=/etc/fonts/conf.avail",
+			"-Dxml-dir=/usr/share/xml/fontconfig",
+			"-Dcache-dir=/var/cache/fontconfig",
+		}) {
+			fmt.eprintln("[Setup] fontconfig meson setup failed")
+			return false
+		}
+	}
+	if !run_tool([]string{"ninja", "-C", build_dir}) {
+		fmt.eprintln("[Setup] fontconfig build failed")
+		return false
+	}
+	if !stage_built_archive(fmt.tprintf("%s/libfontconfig.a", build_dir), lib) {
+		return false
+	}
+	return write_archive_tag("fontconfig", FONTCONFIG_SRC_TAG)
+}
+
+// fetch_source downloads `url` into build/, verifies its sha256, and extracts
+// it into `src_dir`. It is idempotent.
+fetch_source :: proc(url, sha256, src_dir, tarball_name: string) -> bool {
+	if os.exists(src_dir) {
+		return true
+	}
+	os.make_directory_all(OUT_DIR)
+	tarball := fmt.tprintf("%s/%s", OUT_DIR, tarball_name)
+	fmt.printf("[Setup] Downloading %s\n", url)
+	if !run_tool([]string{"curl", "-fsSL", "-o", tarball, url}) {
+		fmt.eprintln("[Setup] download failed")
+		return false
+	}
+	fmt.println("[Setup] Verifying sha256...")
+	if !sha256_ok(tarball, sha256) {
+		fmt.eprintln("[Setup] checksum mismatch; refusing to use the downloaded archive")
+		os.remove(tarball)
+		return false
+	}
+	fmt.println("[Setup] Extracting...")
+	if !run_tool([]string{"tar", "-xf", tarball, "-C", OUT_DIR}) {
+		fmt.eprintln("[Setup] extraction failed")
+		os.remove(tarball)
+		return false
+	}
+	os.remove(tarball)
+	if !os.exists(src_dir) {
+		fmt.eprintf("[Setup] extracted source not found at %s\n", src_dir)
+		return false
+	}
+	return true
+}
+
+// staged_archive_ok reports whether build/static/lib<name>.a is present and was
+// staged from the expected source tag, so bumping a pinned tag invalidates the
+// cached archive instead of silently relinking the old one.
+staged_archive_ok :: proc(name, tag: string) -> bool {
+	if !os.exists(fmt.tprintf("%s/lib%s.a", STATIC_TEXT_DIR, name)) {
+		return false
+	}
+	data, err := os.read_entire_file(fmt.tprintf("%s/lib%s.tag", STATIC_TEXT_DIR, name), context.temp_allocator)
+	if err != nil {
+		return false
+	}
+	return strings.trim_space(string(data)) == tag
+}
+
+// write_archive_tag records the source tag used to stage lib<name>.a so a later
+// build can detect a version bump.
+write_archive_tag :: proc(name, tag: string) -> bool {
+	if err := os.write_entire_file(fmt.tprintf("%s/lib%s.tag", STATIC_TEXT_DIR, name), transmute([]byte)tag); err != nil {
+		fmt.eprintf("[Setup] cannot record %s source tag: %v\n", name, err)
+		return false
+	}
+	return true
+}
+
+// stage_built_archive copies a built static archive into build/static. It is
+// idempotent.
+stage_built_archive :: proc(src, dst: string) -> bool {
+	if os.exists(dst) {
+		return true
+	}
+	if !os.exists(src) {
+		fmt.eprintf("[Setup] built archive missing: %s\n", src)
+		return false
+	}
+	os.make_directory_all(STATIC_TEXT_DIR)
+	if err := os.copy_file(dst, src); err != nil {
+		fmt.eprintf("[Setup] cannot copy %s to %s: %v\n", src, dst, err)
+		return false
+	}
+	return true
 }
 
 // stage_static_archive makes `dst` resolve to `src` (a copy on Windows, a
