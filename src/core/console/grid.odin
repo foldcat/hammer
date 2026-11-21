@@ -63,6 +63,25 @@ Grid :: struct {
 	// cursor_visible tracks DECTCEM (CSI ?25h/l): whether the terminal cursor
 	// is rendered. It defaults to true.
 	cursor_visible: bool,
+	// application_cursor tracks DECCKM (CSI ?1h/l): whether arrow keys use the
+	// application (SS3) encoding. The caller consults it when forwarding keys.
+	application_cursor: bool,
+	// scroll_top/scroll_bottom bound the scrolling region (DECSTBM, CSI r),
+	// 0-based and inclusive. They default to the whole screen and reset on
+	// resize and alternate-screen switches.
+	scroll_top:    int,
+	scroll_bottom: int,
+	// mouse_reporting tracks DECSET 1000 (button-event tracking) and
+	// mouse_sgr tracks 1006 (SGR encoding); the caller consults both when
+	// deciding whether and how to forward pointer events to the child.
+	mouse_reporting: bool,
+	mouse_sgr:       bool,
+	// DECSC (ESC 7) saves the cursor position, pending wrap, and style; DECRC
+	// (ESC 8) restores them.
+	decsc_row:          int,
+	decsc_col:          int,
+	decsc_wrap_pending: bool,
+	decsc_style:        Style,
 	// Alternate screen (CSI ?1049h/l). While using_alternate is true, `cells`
 	// and `scrollback` hold the alternate screen and `saved_*` hold the saved
 	// main screen (swapped back on exit).
@@ -107,6 +126,8 @@ grid_init :: proc(
 		scrollback = make([dynamic]Line, allocator),
 		max_scrollback = m,
 		cursor_visible = true,
+		scroll_top = 0,
+		scroll_bottom = r - 1,
 	}
 	return {}
 }
@@ -170,6 +191,21 @@ grid_cursor_visible :: proc(g: ^Grid) -> bool {
 	return g != nil && g.cursor_visible
 }
 
+// grid_application_cursor reports whether DECCKM (application cursor keys) is
+// set; the caller uses it to pick the arrow-key encoding.
+grid_application_cursor :: proc(g: ^Grid) -> bool {
+	return g != nil && g.application_cursor
+}
+
+// grid_mouse_reporting reports whether DECSET 1000 (button-event tracking) is
+// set, and grid_mouse_sgr whether 1006 (SGR encoding) is set.
+grid_mouse_reporting :: proc(g: ^Grid) -> bool {
+	return g != nil && g.mouse_reporting
+}
+grid_mouse_sgr :: proc(g: ^Grid) -> bool {
+	return g != nil && g.mouse_sgr
+}
+
 // grid_scrollback_len reports how many completed lines have scrolled off the
 // top of the active screen. The transcript is scrollback + visible rows, so a
 // visible screen row r maps to document line scrollback_len + r.
@@ -200,6 +236,8 @@ grid_feed :: proc(g: ^Grid, events: []Event) {
 			grid_csi(g, v)
 		case Osc_Event:
 			// Hyperlinks are a model-A/log concern; the grid ignores OSC.
+		case Escape_Event:
+			grid_escape(g, v.rune)
 		}
 	}
 }
@@ -296,6 +334,8 @@ grid_resize :: proc(g: ^Grid, rows, cols: int) {
 	old_cols := g.cols
 	g.rows = r
 	g.cols = c
+	g.scroll_top = 0
+	g.scroll_bottom = r - 1
 
 	grid_reflow_active(g, old_rows, old_cols)
 	if g.using_alternate {
@@ -374,6 +414,8 @@ grid_switch_alternate :: proc(g: ^Grid, on: bool) {
 		g.cursor_row = 0
 		g.cursor_col = 0
 		g.wrap_pending = false
+		g.scroll_top = 0
+		g.scroll_bottom = g.rows - 1
 		g.using_alternate = true
 	} else {
 		for line in g.scrollback {
@@ -388,6 +430,8 @@ grid_switch_alternate :: proc(g: ^Grid, on: bool) {
 		g.wrap_pending = g.saved_wrap_pending
 		g.saved_cells = {}
 		g.saved_scrollback = {}
+		g.scroll_top = 0
+		g.scroll_bottom = g.rows - 1
 		g.using_alternate = false
 	}
 }
@@ -440,13 +484,14 @@ grid_wrap :: proc(g: ^Grid) {
 	}
 }
 
-// grid_line_feed moves down one line, scrolling at the bottom. Explicit cursor
-// movement (including LF) cancels any pending wrap.
+// grid_line_feed moves down one line, scrolling at the bottom margin of the
+// scrolling region. Explicit cursor movement (including LF) cancels any pending
+// wrap.
 grid_line_feed :: proc(g: ^Grid) {
 	g.wrap_pending = false
 	g.cursor_row += 1
-	if g.cursor_row >= g.rows {
-		g.cursor_row = g.rows - 1
+	if g.cursor_row > g.scroll_bottom {
+		g.cursor_row = g.scroll_bottom
 		grid_scroll_up(g)
 	}
 }
@@ -469,12 +514,51 @@ grid_control :: proc(g: ^Grid, r: rune) {
 	}
 }
 
+// grid_escape handles single-character escapes (ESC + one byte): DECSC/DECRC
+// (cursor save/restore), IND/NEL (index/next line), and RI (reverse index).
+grid_escape :: proc(g: ^Grid, r: rune) {
+	switch r {
+	case '7': // DECSC — save cursor position and style
+		g.decsc_row = g.cursor_row
+		g.decsc_col = g.cursor_col
+		g.decsc_wrap_pending = g.wrap_pending
+		g.decsc_style = g.style
+	case '8': // DECRC — restore cursor position and style
+		g.cursor_row = clamp(g.decsc_row, 0, g.rows - 1)
+		g.cursor_col = clamp(g.decsc_col, 0, g.cols - 1)
+		g.wrap_pending = g.decsc_wrap_pending
+		g.style = g.decsc_style
+	case 'D': // IND — index (move down, scrolling at the bottom)
+		grid_line_feed(g)
+	case 'E': // NEL — next line (CR + LF)
+		g.wrap_pending = false
+		g.cursor_col = 0
+		grid_line_feed(g)
+	case 'M': // RI — reverse index (move up, scrolling down at the top)
+		g.wrap_pending = false
+		if g.cursor_row == g.scroll_top {
+			grid_scroll_down(g)
+		} else {
+			g.cursor_row -= 1
+		}
+	case:
+		// Other single-character escapes are ignored deterministically.
+	}
+}
+
 // csi_param returns CSI parameter i (0-based), or def when absent.
 csi_param :: proc(csi: Csi_Event, i, def: int) -> int {
 	if i < int(csi.param_count) {
 		return int(csi.params[i])
 	}
 	return def
+}
+
+// csi_count returns CSI parameter i as a repeat count. The ANSI default for
+// count-based sequences is 1, and the parser represents a missing parameter as
+// 0, so both a missing and an explicit 0 resolve to 1.
+csi_count :: proc(csi: Csi_Event, i: int) -> int {
+	return max(1, csi_param(csi, i, 1))
 }
 
 // grid_move_cursor clears any pending wrap; explicit addressing supersedes it.
@@ -486,28 +570,28 @@ grid_csi :: proc(g: ^Grid, csi: Csi_Event) {
 	switch csi.final {
 	case 'A': // CUU — cursor up
 		grid_move_cursor(g)
-		n := csi_param(csi, 0, 1)
+		n := csi_count(csi, 0)
 		g.cursor_row = max(0, g.cursor_row - n)
 	case 'B': // CUD — cursor down
 		grid_move_cursor(g)
-		n := csi_param(csi, 0, 1)
+		n := csi_count(csi, 0)
 		g.cursor_row = min(g.rows - 1, g.cursor_row + n)
 	case 'C': // CUF — cursor right
 		grid_move_cursor(g)
-		n := csi_param(csi, 0, 1)
+		n := csi_count(csi, 0)
 		g.cursor_col = min(g.cols - 1, g.cursor_col + n)
 	case 'D': // CUB — cursor left
 		grid_move_cursor(g)
-		n := csi_param(csi, 0, 1)
+		n := csi_count(csi, 0)
 		g.cursor_col = max(0, g.cursor_col - n)
 	case 'E': // CNL — cursor next line
 		grid_move_cursor(g)
-		n := csi_param(csi, 0, 1)
+		n := csi_count(csi, 0)
 		g.cursor_row = min(g.rows - 1, g.cursor_row + n)
 		g.cursor_col = 0
 	case 'F': // CPL — cursor previous line
 		grid_move_cursor(g)
-		n := csi_param(csi, 0, 1)
+		n := csi_count(csi, 0)
 		g.cursor_row = max(0, g.cursor_row - n)
 		g.cursor_col = 0
 	case 'G': // CHA — cursor horizontal absolute (1-based)
@@ -527,27 +611,35 @@ grid_csi :: proc(g: ^Grid, csi: Csi_Event) {
 	case 'K': // EL — erase in line
 		grid_erase_line(g, csi_param(csi, 0, 0))
 	case 'L': // IL — insert lines
-		grid_insert_lines(g, csi_param(csi, 0, 1))
+		grid_insert_lines(g, csi_count(csi, 0))
 	case 'M': // DL — delete lines
-		grid_delete_lines(g, csi_param(csi, 0, 1))
+		grid_delete_lines(g, csi_count(csi, 0))
 	case '@': // ICH — insert blank characters
-		grid_insert_chars(g, csi_param(csi, 0, 1))
+		grid_insert_chars(g, csi_count(csi, 0))
 	case 'P': // DCH — delete characters
-		grid_delete_chars(g, csi_param(csi, 0, 1))
+		grid_delete_chars(g, csi_count(csi, 0))
 	case 'S': // SU — scroll up
-		for _ in 0 ..< csi_param(csi, 0, 1) {
+		for _ in 0 ..< csi_count(csi, 0) {
 			grid_scroll_up(g)
 		}
 	case 'T': // SD — scroll down
-		for _ in 0 ..< csi_param(csi, 0, 1) {
+		for _ in 0 ..< csi_count(csi, 0) {
 			grid_scroll_down(g)
 		}
+	case 'r': // DECSTBM — set scrolling region (1-based top;bottom)
+		grid_set_scroll_region(g, csi_param(csi, 0, 1), csi_param(csi, 1, g.rows))
 	case 'h', 'l': // SM/RM — set/reset mode (DEC private via CSI ? ...)
 		if csi.private {
 			set := csi.final == 'h'
 			switch csi_param(csi, 0, 0) {
+			case 1: // DECCKM — application cursor keys
+				g.application_cursor = set
 			case 25: // DECTCEM — show/hide the terminal cursor
 				g.cursor_visible = set
+			case 1000: // DECSET 1000 — button-event tracking
+				g.mouse_reporting = set
+			case 1006: // DECSET 1006 — SGR mouse encoding
+				g.mouse_sgr = set
 			case 1049: // alternate screen buffer
 				grid_switch_alternate(g, set)
 			}
@@ -603,25 +695,62 @@ grid_clear_row :: proc(g: ^Grid, row: int) {
 	}
 }
 
+// grid_set_scroll_region applies DECSTBM (CSI top;bottom r), 1-based and
+// inclusive. A missing or zero top is 1; a missing or oversized bottom is the
+// last row. An inverted region resets to the full screen. DECSTBM moves the
+// cursor to the home position.
+grid_set_scroll_region :: proc(g: ^Grid, top, bottom: int) {
+	t := top
+	b := bottom
+	if t < 1 {
+		t = 1
+	}
+	if b < 1 || b > g.rows {
+		b = g.rows
+	}
+	if b < t {
+		t = 1
+		b = g.rows
+	}
+	g.scroll_top = t - 1
+	g.scroll_bottom = b - 1
+	g.cursor_row = 0
+	g.cursor_col = 0
+	g.wrap_pending = false
+}
+
 // grid_insert_lines inserts n blank lines at the cursor row, shifting rows down
-// and scrolling the bottom off into scrollback.
+// within the scrolling region. The cursor must be inside the region.
 grid_insert_lines :: proc(g: ^Grid, n: int) {
+	top := g.scroll_top
+	bottom := g.scroll_bottom
+	row := g.cursor_row
+	if row < top || row > bottom {
+		return
+	}
 	for _ in 0 ..< n {
-		for row := g.rows - 1; row > g.cursor_row; row -= 1 {
-			copy(g.cells[row * g.cols:(row + 1) * g.cols], g.cells[(row - 1) * g.cols:row * g.cols])
+		for r := bottom; r > row; r -= 1 {
+			copy(g.cells[r * g.cols:(r + 1) * g.cols], g.cells[(r - 1) * g.cols:r * g.cols])
 		}
-		grid_clear_row(g, g.cursor_row)
+		grid_clear_row(g, row)
 	}
 }
 
-// grid_delete_lines deletes n lines at the cursor row, shifting rows up and
-// leaving blank lines at the bottom.
+// grid_delete_lines deletes n lines at the cursor row, shifting rows up within
+// the scrolling region and leaving blank lines at its bottom. The cursor must
+// be inside the region.
 grid_delete_lines :: proc(g: ^Grid, n: int) {
+	top := g.scroll_top
+	bottom := g.scroll_bottom
+	row := g.cursor_row
+	if row < top || row > bottom {
+		return
+	}
 	for _ in 0 ..< n {
-		for row := g.cursor_row; row < g.rows - 1; row += 1 {
-			copy(g.cells[row * g.cols:(row + 1) * g.cols], g.cells[(row + 1) * g.cols:(row + 2) * g.cols])
+		for r := row; r < bottom; r += 1 {
+			copy(g.cells[r * g.cols:(r + 1) * g.cols], g.cells[(r + 1) * g.cols:(r + 2) * g.cols])
 		}
-		grid_clear_row(g, g.rows - 1)
+		grid_clear_row(g, bottom)
 	}
 }
 
@@ -645,28 +774,34 @@ grid_delete_chars :: proc(g: ^Grid, n: int) {
 	}
 }
 
-// grid_scroll_up moves every row up one, pushing the top row into scrollback
-// and clearing the bottom row.
+// grid_scroll_up moves the scrolling region up one row. A full-screen region
+// pushes the top row into scrollback; a partial region drops it.
 grid_scroll_up :: proc(g: ^Grid) {
-	line := grid_row_line(g, 0)
-	append(&g.scrollback, line)
-	if len(g.scrollback) > g.max_scrollback {
-		line_destroy(g.scrollback[0], g.allocator)
-		ordered_remove(&g.scrollback, 0)
+	top := g.scroll_top
+	bottom := g.scroll_bottom
+	if top == 0 && bottom == g.rows - 1 {
+		line := grid_row_line(g, 0)
+		append(&g.scrollback, line)
+		if len(g.scrollback) > g.max_scrollback {
+			line_destroy(g.scrollback[0], g.allocator)
+			ordered_remove(&g.scrollback, 0)
+		}
 	}
-	for row := 1; row < g.rows; row += 1 {
-		copy(g.cells[(row - 1) * g.cols:row * g.cols], g.cells[row * g.cols:(row + 1) * g.cols])
+	for row := top; row < bottom; row += 1 {
+		copy(g.cells[row * g.cols:(row + 1) * g.cols], g.cells[(row + 1) * g.cols:(row + 2) * g.cols])
 	}
-	grid_clear_row(g, g.rows - 1)
+	grid_clear_row(g, bottom)
 }
 
-// grid_scroll_down moves every row down one, clearing the top row and dropping
-// the bottom row.
+// grid_scroll_down moves the scrolling region down one row, clearing its top
+// row and dropping its bottom row.
 grid_scroll_down :: proc(g: ^Grid) {
-	for row := g.rows - 1; row > 0; row -= 1 {
+	top := g.scroll_top
+	bottom := g.scroll_bottom
+	for row := bottom; row > top; row -= 1 {
 		copy(g.cells[row * g.cols:(row + 1) * g.cols], g.cells[(row - 1) * g.cols:row * g.cols])
 	}
-	grid_clear_row(g, 0)
+	grid_clear_row(g, top)
 }
 
 // grid_row_line builds a scrollback Line (text only) from a screen row, with

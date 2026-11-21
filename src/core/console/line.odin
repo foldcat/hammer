@@ -147,6 +147,9 @@ line_buffer_feed :: proc(lb: ^Line_Buffer, events: []Event, out: ^[dynamic]Line,
 			}
 		case Osc_Event:
 			handle_osc(lb, v.payload)
+		case Escape_Event:
+			// Single-character escapes (DECSC/DECRC/IND/NEL/RI) are terminal-grid
+			// concerns; the log window ignores them.
 		}
 	}
 	return {}

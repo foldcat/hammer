@@ -255,12 +255,20 @@ Osc_Event :: struct {
 	payload: []rune,
 }
 
+// Escape_Event reports a single-character escape (ESC + one byte), e.g. DECSC
+// (ESC 7), DECRC (ESC 8), IND (ESC D), NEL (ESC E), RI (ESC M). `rune` is the
+// byte following ESC.
+Escape_Event :: struct {
+	rune: rune,
+}
+
 Event :: union {
 	Text_Event,
 	Style_Event,
 	Csi_Event,
 	Control_Event,
 	Osc_Event,
+	Escape_Event,
 }
 
 // --- Parser -------------------------------------------------------------
@@ -289,6 +297,7 @@ Parser :: struct {
 	osc:          [MAX_OSC_PAYLOAD]rune,
 	osc_len:      int,
 	osc_overflow: bool,
+	st_pending:   bool, // an OSC string ended with ESC (ST); the next '\' is its second byte
 	// owned holds the OSC payloads allocated during the current feed; they are
 	// released at the start of the next feed and by parser_destroy.
 	owned: [dynamic][]rune,
@@ -371,6 +380,16 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 			continue
 
 		case .Escape:
+			if p.st_pending {
+				p.st_pending = false
+				if r == '\\' {
+					// ST terminator second byte.
+					p.state = .Ground
+					i += 1
+					continue
+				}
+				// Not a proper ST; fall through to treat r as a fresh escape body.
+			}
 			switch r {
 			case '[':
 				p.state = .Csi
@@ -383,8 +402,13 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 				p.osc_len = 0
 				p.osc_overflow = false
 			case:
-				// Single-character escape (ESC + one byte): ignored
-				// deterministically.
+				// Single-character escape (ESC + one byte): reported so the
+				// grid can handle DECSC/DECRC/IND/NEL/RI.
+				if written >= len(out) {
+					return written, i
+				}
+				out[written] = Escape_Event{rune = r}
+				written += 1
 				p.state = .Ground
 			}
 			i += 1
@@ -455,7 +479,12 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 				append(&p.owned, payload)
 				out[written] = Osc_Event{payload = payload}
 				written += 1
-				p.state = .Escape if r == 0x1b else .Ground
+				if r == 0x1b {
+					p.state = .Escape
+					p.st_pending = true
+				} else {
+					p.state = .Ground
+				}
 				i += 1
 				continue
 			}

@@ -285,6 +285,38 @@ test_grid_append_styled_scrollback :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_grid_application_cursor_mode :: proc(t: ^testing.T) {
+	s: console.Grid_Stream
+	console.grid_stream_init(&s, 24, 80, 0, context.allocator)
+	defer console.grid_stream_destroy(&s)
+	testing.expect(t, !console.grid_application_cursor(&s.grid))
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?1h"))
+	testing.expect(t, console.grid_application_cursor(&s.grid))
+	console.grid_stream_feed(&s, transmute([]byte)string("\x1b[?1l"))
+	testing.expect(t, !console.grid_application_cursor(&s.grid))
+}
+
+@(test)
+test_grid_scroll_region :: proc(t: ^testing.T) {
+	// SU scrolls only the region [2;3), leaving row 1 untouched.
+	expect_grid(t, 4, 80, transmute([]byte)string("A\r\nB\r\nC\r\n\x1b[2;3r\x1b[S"), "A\nC")
+	// SD scrolls the region down, clearing its top row.
+	expect_grid(t, 4, 80, transmute([]byte)string("A\r\nB\r\nC\r\n\x1b[2;3r\x1b[T"), "A\n\nB")
+}
+
+@(test)
+test_grid_empty_param_counts_one :: proc(t: ^testing.T) {
+	// An empty CSI parameter is a count of 1 (CUU \x1b[A moves up one row).
+	expect_grid(t, 4, 80, transmute([]byte)string("top\r\n\x1b[B\x1b[A!\r\n"), "top\n!")
+}
+
+@(test)
+test_grid_cursor_save_restore :: proc(t: ^testing.T) {
+	// ESC 7 (DECSC) saves the cursor; ESC 8 (DECRC) restores it after movement.
+	expect_grid(t, 24, 80, transmute([]byte)string("abc\x1b7\r\ndef\x1b8!"), "abc!\ndef")
+}
+
+@(test)
 test_grid_cursor_visibility_and_position :: proc(t: ^testing.T) {
 	s: console.Grid_Stream
 	console.grid_stream_init(&s, 24, 80, 0, context.allocator)

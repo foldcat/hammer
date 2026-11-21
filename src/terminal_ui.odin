@@ -486,6 +486,7 @@ editor_terminal_write_key :: proc(t: ^Editor_Terminal, key: input.Key, modifiers
 			return
 		}
 	}
+	app_cursor := console.grid_application_cursor(&t.grid.grid)
 	#partial switch key {
 	case .Enter, .KP_Enter:
 		editor_terminal_write_bytes(t, []byte{'\r'})
@@ -493,18 +494,20 @@ editor_terminal_write_key :: proc(t: ^Editor_Terminal, key: input.Key, modifiers
 		editor_terminal_write_bytes(t, []byte{0x7f})
 	case .Tab:
 		editor_terminal_write_bytes(t, []byte{'\t'})
+	case .Escape:
+		editor_terminal_write_bytes(t, []byte{0x1b})
 	case .Up:
-		editor_terminal_write_bytes(t, []byte{0x1b, '[', 'A'})
+		editor_terminal_write_bytes(t, []byte{0x1b, 'O', 'A'} if app_cursor else []byte{0x1b, '[', 'A'})
 	case .Down:
-		editor_terminal_write_bytes(t, []byte{0x1b, '[', 'B'})
+		editor_terminal_write_bytes(t, []byte{0x1b, 'O', 'B'} if app_cursor else []byte{0x1b, '[', 'B'})
 	case .Right:
-		editor_terminal_write_bytes(t, []byte{0x1b, '[', 'C'})
+		editor_terminal_write_bytes(t, []byte{0x1b, 'O', 'C'} if app_cursor else []byte{0x1b, '[', 'C'})
 	case .Left:
-		editor_terminal_write_bytes(t, []byte{0x1b, '[', 'D'})
+		editor_terminal_write_bytes(t, []byte{0x1b, 'O', 'D'} if app_cursor else []byte{0x1b, '[', 'D'})
 	case .Home:
-		editor_terminal_write_bytes(t, []byte{0x1b, '[', 'H'})
+		editor_terminal_write_bytes(t, []byte{0x1b, 'O', 'H'} if app_cursor else []byte{0x1b, '[', 'H'})
 	case .End:
-		editor_terminal_write_bytes(t, []byte{0x1b, '[', 'F'})
+		editor_terminal_write_bytes(t, []byte{0x1b, 'O', 'F'} if app_cursor else []byte{0x1b, '[', 'F'})
 	case .Delete:
 		editor_terminal_write_bytes(t, []byte{0x1b, '[', '3', '~'})
 	case:
@@ -520,6 +523,120 @@ editor_terminal_write_bytes :: proc(t: ^Editor_Terminal, data: []byte) {
 	if written != len(data) {
 		log.debugf("terminal: partial write %d/%d (status %v)", written, len(data), status)
 	}
+}
+
+// --- Terminal mouse reporting (M10.07d) ---------------------------------
+
+// terminal_mouse_button maps an editor button to the SGR mouse button code
+// (0 = left, 1 = middle, 2 = right).
+terminal_mouse_button :: proc(button: input.Mouse_Button) -> int {
+	switch button {
+	case .Left:
+		return 0
+	case .Middle:
+		return 1
+	case .Right:
+		return 2
+	}
+	return 0
+}
+
+// editor_terminal_mouse_cell maps a logical point in the terminal body to the
+// grid's 0-based (col, row), or false when it is outside the text area. The
+// on-screen row is mapped back through the scroll position and scrollback to
+// the grid's visible-screen row (what the child observes).
+editor_terminal_mouse_cell :: proc(buffer: ^Editor_Buffer, pos: coords.Logical_Point) -> (col, row: int, ok: bool) {
+	item := editor_first_view_for_buffer(buffer.id)
+	if item == nil {
+		return 0, 0, false
+	}
+	geometry, _, layout_ok := current_layout()
+	if !layout_ok {
+		return 0, 0, false
+	}
+	win, found := window_for_id(&geometry, item.window_id)
+	if !found {
+		return 0, 0, false
+	}
+	_, _, text := editor_body_parts(item, &buffer.doc, win.body)
+	line_height := coords.points_to_logical_px(state.dpi.points) * cfg.Line_Height
+	cell_width := text_measure_advance("M")
+	if line_height <= 0 || cell_width <= 0 {
+		return 0, 0, false
+	}
+	x := pos.x - text.x
+	y := pos.y - text.y - TEXT_PADDING
+	if x < 0 || y < 0 {
+		return 0, 0, false
+	}
+	col = int(x / cell_width)
+	doc_line := int(item.first_line) + int(y / line_height)
+	screen_row := doc_line - console.grid_scrollback_len(&buffer.terminal.grid.grid)
+	if screen_row < 0 {
+		return 0, 0, false
+	}
+	return col, screen_row, true
+}
+
+// editor_terminal_write_sgr_mouse encodes one SGR mouse report
+// (ESC [ < b ; col ; row M/m) and forwards it to the child.
+editor_terminal_write_sgr_mouse :: proc(buffer: ^Editor_Buffer, b, col, row: int, terminator: byte) {
+	report := fmt.aprintf("\x1b[<%d;%d;%d%c", b, col + 1, row + 1, terminator, allocator = context.temp_allocator)
+	defer delete(report, context.temp_allocator)
+	editor_terminal_write_bytes(&buffer.terminal, transmute([]byte)report)
+}
+
+// editor_terminal_mouse forwards a pointer event to the active terminal when
+// button-event tracking (DECSET 1000) is on, using SGR encoding. It returns
+// true when the event was consumed; otherwise it falls through to the editor's
+// pointer layer (so mouse reporting off keeps view scrolling and selection).
+editor_terminal_mouse :: proc(event: input.Event) -> bool {
+	if !editor_active_terminal() {
+		return false
+	}
+	buffer := editor.buffer
+	// Only SGR encoding (?1006) is forwarded; legacy X10 (1000 alone) is not.
+	if !console.grid_mouse_reporting(&buffer.terminal.grid.grid) || !console.grid_mouse_sgr(&buffer.terminal.grid.grid) {
+		return false
+	}
+	#partial switch e in event {
+	case input.Pointer_Down:
+		col, row, ok := editor_terminal_mouse_cell(buffer, e.pos)
+		if !ok {
+			return false
+		}
+		b := terminal_mouse_button(e.button)
+		if .Shift in e.modifiers {
+			b += 4
+		}
+		if .Alt in e.modifiers {
+			b += 8
+		}
+		if .Ctrl in e.modifiers {
+			b += 16
+		}
+		editor_terminal_write_sgr_mouse(buffer, b, col, row, 'M')
+		return true
+	case input.Pointer_Up:
+		col, row, ok := editor_terminal_mouse_cell(buffer, e.pos)
+		if !ok {
+			return false
+		}
+		editor_terminal_write_sgr_mouse(buffer, terminal_mouse_button(e.button), col, row, 'm')
+		return true
+	case input.Scroll:
+		col, row, ok := editor_terminal_mouse_cell(buffer, e.pos)
+		if !ok {
+			return false
+		}
+		if e.dy > 0 {
+			editor_terminal_write_sgr_mouse(buffer, 65, col, row, 'M') // wheel down
+		} else if e.dy < 0 {
+			editor_terminal_write_sgr_mouse(buffer, 64, col, row, 'M') // wheel up
+		}
+		return true
+	}
+	return false
 }
 
 // terminal_encode_rune writes the UTF-8 encoding of a valid scalar value r into

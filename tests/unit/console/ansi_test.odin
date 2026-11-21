@@ -113,6 +113,9 @@ event_equal :: proc(a, b: console.Event) -> bool {
 	case console.Osc_Event:
 		y, ok := b.(console.Osc_Event)
 		return ok && runes_equal(x.payload, y.payload)
+	case console.Escape_Event:
+		y, ok := b.(console.Escape_Event)
+		return ok && x.rune == y.rune
 	}
 	return false
 }
@@ -538,14 +541,16 @@ test_parser_control_characters :: proc(t: ^testing.T) {
 
 @(test)
 test_parser_escape_and_csi_sequences :: proc(t: ^testing.T) {
-	// A single-character escape is ignored; an unknown CSI sequence becomes a
-	// Csi event with its parameters.
+	// A single-character escape becomes an Escape event; an unknown CSI
+	// sequence becomes a Csi event with its parameters.
 	events := collect_events(transmute([]byte)string("\x1b7\x1b[2J\x1b[?25l"))
 	defer delete_events(events)
-	testing.expect(t, len(events) == 2)
-	if len(events) == 2 {
-		expect_csi(t, events[0], 'J', 2)
-		expect_csi(t, events[1], 'l', 25)
+	testing.expect(t, len(events) == 3)
+	if len(events) == 3 {
+		esc, ok := events[0].(console.Escape_Event)
+		testing.expect(t, ok && esc.rune == '7')
+		expect_csi(t, events[1], 'J', 2)
+		expect_csi(t, events[2], 'l', 25)
 	}
 }
 

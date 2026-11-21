@@ -406,6 +406,9 @@ editor_destroy :: proc() {
 
 editor_consume_input :: proc(event: input.Event) {
 	log_input_event(event)
+	if editor_terminal_mouse(event) {
+		return
+	}
 	#partial switch e in event {
 	case input.Pointer_Down:
 		editor_pointer_down(e)
