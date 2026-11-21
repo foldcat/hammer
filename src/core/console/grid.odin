@@ -43,6 +43,15 @@ Style_Run :: struct {
 	style: Style,
 }
 
+// Charset_Kind tags the active G0 character set (SCS designation). The grid
+// always emits UTF-8, so the only set it must translate is DEC Special
+// Graphics (the VT100/ACS line-drawing set selected by ESC ( 0); every other
+// designator renders as plain ASCII.
+Charset_Kind :: enum u8 {
+	Ascii,
+	Dec_Special_Graphics,
+}
+
 // Grid is a fixed rows×cols terminal screen plus a bounded scrollback. It is a
 // fixed-location value: keep it at one address and do not copy it.
 Grid :: struct {
@@ -55,6 +64,7 @@ Grid :: struct {
 	cursor_col:  int,
 	wrap_pending: bool, // a full line was written; the next char wraps
 	style:       Style,
+	g0_charset:  Charset_Kind,
 	// scrollback holds completed lines scrolled off the top, oldest first.
 	// Each Line owns its text (runs/links are empty).
 	scrollback:     [dynamic]Line,
@@ -238,6 +248,8 @@ grid_feed :: proc(g: ^Grid, events: []Event) {
 			// Hyperlinks are a model-A/log concern; the grid ignores OSC.
 		case Escape_Event:
 			grid_escape(g, v.rune)
+		case Charset_Event:
+			grid_charset(g, v.target, v.designator)
 		}
 	}
 }
@@ -364,6 +376,11 @@ grid_reflow_active :: proc(g: ^Grid, old_rows, old_cols: int) {
 	g.cursor_row = 0
 	g.cursor_col = 0
 	g.wrap_pending = false
+	// Re-write verbatim: the snapshotted runes are already translated, so a
+	// still-selected DEC Special Graphics set must not re-translate literal
+	// ASCII (e.g. 'q'/'x' in a command line) into box-drawing glyphs. The
+	// child's SIGWINCH redraw re-selects the set as needed.
+	g.g0_charset = .Ascii
 
 	for line, index in visible {
 		g.cursor_col = 0
@@ -459,11 +476,15 @@ grid_write :: proc(g: ^Grid, runes: []rune) {
 		if r == 0 {
 			continue
 		}
+		cr := r
+		if g.g0_charset == .Dec_Special_Graphics {
+			cr = dec_special_graphics(cr)
+		}
 		if g.wrap_pending {
 			grid_wrap(g)
 		}
 		c := cell_ptr(g, g.cursor_row, g.cursor_col)
-		c^ = Cell{r = r, style = g.style, link = -1}
+		c^ = Cell{r = cr, style = g.style, link = -1}
 		g.cursor_col += 1
 		if g.cursor_col >= g.cols {
 			g.cursor_col = g.cols - 1
@@ -544,6 +565,92 @@ grid_escape :: proc(g: ^Grid, r: rune) {
 	case:
 		// Other single-character escapes are ignored deterministically.
 	}
+}
+
+// grid_charset applies a character-set designation/selection event. Only the
+// G0 set (ESC ( X) affects rendering, and only DEC Special Graphics (X = '0')
+// changes how runes are written; every other designation maps back to ASCII.
+// G1/G2/G3 and ESC % (UTF-8 selection) are no-ops because the grid always
+// emits UTF-8 and does not implement shift-out/shift-in switching.
+grid_charset :: proc(g: ^Grid, target, designator: rune) {
+	if target == '(' {
+		g.g0_charset = designator == '0' ? .Dec_Special_Graphics : .Ascii
+	}
+}
+
+// dec_special_graphics translates the DEC Special Graphics (VT100/ACS) variant
+// of an ASCII rune to its Unicode box-drawing/typographic equivalent. Runes
+// without a variant are returned unchanged.
+dec_special_graphics :: proc(r: rune) -> rune {
+	switch r {
+	case '`':
+		return '\u25c6' // BLACK DIAMOND
+	case 'a':
+		return '\u2592' // MEDIUM SHADE
+	case 'b':
+		return '\u2409' // SYMBOL FOR HORIZONTAL TABULATION
+	case 'c':
+		return '\u240c' // SYMBOL FOR FORM FEED
+	case 'd':
+		return '\u240d' // SYMBOL FOR CARRIAGE RETURN
+	case 'e':
+		return '\u240a' // SYMBOL FOR LINE FEED
+	case 'f':
+		return '\u00b0' // DEGREE SIGN
+	case 'g':
+		return '\u00b1' // PLUS-MINUS SIGN
+	case 'h':
+		return '\u2424' // SYMBOL FOR NEWLINE
+	case 'i':
+		return '\u240b' // SYMBOL FOR VERTICAL TABULATION
+	case 'j':
+		return '\u2518' // BOX DRAWINGS LIGHT UP AND LEFT
+	case 'k':
+		return '\u2510' // BOX DRAWINGS LIGHT DOWN AND LEFT
+	case 'l':
+		return '\u250c' // BOX DRAWINGS LIGHT DOWN AND RIGHT
+	case 'm':
+		return '\u2514' // BOX DRAWINGS LIGHT UP AND RIGHT
+	case 'n':
+		return '\u253c' // BOX DRAWINGS LIGHT VERTICAL AND HORIZONTAL
+	case 'o':
+		return '\u23ba' // HORIZONTAL SCAN LINE-1
+	case 'p':
+		return '\u23bb' // HORIZONTAL SCAN LINE-3
+	case 'q':
+		return '\u2500' // BOX DRAWINGS LIGHT HORIZONTAL
+	case 'r':
+		return '\u23bc' // HORIZONTAL SCAN LINE-7
+	case 's':
+		return '\u23bd' // HORIZONTAL SCAN LINE-9
+	case 't':
+		return '\u251c' // BOX DRAWINGS LIGHT VERTICAL AND RIGHT
+	case 'u':
+		return '\u2524' // BOX DRAWINGS LIGHT VERTICAL AND LEFT
+	case 'v':
+		return '\u2534' // BOX DRAWINGS LIGHT UP AND HORIZONTAL
+	case 'w':
+		return '\u252c' // BOX DRAWINGS LIGHT DOWN AND HORIZONTAL
+	case 'x':
+		return '\u2502' // BOX DRAWINGS LIGHT VERTICAL
+	case 'y':
+		return '\u2264' // LESS-THAN OR EQUAL TO
+	case 'z':
+		return '\u2265' // GREATER-THAN OR EQUAL TO
+	case '{':
+		return '\u03c0' // GREEK SMALL LETTER PI
+	case '|':
+		return '\u2260' // NOT EQUAL TO
+	case '}':
+		return '\u00a3' // POUND SIGN
+	case '~':
+		return '\u00b7' // MIDDLE DOT
+	case '_':
+		return '\u00a0' // NO-BREAK SPACE
+	case '0':
+		return '\u2588' // FULL BLOCK
+	}
+	return r
 }
 
 // csi_param returns CSI parameter i (0-based), or def when absent.

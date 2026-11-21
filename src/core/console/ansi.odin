@@ -262,6 +262,17 @@ Escape_Event :: struct {
 	rune: rune,
 }
 
+// Charset_Event reports a character-set designation or selection — ESC ( X,
+// ESC ) X, ESC * X, ESC + X, ESC % X — as `target` (the byte after ESC) and
+// `designator` (the final byte). The grid uses it to switch the G0 set (e.g.
+// ESC ( 0 selects DEC Special Graphics line drawing); other consumers ignore
+// it. Reporting the designator (instead of echoing it as text) is what keeps
+// full-screen apps like htop from leaking stray 'B'/'0' glyphs.
+Charset_Event :: struct {
+	target:     rune,
+	designator: rune,
+}
+
 Event :: union {
 	Text_Event,
 	Style_Event,
@@ -269,6 +280,7 @@ Event :: union {
 	Control_Event,
 	Osc_Event,
 	Escape_Event,
+	Charset_Event,
 }
 
 // --- Parser -------------------------------------------------------------
@@ -278,6 +290,7 @@ Parser_State :: enum u8 {
 	Escape, // saw ESC, awaiting the escape body
 	Csi, // saw ESC [, collecting parameters
 	Osc, // saw ESC ], collecting an OSC payload
+	Charset, // saw ESC ( ) * + %, awaiting the designator
 }
 
 // Parser is a streaming ANSI state machine over runes. Initialize it with
@@ -298,6 +311,9 @@ Parser :: struct {
 	osc_len:      int,
 	osc_overflow: bool,
 	st_pending:   bool, // an OSC string ended with ESC (ST); the next '\' is its second byte
+	// charset_target holds the intermediate byte of a pending character-set
+	// designation/selection (ESC ( ) * + %); the next rune is its designator.
+	charset_target: rune,
 	// owned holds the OSC payloads allocated during the current feed; they are
 	// released at the start of the next feed and by parser_destroy.
 	owned: [dynamic][]rune,
@@ -401,6 +417,11 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 				p.state = .Osc
 				p.osc_len = 0
 				p.osc_overflow = false
+			case '(', ')', '*', '+', '%':
+				// Character-set designation/selection: the byte after this
+				// intermediate is the designator, not printable text.
+				p.charset_target = r
+				p.state = .Charset
 			case:
 				// Single-character escape (ESC + one byte): reported so the
 				// grid can handle DECSC/DECRC/IND/NEL/RI.
@@ -465,6 +486,23 @@ feed :: proc(p: ^Parser, input: []rune, out: []Event) -> (written: int, consumed
 			// Control, ESC, or non-ASCII inside a CSI sequence: cancel it and
 			// reprocess the rune in Ground.
 			p.state = .Ground
+			continue
+
+		case .Charset:
+			// The designator is a single final byte (0x20..0x7E). A control or
+			// non-ASCII rune cancels the designation and is reprocessed in
+			// Ground.
+			if r < 0x20 || r >= 0x7f {
+				p.state = .Ground
+				continue
+			}
+			if written >= len(out) {
+				return written, i
+			}
+			out[written] = Charset_Event{target = p.charset_target, designator = r}
+			written += 1
+			p.state = .Ground
+			i += 1
 			continue
 
 		case .Osc:

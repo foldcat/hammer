@@ -317,6 +317,23 @@ test_grid_cursor_save_restore :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_grid_dec_special_graphics :: proc(t: ^testing.T) {
+	// ESC ( 0 selects DEC Special Graphics: ASCII q/x/l/m/k/j draw box borders;
+	// ESC ( B restores ASCII and must not leak a 'B' or '0' glyph.
+	expect_grid(t, 24, 80, transmute([]byte)string("\x1b(0lqk\x1b(B"), "\u250c\u2500\u2510")
+	expect_grid(t, 24, 80, transmute([]byte)string("\x1b(0x\x1b(B"), "\u2502")
+	expect_grid(t, 24, 80, transmute([]byte)string("\x1b(0mqj\x1b(B"), "\u2514\u2500\u2518")
+}
+
+@(test)
+test_grid_charset_no_leak :: proc(t: ^testing.T) {
+	// The designator byte is consumed; it is never echoed as a glyph.
+	expect_grid(t, 24, 80, transmute([]byte)string("\x1b(B"), "")
+	expect_grid(t, 24, 80, transmute([]byte)string("\x1b(0"), "")
+	expect_grid(t, 24, 80, transmute([]byte)string("\x1b(0\x1b(B\x1b)0\x1b%G"), "")
+}
+
+@(test)
 test_grid_cursor_visibility_and_position :: proc(t: ^testing.T) {
 	s: console.Grid_Stream
 	console.grid_stream_init(&s, 24, 80, 0, context.allocator)

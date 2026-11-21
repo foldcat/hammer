@@ -116,6 +116,9 @@ event_equal :: proc(a, b: console.Event) -> bool {
 	case console.Escape_Event:
 		y, ok := b.(console.Escape_Event)
 		return ok && x.rune == y.rune
+	case console.Charset_Event:
+		y, ok := b.(console.Charset_Event)
+		return ok && x.target == y.target && x.designator == y.designator
 	}
 	return false
 }
@@ -551,6 +554,38 @@ test_parser_escape_and_csi_sequences :: proc(t: ^testing.T) {
 		testing.expect(t, ok && esc.rune == '7')
 		expect_csi(t, events[1], 'J', 2)
 		expect_csi(t, events[2], 'l', 25)
+	}
+}
+
+@(test)
+test_parser_charset_designation :: proc(t: ^testing.T) {
+	// ESC ( 0 and ESC ( B are character-set designations, not text: no '0' or
+	// 'B' leaks through as a glyph.
+	events := collect_events(transmute([]byte)string("\x1b(0\x1b(Bx"))
+	defer delete_events(events)
+	testing.expectf(t, len(events) == 3, "expected 3 events, got %d", len(events))
+	if len(events) == 3 {
+		c0, ok0 := events[0].(console.Charset_Event)
+		testing.expect(t, ok0 && c0.target == '(' && c0.designator == '0')
+		c1, ok1 := events[1].(console.Charset_Event)
+		testing.expect(t, ok1 && c1.target == '(' && c1.designator == 'B')
+		expect_text(t, events[2], "x")
+	}
+}
+
+@(test)
+test_parser_charset_g1_and_utf8 :: proc(t: ^testing.T) {
+	// ESC ) 0 (G1 designation) and ESC % G (UTF-8 selection) are also consumed
+	// and reported, not echoed as text.
+	events := collect_events(transmute([]byte)string("\x1b)0\x1b%Gy"))
+	defer delete_events(events)
+	testing.expectf(t, len(events) == 3, "expected 3 events, got %d", len(events))
+	if len(events) == 3 {
+		c0, ok0 := events[0].(console.Charset_Event)
+		testing.expect(t, ok0 && c0.target == ')' && c0.designator == '0')
+		c1, ok1 := events[1].(console.Charset_Event)
+		testing.expect(t, ok1 && c1.target == '%' && c1.designator == 'G')
+		expect_text(t, events[2], "y")
 	}
 }
 
