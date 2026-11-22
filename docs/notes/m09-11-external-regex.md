@@ -13,7 +13,7 @@ backward search, and `Edit` remain entirely on the native engine.
 
 The command resolves `raku` on the invocation-time `PATH` snapshot:
 
-- Present: echo the invocation to `+Errors`, then run the fixed adapter as
+- Present: log the invocation without opening `+Errors`, then run the fixed adapter as
   `raku -e <program> <pattern> <dot-byte>` without a shell. Raku regex syntax and
   leftmost-first behavior apply. The whole body is an immutable stdin snapshot.
 - Absent: synchronously evaluate the same `/pattern/` with the existing native

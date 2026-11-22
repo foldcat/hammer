@@ -21,7 +21,8 @@ routing: replace-selection
 body: $*IN.lines.sort.join("\n")
 ```
 
-All four keys are required and unique. Names start with an ASCII alphanumeric
+All four original keys are required and unique. M09.12 adds the optional
+`raku: -n` or `raku: -p` mode for Raku line filters. Names start with an ASCII alphanumeric
 and may then contain alphanumerics, `.`, `_`, or `-`. Engines are executable
 names, not paths or shell fragments. Routing is `replace-selection`,
 `output-window`, or `discard`. The body is the raw, nonempty, single-line value

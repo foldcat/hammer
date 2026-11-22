@@ -12,6 +12,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -141,6 +142,25 @@ def main() -> int:
                     f"terminal buffer has only {match.group(1)} bytes; expected the shell's echo output; log: {log_path}"
                 )
             print("PASS: the terminal buffer received the shell's output")
+
+            if shutil.which("raku") is not None:
+                execute(x11, window, "RakuRepl", 10, 10, args.timeout, log_path)
+                wait_for_log(log_path, "raku: REPL opened", args.timeout)
+                wait_for_log(log_path, "terminal: resize", args.timeout, 2)
+                type_text(x11, 'say 6*7; spurt "raku-repl-ok", 42')
+                x11.tap(0xFF0D)
+                repl_marker = sandbox / "raku-repl-ok"
+                deadline = time.monotonic() + args.timeout
+                while not repl_marker.exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                if repl_marker.read_bytes() != b"42":
+                    raise HarnessFailure("Raku REPL did not evaluate typed input")
+                type_text(x11, "exit")
+                x11.tap(0xFF0D)
+                wait_for_log(log_path, "terminal: exited", args.timeout, 2)
+                print("PASS: RakuRepl evaluates typed one-liners in a PTY window and exits cleanly")
+            else:
+                print("SKIP: RakuRepl execution (raku is not installed)")
 
             x11.tap(0xFF1B)
             wait_for_exit(process, args.timeout, log_path)

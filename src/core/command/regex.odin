@@ -48,6 +48,45 @@ raku_regex_command :: proc(engine_path, pattern: string, start_byte: int, alloca
 	return argv, {}
 }
 
+raku_program_mode_valid :: proc(mode: string) -> bool {
+	return mode == "" || mode == "-n" || mode == "-p"
+}
+
+// raku_program_command invokes a source file directly, without a shell. The
+// optional mode is one declarative Raku argument (-n or -p), not a command line.
+raku_program_command :: proc(engine_path, mode, program_path: string, allocator := context.allocator) -> ([]string, errs.Error) {
+	if engine_path == "" || program_path == "" || !raku_program_mode_valid(mode) {
+		return nil, errs.new(.Invalid_Input, "raku: invalid program command", allocator = allocator)
+	}
+	path_index := 1
+	vector_length := 2
+	if mode != "" {
+		path_index = 2
+		vector_length = 3
+	}
+	argv, alloc_err := make([]string, vector_length, allocator)
+	if alloc_err != nil {
+		return nil, errs.new(.Resource_Limit, "raku: cannot allocate program command", allocator = allocator)
+	}
+	argv[0] = strings.clone(engine_path, allocator)
+	if mode != "" {
+		argv[1] = strings.clone(mode, allocator)
+	}
+	argv[path_index] = strings.clone(program_path, allocator)
+	if argv[0] == "" || (mode != "" && argv[1] == "") || argv[path_index] == "" {
+		raku_program_command_destroy(argv, allocator)
+		return nil, errs.new(.Resource_Limit, "raku: cannot copy program command", allocator = allocator)
+	}
+	return argv, {}
+}
+
+raku_program_command_destroy :: proc(argv: []string, allocator := context.allocator) {
+	for argument in argv {
+		delete(argument, allocator)
+	}
+	delete(argv, allocator)
+}
+
 raku_regex_command_destroy :: proc(argv: []string, allocator := context.allocator) {
 	for argument in argv {
 		delete(argument, allocator)

@@ -14,6 +14,7 @@ filter_parse_error :: proc(origin: string, line: int, message: string, allocator
 // filter_parse_definition reads one declarative key/value file. Values borrow
 // text and origin until registration clones them. body is a raw, single-line
 // value; multi-line programs are deliberately rejected rather than misparsed.
+// The optional raku key declares -n/-p without executing the definition.
 filter_parse_definition :: proc(text, origin: string, scope: Filter_Scope, allocator := context.allocator) -> (Filter_Definition, errs.Error) {
 	definition := Filter_Definition{origin = origin, scope = scope}
 	if len(text) > MAX_FILTER_BODY_BYTES {
@@ -31,6 +32,7 @@ filter_parse_definition :: proc(text, origin: string, scope: Filter_Scope, alloc
 	seen_engine := false
 	seen_routing := false
 	seen_body := false
+	seen_raku := false
 	for raw, index in lines {
 		line_number := index + 1
 		trimmed := strings.trim_space(raw)
@@ -72,6 +74,12 @@ filter_parse_definition :: proc(text, origin: string, scope: Filter_Scope, alloc
 			}
 			seen_body = true
 			definition.body = value
+		case "raku":
+			if seen_raku {
+				return {}, filter_parse_error(origin, line_number, "duplicate raku", allocator = allocator)
+			}
+			seen_raku = true
+			definition.raku_mode = value
 		case:
 			return {}, filter_parse_error(origin, line_number, "unknown key", allocator = allocator)
 		}

@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import "core:log"
 
 import address "core/address"
@@ -69,13 +68,7 @@ editor_command_raku :: proc(cmd_context: ^command.Context, invocation: command.I
 	}
 	defer process.context_snapshot_destroy(&snapshot)
 
-	line := fmt.aprintf("%s -e <external-regex> %s", engine_path, invocation.argument, allocator = context.temp_allocator)
-	if line == "" {
-		return errs.new(.Resource_Limit, "regex: cannot format external search echo", allocator = permanent())
-	}
-	defer delete(line, context.temp_allocator)
 	log.infof("regex: echo %q", invocation.argument)
-	editor_report(editor_append_error(line))
 	id, start_err := process.job_start_regex_search(
 		&editor.jobs,
 		{command = argv, working_dir = snapshot.working_dir, environment = snapshot.environment},

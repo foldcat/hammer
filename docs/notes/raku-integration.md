@@ -2,8 +2,8 @@
 
 **Status:** proposed on 2026-11-18; R-05 registry/discovery is implemented
 by M09.09, invocation/context routing by M09.10, and the optional external regex
-verb with native fallback by M09.11. General Raku named-filter adapters and the
-REPL remain unimplemented. Recorded because adding an optional external language
+verb with native fallback by M09.11. Temp-file named filters, `-n`/`-p`, direct
+one-liners, and the REPL are implemented by M09.12. Recorded because adding an optional external language
 runtime and a user-defined command layer is an architecture change (AGENTS.md §1, scope §3:
 "Do not introduce a … scripting runtime, plugin system, or major dependency
 merely to complete a small task"), so it needs a documented decision before any
@@ -100,9 +100,10 @@ The convenience layer (what makes Raku commands feel built-in):
   stderr always → output window.
 - **Named, scoped, persistent:** per-user (`~/.config/hammer/`),
   per-project (`.hammer/`), session-only; `Cmd`/`Cmds` to list; tag completion.
-- **Echo before run** (show the expanded command, as Acme does).
-- **Bounded:** every invocation rides M09's job service → `Stop`, backpressure,
-  and a default timeout apply automatically.
+- **Log echo before run** (the resolved invocation is logged; Raku does not open
+  a redundant `+Errors` echo window).
+- **Bounded:** every invocation rides M09's job service → `Stop`, cancellation,
+  backpressure, and bounded output apply automatically.
 
 Definitions are **metadata + body**, not executable Raku, precisely so the
 editor can list and validate commands without running anything (trust rule:
@@ -112,7 +113,8 @@ executes Raku is an explicit user invocation.
 ## 4. Guardrails (carried from trust/safety docs)
 
 - Running a named command or an external regex = running code. It is explicit
-  (tag/command invocation), never auto-run on file open, and echoed first.
+  (tag/command invocation), never auto-run on file open, and log-echoed before
+  run without a redundant `+Errors` window for Raku.
 - Importing project `.hammer/` command definitions = importing executable
   project code; surface it rather than silently loading it.
 - No silent lossy conversion; output is a byte string applied through the
@@ -131,12 +133,17 @@ future session doesn't "helpfully" wire Raku into the address language.
 
 M09.09 implements and validates the registry, scopes, PATH detection, and
 non-executing discovery on Linux/X11; M09.10 validates named-filter invocation;
-M09.11 validates real Raku search and native fallback on Linux/X11. Windows is
-source-checked only. The current `.filter` format accepts single-line bodies,
-not multi-line programs or PATHEXT customization. See
-`docs/notes/m09-09-filter-registry.md`, `docs/notes/m09-10-command-invocation.md`,
-and `docs/notes/m09-11-external-regex.md` for the implemented contracts.
+M09.11 validates real Raku search and native fallback on Linux/X11. M09.12 adds
+and validates direct `RakuEval` one-liners, temp-file named filters, `-n`/`-p`,
+job-owned temp-file cleanup, and `RakuRepl`; see
+`docs/notes/m09-12-raku-engine.md`. Direct evaluation and named filters use the
+highlighted range as stdin, or the whole unsaved buffer at a collapsed caret.
+Raku log echoes do not open `+Errors`. Windows remains source-checked only. The
+current `.filter` format accepts single-line bodies, not multi-line programs or
+PATHEXT customization. See `docs/notes/m09-09-filter-registry.md`,
+`docs/notes/m09-10-command-invocation.md`, and
+`docs/notes/m09-11-external-regex.md` for the earlier contracts.
 
-General Raku named-filter behavior (`-n`/`-p`, temp-file program execution) and
-the REPL window remain unimplemented until M09.12. Native Windows/Raku execution
-and interactive cancellation of a pathological external regex remain unverified.
+Placeholder interpolation and multi-line `.filter` bodies remain unimplemented.
+Native Windows/Raku execution, ConPTY REPL behavior, and interactive cancellation
+of a pathological external regex remain unverified.

@@ -85,8 +85,13 @@ def select_all(x11: X11) -> None:
 
 
 def type_text(x11: X11, text: str) -> None:
+    shifted = {"+": "=", "$": "4", "*": "8", '"': "'"}
     for character in text:
-        if character.isupper() or character == "!":
+        if character in shifted:
+            x11.key(0xFFE1, True)
+            x11.tap(ord(shifted[character]))
+            x11.key(0xFFE1, False)
+        elif character.isupper() or character == "!":
             x11.key(0xFFE1, True)
             x11.tap(ord(character.lower()))
             x11.key(0xFFE1, False)
@@ -317,6 +322,8 @@ def run_regex_case(
                 wait_for_log(log_path, "range=25,31", args.timeout)
                 execute(x11, window, "Raku /needle/", 60, 52, args.timeout, log_path, 3)
                 wait_for_log(log_path, "range=5,11", args.timeout, 2)
+                if "errors: opened" in log_path.read_text(encoding="utf-8", errors="replace"):
+                    raise HarnessFailure("external Raku search opened a redundant +Errors window")
             else:
                 wait_for_log(log_path, "regex: native fallback", args.timeout)
                 wait_for_log(log_path, "range=5,11", args.timeout)
@@ -635,6 +642,15 @@ def main() -> int:
                 f"name: invoke-discard\nengine: {job_helper.name}\nrouting: discard\nbody: mark\n",
                 encoding="utf-8",
             )
+            if shutil.which("raku") is not None:
+                (invoke_user_commands / "raku-upper.filter").write_text(
+                    "name: raku-upper\nengine: raku\nrouting: replace-selection\nraku: -p\nbody: $_ = $_.uc\n",
+                    encoding="utf-8",
+                )
+                (invoke_user_commands / "raku-lines.filter").write_text(
+                    'name: raku-lines\nengine: raku\nrouting: output-window\nraku: -n\nbody: spurt "raku-n-ok", $_\n',
+                    encoding="utf-8",
+                )
             invoke_source = sandbox / "invoke.txt"
             invoke_source.write_bytes("invoke α β\n".encode("utf-8"))
             discard_marker = sandbox / "discard-marker.txt"
@@ -642,6 +658,9 @@ def main() -> int:
             invoke_environment = filter_environment.copy()
             invoke_environment["XDG_CONFIG_HOME"] = str(invoke_config_home)
             invoke_environment["XDG_STATE_HOME"] = str(sandbox / "invoke-state")
+            raku_temp = sandbox / "raku-temp"
+            raku_temp.mkdir()
+            invoke_environment["TMPDIR"] = str(raku_temp)
             with invoke_log_path.open("wb") as invoke_log:
                 process = subprocess.Popen(
                     [str(binary), "invoke.txt"],
@@ -689,6 +708,84 @@ def main() -> int:
                 if after_opened != before_opened:
                     raise HarnessFailure("discard filter opened an output window")
                 print("PASS: discard filter runs its engine without an output window")
+
+                if shutil.which("raku") is not None:
+                    before_log = invoke_log_path.read_text(encoding="utf-8", errors="replace")
+                    errors_opened_before = before_log.count("errors: opened")
+                    errors_appended_before = before_log.count("errors: appended")
+                    job_windows_before = before_log.count("job: output opened")
+                    execute(x11, invoke_window, "raku-upper", 60, 52, args.timeout, invoke_log_path, 1)
+                    wait_for_log(invoke_log_path, "filter: raku-upper started replace-selection", args.timeout)
+                    wait_for_log(invoke_log_path, "job: selection replaced", args.timeout, 2)
+                    execute(x11, invoke_window, "Putall", 10, 10, args.timeout, invoke_log_path, 2)
+                    wait_for_log(invoke_log_path, "file: saved invoke.txt", args.timeout, 2)
+                    expected_upper = "FILTERED:INVOKE Α Β\n".encode("utf-8")
+                    if invoke_source.read_bytes() != expected_upper:
+                        raise HarnessFailure(f"Raku -p filter wrote unexpected bytes: {invoke_source.read_bytes()!r}")
+                    print("PASS: named Raku -p temp-file filter uppercases the selection")
+
+                    execute(x11, invoke_window, "raku-lines", 60, 52, args.timeout, invoke_log_path, 1)
+                    wait_for_log(invoke_log_path, "filter: raku-lines started output-window", args.timeout)
+                    raku_n_marker = sandbox / "raku-n-ok"
+                    deadline = time.monotonic() + args.timeout
+                    while not raku_n_marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    if raku_n_marker.read_bytes() != "FILTERED:INVOKE Α Β".encode("utf-8"):
+                        raise HarnessFailure("Raku -n output filter did not receive the selected line")
+                    print("PASS: named Raku -n filter receives selection stdin and routes output to a job window")
+
+                    # A collapsed caret feeds the entire current buffer, including
+                    # unsaved text, rather than an empty stream.
+                    append_text(x11, invoke_window, 60, 100, "!")
+                    one_liner = 'RakuEval say 2+2; spurt "raku-one-liner-ok", $*IN.slurp'
+                    execute(x11, invoke_window, one_liner, 60, 52, args.timeout, invoke_log_path, 1)
+                    wait_for_log(invoke_log_path, "raku: one-liner started", args.timeout)
+                    one_liner_marker = sandbox / "raku-one-liner-ok"
+                    deadline = time.monotonic() + args.timeout
+                    while not one_liner_marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    if one_liner_marker.read_bytes() != "FILTERED:INVOKE Α Β\n!".encode("utf-8"):
+                        raise HarnessFailure("RakuEval did not receive the whole unsaved buffer")
+                    log_text = invoke_log_path.read_text(encoding="utf-8", errors="replace")
+                    echo_pos = log_text.find("raku: echo")
+                    start_pos = log_text.find("raku: one-liner started")
+                    if echo_pos < 0 or start_pos < 0 or echo_pos > start_pos:
+                        raise HarnessFailure("RakuEval echo did not precede process start")
+                    print("PASS: RakuEval reads the whole unsaved buffer at a collapsed caret")
+
+                    # A non-empty highlight overrides whole-buffer input.
+                    click(x11, invoke_window, 1, 60, 100)
+                    x11.key(0xFFE3, True)
+                    x11.tap(0xFF50)
+                    x11.key(0xFFE3, False)
+                    x11.key(0xFFE1, True)
+                    for _ in range(8):
+                        x11.tap(0xFF53)
+                    x11.key(0xFFE1, False)
+                    selected_liner = 'RakuEval spurt "raku-selected-ok", $*IN.slurp'
+                    execute(x11, invoke_window, selected_liner, 60, 52, args.timeout, invoke_log_path, 2)
+                    wait_for_log(invoke_log_path, "raku: one-liner started", args.timeout, 2)
+                    selected_marker = sandbox / "raku-selected-ok"
+                    deadline = time.monotonic() + args.timeout
+                    while not selected_marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    if selected_marker.read_bytes() != b"FILTERED":
+                        raise HarnessFailure(f"RakuEval received unexpected selected stdin: {selected_marker.read_bytes()!r}")
+                    print("PASS: RakuEval reads only a non-empty highlighted range")
+
+                    deadline = time.monotonic() + args.timeout
+                    while any(raku_temp.iterdir()) and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    if any(raku_temp.iterdir()):
+                        raise HarnessFailure("completed Raku jobs left temporary programs behind")
+                    after_log = invoke_log_path.read_text(encoding="utf-8", errors="replace")
+                    if after_log.count("errors: opened") != errors_opened_before or after_log.count("errors: appended") != errors_appended_before:
+                        raise HarnessFailure("Raku spawned or wrote to a redundant +Errors window")
+                    if after_log.count("job: output opened") - job_windows_before != 4:
+                        raise HarnessFailure("Raku did not create exactly one job window per invocation")
+                    print("PASS: Raku spawns one job window only and no +Errors echo; temp files are reclaimed")
+                    execute(x11, invoke_window, "Putall", 10, 10, args.timeout, invoke_log_path, 3)
+                    wait_for_log(invoke_log_path, "file: saved invoke.txt", args.timeout, 3)
 
                 x11.tap(0xFF1B)
                 wait_for_exit(process, args.timeout, invoke_log_path)

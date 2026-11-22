@@ -35,6 +35,10 @@ Selection_Pipe_Options :: struct {
 	// while providing no input. The target range is still captured for the
 	// replacement and its stale-target validation.
 	empty_input:  bool,
+	// whole_buffer_input_when_empty feeds the entire document when the target
+	// selection is a caret. A non-empty selection remains the input. The target
+	// range and output replacement semantics are unchanged.
+	whole_buffer_input_when_empty: bool,
 }
 
 // Selection_Pipe owns independent selection input and fixed-capacity stdout
@@ -80,12 +84,16 @@ selection_pipe_init :: proc(
 		return errs.newf(.Resource_Limit, "process: selection pipe output exceeds the %d-byte budget", MAX_SELECTION_OUTPUT_BYTES, allocator = allocator)
 	}
 	range := rope.Byte_Range{min(selection.anchor, selection.active), max(selection.anchor, selection.active)}
+	input_range := range
+	if resolved.whole_buffer_input_when_empty && range.start == range.end {
+		input_range = {0, rope.tree_byte_count(&doc.tree)}
+	}
 	input: []byte
 	if !resolved.empty_input {
-		if range.end - range.start > MAX_SELECTION_INPUT_BYTES {
+		if input_range.end - input_range.start > MAX_SELECTION_INPUT_BYTES {
 			return errs.newf(.Resource_Limit, "process: selection pipe input exceeds the %d-byte budget", MAX_SELECTION_INPUT_BYTES, allocator = allocator)
 		}
-		read, read_err := rope.tree_read_all(&doc.tree, range, allocator)
+		read, read_err := rope.tree_read_all(&doc.tree, input_range, allocator)
 		if !errs.ok(read_err) {
 			return read_err
 		}

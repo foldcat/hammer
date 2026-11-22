@@ -79,13 +79,17 @@ editor_command_win :: proc(cmd_context: ^command.Context, invocation: command.In
 	if invocation.argument != "" {
 		return errs.new(.Invalid_Input, "terminal: Win takes no arguments", allocator = permanent())
 	}
+	shell := editor_terminal_shell()
+	return editor_open_terminal(cmd_context, {shell}, shell)
+}
+
+editor_open_terminal :: proc(cmd_context: ^command.Context, argv: []string, name: string) -> errs.Error {
 	target := editor_command_source_target(cmd_context.source)
 	column_id := editor_look_column(target)
 	if column_id == 0 {
-		return errs.new(.NotFound, "view: no column is available for Win", allocator = permanent())
+		return errs.new(.NotFound, "view: no column is available for terminal", allocator = permanent())
 	}
-	shell := editor_terminal_shell()
-	buffer, alloc_err := editor_alloc_terminal_buffer(shell)
+	buffer, alloc_err := editor_alloc_terminal_buffer(argv, name)
 	if !errs.ok(alloc_err) {
 		return alloc_err
 	}
@@ -97,18 +101,18 @@ editor_command_win :: proc(cmd_context: ^command.Context, invocation: command.In
 	item.wrap_mode = .Truncate
 	item.line_numbers = false
 	editor_activate_window(item.window_id)
-	log.infof("terminal: opened window=%d buffer=%d shell=%q", u64(item.window_id), u64(buffer.id), shell)
+	log.infof("terminal: opened window=%d buffer=%d shell=%q", u64(item.window_id), u64(buffer.id), name)
 	return {}
 }
 
-// editor_alloc_terminal_buffer spawns an interactive shell on a PTY and returns
-// a fresh .Terminal buffer whose document receives the grid transcript.
-editor_alloc_terminal_buffer :: proc(shell: string) -> (^Editor_Buffer, errs.Error) {
+// editor_alloc_terminal_buffer spawns an interactive program on a PTY and
+// returns a fresh .Terminal buffer whose document receives the grid transcript.
+editor_alloc_terminal_buffer :: proc(argv: []string, name: string) -> (^Editor_Buffer, errs.Error) {
 	if editor.next_buffer_id == 0 {
 		return nil, errs.new(.Resource_Limit, "file: buffer ID space exhausted", allocator = permanent())
 	}
 	pty, spawn_err := process.pty_spawn(
-		{command = {shell}},
+		{command = argv},
 		{termios = .Cooked, size = {cols = TERMINAL_COLS, rows = TERMINAL_ROWS}},
 		permanent(),
 	)
@@ -140,7 +144,7 @@ editor_alloc_terminal_buffer :: proc(shell: string) -> (^Editor_Buffer, errs.Err
 		}
 		buffer.terminal.render = make([dynamic]byte, runtime.heap_allocator())
 		buffer.terminal.styles = make([dynamic]console.Style_Run, runtime.heap_allocator())
-		name, clone_err := strings.clone(shell, permanent())
+		owned_name, clone_err := strings.clone(name, permanent())
 		if clone_err != nil {
 			delete(buffer.terminal.styles)
 			delete(buffer.terminal.render)
@@ -153,7 +157,7 @@ editor_alloc_terminal_buffer :: proc(shell: string) -> (^Editor_Buffer, errs.Err
 		buffer.terminal.pty = pty
 		buffer.terminal.live = true
 		buffer.terminal.following = true
-		buffer.job_name = name
+		buffer.job_name = owned_name
 		editor.next_buffer_id += 1
 		editor.buffer_count += 1
 		return buffer, {}

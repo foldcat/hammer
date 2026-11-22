@@ -35,6 +35,7 @@ Filter_Definition :: struct {
 	name:        string,
 	engine:      string,
 	body:        string,
+	raku_mode:   string,
 	origin:      string,
 	engine_path: string,
 	scope:       Filter_Scope,
@@ -98,6 +99,7 @@ filter_definition_destroy :: proc(definition: ^Filter_Definition, allocator: run
 	delete(definition.name, allocator)
 	delete(definition.engine, allocator)
 	delete(definition.body, allocator)
+	delete(definition.raku_mode, allocator)
 	delete(definition.origin, allocator)
 	delete(definition.engine_path, allocator)
 	definition^ = {}
@@ -176,6 +178,9 @@ filter_validate :: proc(definition: Filter_Definition, allocator := context.allo
 	if len(definition.origin) > MAX_FILTER_ORIGIN_BYTES {
 		return errs.new(.Resource_Limit, "filter: origin path is too long", allocator = allocator)
 	}
+	if !raku_program_mode_valid(definition.raku_mode) || (definition.raku_mode != "" && definition.engine != "raku") {
+		return errs.new(.Invalid_Input, "filter: raku mode must be empty, -n, or -p and requires engine raku", allocator = allocator)
+	}
 	if definition.scope != .User && definition.scope != .Project && definition.scope != .Session {
 		return errs.new(.Invalid_Input, "filter: invalid definition scope", allocator = allocator)
 	}
@@ -195,11 +200,12 @@ filter_definition_clone :: proc(source: Filter_Definition, allocator: runtime.Al
 	definition.name = strings.clone(source.name, allocator)
 	definition.engine = strings.clone(source.engine, allocator)
 	definition.body = strings.clone(source.body, allocator)
+	definition.raku_mode = strings.clone(source.raku_mode, allocator)
 	definition.origin = strings.clone(source.origin, allocator)
 	definition.engine_path = strings.clone(source.engine_path, allocator)
 	if (len(source.name) > 0 && definition.name == "") || (len(source.engine) > 0 && definition.engine == "") ||
-		(len(source.body) > 0 && definition.body == "") || (len(source.origin) > 0 && definition.origin == "") ||
-		(len(source.engine_path) > 0 && definition.engine_path == "") {
+		(len(source.body) > 0 && definition.body == "") || (len(source.raku_mode) > 0 && definition.raku_mode == "") ||
+		(len(source.origin) > 0 && definition.origin == "") || (len(source.engine_path) > 0 && definition.engine_path == "") {
 		err = errs.new(.Resource_Limit, "filter: cannot copy command definition", allocator = allocator)
 		return
 	}
@@ -398,13 +404,18 @@ filter_registry_describe :: proc(registry: ^Filter_Registry, allocator := contex
 		if definition.engine_path != "" {
 			availability = definition.engine_path
 		}
+		mode := definition.raku_mode
+		if mode == "" {
+			mode = "-"
+		}
 		line := fmt.aprintf(
-			"%s  scope=%s  engine=%s  available=%s  routing=%s  origin=%s\n",
+			"%s  scope=%s  engine=%s  available=%s  routing=%s  raku=%s  origin=%s\n",
 			definition.name,
 			filter_scope_name(definition.scope),
 			definition.engine,
 			availability,
 			filter_routing_name(definition.routing),
+			mode,
 			origin,
 			allocator = allocator,
 		)

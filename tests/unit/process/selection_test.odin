@@ -337,3 +337,40 @@ test_selection_pipe_empty_input_replaces_without_stdin :: proc(t: ^testing.T) {
 	testing.expectf(t, string(content) == "stdout=\n", "replacement %q", string(content))
 	expect_ok(t, process.job_release(&service, id))
 }
+
+@(test)
+test_selection_pipe_raku_input_uses_selection_or_whole_buffer :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	expect_ok(t, txn.doc_init_from_bytes(&doc, transmute([]byte)string("abcdef"), {}, context.allocator))
+	defer txn.doc_destroy(&doc)
+
+	caret: process.Selection_Pipe
+	expect_ok(t, process.selection_pipe_init(
+		&caret,
+		&doc,
+		{anchor = 2, active = 2},
+		51,
+		52,
+		53,
+		{whole_buffer_input_when_empty = true},
+		context.allocator,
+	))
+	testing.expect(t, string(caret.input) == "abcdef")
+	testing.expect(t, caret.target.range.start == 2 && caret.target.range.end == 2)
+	process.selection_pipe_destroy(&caret)
+
+	selection: process.Selection_Pipe
+	expect_ok(t, process.selection_pipe_init(
+		&selection,
+		&doc,
+		{anchor = 1, active = 4},
+		51,
+		52,
+		53,
+		{whole_buffer_input_when_empty = true},
+		context.allocator,
+	))
+	defer process.selection_pipe_destroy(&selection)
+	testing.expect(t, string(selection.input) == "bcd")
+	testing.expect(t, selection.target.range.start == 1 && selection.target.range.end == 4)
+}

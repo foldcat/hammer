@@ -1,5 +1,7 @@
 package process_test
 
+import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -208,4 +210,52 @@ test_job_state_names :: proc(t: ^testing.T) {
 	testing.expect(t, process.job_state_name(.CancelRequested) == "stopping")
 	testing.expect(t, process.job_state_name(.Exited) == "exited")
 	testing.expect(t, process.job_state_name(.FailedToStart) == "failed")
+}
+
+@(test)
+test_job_release_removes_owned_temporary_file :: proc(t: ^testing.T) {
+	root, temp_err := os.make_directory_temp("", "hammer-job-temp-*", context.allocator)
+	testing.expectf(t, temp_err == nil, "cannot create temporary-file sandbox: %v", temp_err)
+	defer delete(root, context.allocator)
+	defer os.remove_all(root)
+	path := fmt.tprintf("%s/program.raku", root)
+	testing.expect(t, os.write_entire_file(path, "say 42") == nil)
+
+	service: process.Job_Service
+	process.job_service_init(&service, {}, context.allocator)
+	defer expect_ok(t, process.job_service_destroy(&service))
+	id, start_err := process.job_start(&service, {command = {"/definitely/missing/hammer-raku"}}, nil, 0)
+	expect_ok(t, start_err)
+	expect_ok(t, process.job_track_temporary_file(&service, id, path))
+	job := process.job_find(&service, id)
+	testing.expect(t, job != nil && job.temporary_file == path)
+	expect_kind(t, process.job_track_temporary_file(&service, id, path), .Invalid_Input)
+	expect_ok(t, process.job_release(&service, id))
+	testing.expect(t, !os.exists(path))
+	expect_kind(t, process.job_track_temporary_file(&service, 9999, path), .Invalid_Input)
+}
+
+@(test)
+test_job_context_discard_copies_stdin_snapshot :: proc(t: ^testing.T) {
+	service: process.Job_Service
+	process.job_service_init(&service, {}, context.allocator)
+	defer expect_ok(t, process.job_service_destroy(&service))
+	snapshot: process.Context_Snapshot
+	expect_ok(t, process.context_snapshot_init(&snapshot, {}, context.allocator))
+	defer process.context_snapshot_destroy(&snapshot)
+	input := make([]byte, 3, context.allocator)
+	defer delete(input, context.allocator)
+	copy(input, "abc")
+	id, start_err := process.job_start_context_discard_input(&service, {HELPER, "echo"}, &snapshot, input, 5)
+	expect_ok(t, start_err)
+	input[0] = 'X'
+	job := process.job_find(&service, id)
+	testing.expect(t, job != nil && job.discard_output && string(job.input) == "abc")
+	stdout := make([dynamic]byte, 0, 1024, context.allocator)
+	defer delete(stdout)
+	stderr := make([dynamic]byte, 0, 1024, context.allocator)
+	defer delete(stderr)
+	poll_job_until_releasable(t, &service, id, &stdout, &stderr)
+	testing.expect(t, string(stdout[:]) == "stdout=abc\n")
+	expect_ok(t, process.job_release(&service, id))
 }

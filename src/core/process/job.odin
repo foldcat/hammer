@@ -1,6 +1,7 @@
 package process
 
 import "base:runtime"
+import "core:os"
 import "core:strings"
 
 import errs "../errs"
@@ -44,6 +45,7 @@ Job :: struct {
 	state:           Job_State,
 	command:         string,
 	working_dir:     string,
+	temporary_file:  string, // Owned path; removed when the job slot is released.
 	environment:     []string,
 	input:           []byte,
 	selection_pipe:  Selection_Pipe,
@@ -97,6 +99,22 @@ job_find :: proc(service: ^Job_Service, id: Job_ID) -> ^Job {
 		}
 	}
 	return nil
+}
+
+// job_track_temporary_file copies a path into job-owned storage. The file is
+// removed and the copy freed on job_release or service destruction. The caller
+// retains responsibility for the original path string.
+job_track_temporary_file :: proc(service: ^Job_Service, id: Job_ID, path: string) -> errs.Error {
+	job := job_find(service, id)
+	if job == nil || path == "" || job.temporary_file != "" {
+		return errs.new(.Invalid_Input, "process: cannot attach temporary file to job")
+	}
+	owned, clone_err := strings.clone(path, job.allocator)
+	if clone_err != nil {
+		return errs.new(.Resource_Limit, "process: cannot copy job temporary-file path", allocator = job.allocator)
+	}
+	job.temporary_file = owned
+	return {}
 }
 
 job_active :: proc(job: ^Job) -> bool {
@@ -303,17 +321,22 @@ job_start_context :: proc(service: ^Job_Service, command: []string, snapshot: ^C
 	return job_start(service, desc, input, attachment)
 }
 
-// job_start_context_discard starts a job with a context snapshot but marks it
-// to discard all stdout/stderr instead of opening an output window. The job
-// still participates in cancellation, quit-blocking, and slot lifecycle.
-job_start_context_discard :: proc(service: ^Job_Service, command: []string, snapshot: ^Context_Snapshot, attachment: u64) -> (Job_ID, errs.Error) {
-	id, start_err := job_start_context(service, command, snapshot, nil, attachment)
+// job_start_context_discard_input starts a discard job with a stdin snapshot.
+job_start_context_discard_input :: proc(service: ^Job_Service, command: []string, snapshot: ^Context_Snapshot, input: []byte, attachment: u64) -> (Job_ID, errs.Error) {
+	id, start_err := job_start_context(service, command, snapshot, input, attachment)
 	if !errs.ok(start_err) {
 		return 0, start_err
 	}
 	job := job_find(service, id)
 	job.discard_output = true
 	return id, {}
+}
+
+// job_start_context_discard starts a job with a context snapshot but marks it
+// to discard all stdout/stderr instead of opening an output window. The job
+// still participates in cancellation, quit-blocking, and slot lifecycle.
+job_start_context_discard :: proc(service: ^Job_Service, command: []string, snapshot: ^Context_Snapshot, attachment: u64) -> (Job_ID, errs.Error) {
+	return job_start_context_discard_input(service, command, snapshot, nil, attachment)
 }
 
 job_force :: proc(job: ^Job) {
@@ -435,6 +458,12 @@ job_cleanup :: proc(job: ^Job, allocator: runtime.Allocator) -> errs.Error {
 	}
 	delete(job.command, allocator)
 	delete(job.working_dir, allocator)
+	if job.temporary_file != "" {
+		if remove_err := os.remove(job.temporary_file); remove_err != nil && remove_err != .Not_Exist {
+			capture(&first, errs.newf(.IO, "process: cannot remove job temporary file %s: %v", job.temporary_file, remove_err, allocator = allocator))
+		}
+		delete(job.temporary_file, allocator)
+	}
 	environment_destroy(job.environment, allocator)
 	delete(job.input, allocator)
 	selection_pipe_destroy(&job.selection_pipe)
