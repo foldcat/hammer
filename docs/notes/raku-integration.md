@@ -1,9 +1,10 @@
 # Raku integration — design and decisions
 
-**Status:** proposed on 2026-11-18; R-05 registry/discovery is now implemented
-by M09.09. Invocation, external engines, and Raku-specific behavior remain
-unimplemented. Recorded because adding an optional external language runtime and
-a user-defined command layer is an architecture change (AGENTS.md §1, scope §3:
+**Status:** proposed on 2026-11-18; R-05 registry/discovery is implemented
+by M09.09, invocation/context routing by M09.10, and the optional external regex
+verb with native fallback by M09.11. General Raku named-filter adapters and the
+REPL remain unimplemented. Recorded because adding an optional external language
+runtime and a user-defined command layer is an architecture change (AGENTS.md §1, scope §3:
 "Do not introduce a … scripting runtime, plugin system, or major dependency
 merely to complete a small task"), so it needs a documented decision before any
 code.
@@ -59,19 +60,19 @@ first-class default because of its regex/text strengths. The editor builds a
 | ID  | Decision                                                                                                      | Status   |
 | --- | ------------------------------------------------------------------------------------------------------------- | -------- |
 | R-01 | Address-language regex is always the native Odin engine; no Raku fallback.                                    | Proposed |
-| R-02 | Optional Raku regex is a separate, explicitly invoked verb with native fallback (detect `raku` → use it, else native). | Proposed |
-| R-03 | Commands are pure stdio filters: `(stdin + env + args) → stdout`. No editor API, no live object model.        | Proposed |
-| R-04 | Editor state is passed as a one-shot invocation-time snapshot (env vars + stdin), never a live bidirectional handle. | Proposed |
+| R-02 | Optional Raku regex is a separate, explicitly invoked verb with native fallback (detect `raku` → use it, else native). | Implemented (M09.11) |
+| R-03 | Commands are pure stdio filters: `(stdin + env + args) → stdout`. No editor API, no live object model.        | Implemented (M09.10) |
+| R-04 | Editor state is passed as a one-shot invocation-time snapshot (env vars + stdin), never a live bidirectional handle. | Implemented (M09.10) |
 | R-05 | Command *definitions* are declarative metadata + a body string; the registry is enumerable/validatable without executing anything. | Implemented (M09.09) |
 | R-06 | Raku-driven editor *mutation* (move cursor, open window, rename, listen to events) is deferred to M18 IPC, versioned and revision-validated. | Proposed |
-| R-07 | Raku is never embedded; absence is graceful (command unavailable or native fallback).                          | Proposed |
+| R-07 | Raku is never embedded; absence is graceful (command unavailable or native fallback).                          | Implemented for external regex (M09.11) |
 
 ### 3.1 R-02/R-07 — optional external regex
 
-A dedicated verb (e.g. a `Raku /pattern/` search or a `raku-regex` filter)
-detects `raku` at runtime. Present → shell out; absent → native engine, or
-the command is marked unavailable. This is the only place
-"detect-then-use-Raku-else-Odin" applies.
+The dedicated `Raku /pattern/` verb detects `raku` at invocation time. Present →
+run the bounded asynchronous external adapter; absent → native engine. This is
+the only place "detect-then-use-Raku-else-Odin" applies. See
+`docs/notes/m09-11-external-regex.md` for the implemented contract.
 
 ### 3.2 R-03/R-04 — the state boundary (answers "pipe editor state to Raku?")
 
@@ -129,12 +130,13 @@ future session doesn't "helpfully" wire Raku into the address language.
 ## 6. Not validated
 
 M09.09 implements and validates the registry, scopes, PATH detection, and
-non-executing discovery on Linux/X11; Windows is source-checked only. The current
-`.filter` format accepts single-line bodies, not multi-line programs or PATHEXT
-customization. See `docs/notes/m09-09-filter-registry.md` for the implemented
-contract.
+non-executing discovery on Linux/X11; M09.10 validates named-filter invocation;
+M09.11 validates real Raku search and native fallback on Linux/X11. Windows is
+source-checked only. The current `.filter` format accepts single-line bodies,
+not multi-line programs or PATHEXT customization. See
+`docs/notes/m09-09-filter-registry.md`, `docs/notes/m09-10-command-invocation.md`,
+and `docs/notes/m09-11-external-regex.md` for the implemented contracts.
 
-No named-command spawn path or Raku binary interaction has been tested.
-Cross-platform claims (Windows/ConPTY, Linux) and Raku-specific behaviors
-(`-n`/`-p`, temp-file program execution, stdout/stderr routing) remain unverified
-until later M09 work runs against a real `raku`.
+General Raku named-filter behavior (`-n`/`-p`, temp-file program execution) and
+the REPL window remain unimplemented until M09.12. Native Windows/Raku execution
+and interactive cancellation of a pathological external regex remain unverified.

@@ -48,6 +48,8 @@ Job :: struct {
 	input:           []byte,
 	selection_pipe:  Selection_Pipe,
 	has_selection_pipe: bool,
+	regex_search:    Regex_Search,
+	has_regex_search: bool,
 	discard_output:  bool,
 	handle:          Handle,
 	pump:            Pump,
@@ -256,6 +258,37 @@ job_start_selection :: proc(
 	return id, {}
 }
 
+// job_start_regex_search starts an external search with a whole-document
+// snapshot. Completion applies a selection only after strict target/revision
+// validation; it never edits the document.
+job_start_regex_search :: proc(
+	service: ^Job_Service,
+	desc: Description,
+	doc: ^txn.Doc,
+	selection: txn.Selection,
+	target_id: u64,
+	target_generation: u64,
+	attachment: u64,
+) -> (Job_ID, errs.Error) {
+	if service == nil || !service.initialized {
+		return 0, errs.new(.Invalid_Input, "process: job service is not initialized")
+	}
+	search: Regex_Search
+	if err := regex_search_init(&search, doc, selection, target_id, target_generation, u64(service.next_id), service.allocator); !errs.ok(err) {
+		return 0, err
+	}
+	search.target.window_id = attachment
+	id, start_err := job_start(service, desc, search.input, attachment)
+	if !errs.ok(start_err) {
+		regex_search_destroy(&search)
+		return 0, start_err
+	}
+	job := job_find(service, id)
+	job.regex_search = search
+	job.has_regex_search = true
+	return id, {}
+}
+
 // job_start_context borrows command and snapshot only for this synchronous
 // start. The retained Job owns independent copies of all context metadata.
 job_start_context :: proc(service: ^Job_Service, command: []string, snapshot: ^Context_Snapshot, input: []byte, attachment: u64) -> (Job_ID, errs.Error) {
@@ -405,6 +438,7 @@ job_cleanup :: proc(job: ^Job, allocator: runtime.Allocator) -> errs.Error {
 	environment_destroy(job.environment, allocator)
 	delete(job.input, allocator)
 	selection_pipe_destroy(&job.selection_pipe)
+	regex_search_destroy(&job.regex_search)
 	errs.destroy(&job.err)
 	job^ = {}
 	return first

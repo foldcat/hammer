@@ -175,6 +175,68 @@ editor_job_apply_selection :: proc(job: ^process.Job) -> errs.Error {
 	return {}
 }
 
+editor_job_apply_regex :: proc(job: ^process.Job) -> errs.Error {
+	search := &job.regex_search
+	item, found := view.find(&editor.views, layout.Window_ID(search.target.window_id))
+	if !found || u64(item.buffer_id) != search.target.id {
+		process.regex_search_reject(search)
+		return errs.new(.Conflict, "regex: search source view is no longer available", allocator = permanent())
+	}
+	buffer := editor_buffer_by_id(item.buffer_id)
+	if buffer == nil || buffer.generation != search.target.generation {
+		process.regex_search_reject(search)
+		return errs.new(.Conflict, "regex: search target buffer is no longer available", allocator = permanent())
+	}
+	match, apply_err := process.regex_search_apply(search, &buffer.doc, u64(buffer.id), buffer.generation, u64(job.id))
+	if !errs.ok(apply_err) {
+		return apply_err
+	}
+	item.selection = txn.Selection{anchor = match.start, active = match.end, affinity = .Right}
+	editor_reveal_caret(item)
+	editor_finish_history_jump(item)
+	log.infof("regex: external match id=%d window=%d buffer=%d range=%d,%d", u64(job.id), u64(item.window_id), u64(buffer.id), match.start, match.end)
+	return {}
+}
+
+editor_job_poll_regex :: proc(job: ^process.Job, state: ^Editor_Job_Output, remaining: ^int) {
+	search := &job.regex_search
+	if search.state == .Collecting && remaining^ > 0 {
+		was_dirty, follow := editor_job_output_snapshot(state)
+		consumed, consume_err := process.regex_search_consume(search, &job.pump, &state.output, remaining^)
+		remaining^ -= consumed
+		editor_job_output_apply(state, was_dirty, follow)
+		if !errs.ok(consume_err) {
+			editor_job_queue_error(state, consume_err.message)
+			errs.destroy(&consume_err)
+			if process.job_active(job) {
+				_, stop_err := process.job_stop(&editor.jobs, job.id, mouse_now_ms())
+				editor_report(stop_err)
+			}
+		}
+	}
+	output_done := process.pump_drained(&job.pump)
+	if search.state == .Collecting && ((job.state == .Exited && output_done) || job.state == .FailedToStart) {
+		if job.state == .Exited && job.exit_status.success && job.err.kind == .None {
+			process.regex_search_ready(search)
+		} else {
+			process.regex_search_abort(search)
+			if job.state == .Exited && job.exit_status.code == 4 {
+				editor_job_queue_error(state, "regex: regular expression did not match")
+			} else if job.state == .Exited && job.err.kind == .None {
+				editor_job_queue_error(state, "regex: Raku search failed; see diagnostics")
+			}
+		}
+	}
+	if search.state == .Ready {
+		apply_err := editor_job_apply_regex(job)
+		if !errs.ok(apply_err) {
+			log.warnf("regex: external apply failed id=%d kind=%v message=%s", u64(job.id), apply_err.kind, apply_err.message)
+			editor_job_queue_error(state, apply_err.message)
+			errs.destroy(&apply_err)
+		}
+	}
+}
+
 editor_job_apply_conflict :: proc(output_buffer: ^Editor_Buffer) -> errs.Error {
 	if output_buffer == nil || !output_buffer.has_conflict_pipe || output_buffer.conflict_pipe.state != .Conflict {
 		return errs.new(.NotFound, "job: no preserved selection conflict is available", allocator = permanent())
@@ -277,6 +339,9 @@ editor_poll_jobs :: proc() {
 			if job.has_selection_pipe {
 				process.selection_pipe_abort(&job.selection_pipe)
 			}
+			if job.has_regex_search {
+				process.regex_search_abort(&job.regex_search)
+			}
 		} else {
 			if state.id != job.id {
 				editor_job_output_reset(state)
@@ -288,7 +353,9 @@ editor_poll_jobs :: proc() {
 				}
 			}
 			if state.id == job.id {
-				if job.has_selection_pipe {
+				if job.has_regex_search {
+					editor_job_poll_regex(job, state, &remaining)
+				} else if job.has_selection_pipe {
 					pipe := &job.selection_pipe
 					if pipe.state == .Collecting && remaining > 0 {
 						was_dirty, follow := editor_job_output_snapshot(state)

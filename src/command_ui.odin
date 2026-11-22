@@ -28,6 +28,7 @@ EDITOR_COMMANDS :: []command.Entry {
 	{name = "Newcol", handler = editor_command_newcol},
 	{name = "Put", handler = editor_command_put},
 	{name = "Putall", handler = editor_command_putall},
+	{name = "Raku", handler = editor_command_raku},
 	{name = "Zerox", handler = editor_command_zerox},
 	{name = "Edit", handler = editor_command_edit},
 	{name = "Undo", handler = editor_command_undo},

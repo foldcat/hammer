@@ -36,7 +36,8 @@ Output_Update :: struct {
 // Raw output bytes are decoded through a console.Stream before reaching the
 // document (SPECS §12.5 model A): ANSI escape sequences are consumed, and CR/
 // backspace/erase progress collapses. All writers (output_consume, output_append,
-// selection_pipe_consume stderr, selection_pipe_replay) funnel through pending
+// selection_pipe_consume stderr, regex_search_consume stderr, selection_pipe_replay)
+// funnel through pending
 // and output_flush, so every path decodes uniformly.
 Output_Buffer :: struct {
 	allocator:     runtime.Allocator,

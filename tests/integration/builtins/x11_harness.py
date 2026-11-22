@@ -8,6 +8,7 @@ import ctypes
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -257,6 +258,74 @@ def run_async_case(
             wait_for_exit(process, args.timeout, log_path)
             process = None
             return source.read_bytes()
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+
+
+def run_regex_case(
+    args: argparse.Namespace,
+    binary: Path,
+    sandbox: Path,
+    x11: X11,
+    external: bool,
+) -> str:
+    name = "external" if external else "native"
+    source = sandbox / f"regex-{name}.txt"
+    source.write_bytes("zero\nneedle one\nαβ🙂 needle two\n".encode("utf-8"))
+    log_path = sandbox / f"regex-{name}-hammer.log"
+    environment = os.environ.copy()
+    environment["HAMMER_LOG"] = ""
+    environment["XDG_CONFIG_HOME"] = str(sandbox / f"regex-{name}-config")
+    environment["XDG_STATE_HOME"] = str(sandbox / f"regex-{name}-state")
+    for variable in ("HAMMER_TEST_IGNORE_JOB", "HAMMER_TEST_FLOOD_JOB", "HAMMER_TEST_PIPE_JOB", "HAMMER_TEST_PIPE_DELAY"):
+        environment.pop(variable, None)
+    if not external:
+        empty_path = sandbox / "regex-empty-path"
+        empty_path.mkdir()
+        environment["PATH"] = str(empty_path)
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                [str(binary), source.name],
+                cwd=sandbox,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+            )
+            window = x11.find_window(args.timeout)
+            x11.lib.XMapRaised(x11.display, window)
+            x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+            x11.lib.XSync(x11.display, 0)
+            time.sleep(0.3)
+            click(x11, window, 1, 60, 100)
+            select_all(x11)
+            execute(x11, window, "Raku /needle/", 60, 52, args.timeout, log_path, 1)
+            if external:
+                wait_for_log(log_path, 'regex: echo "/needle/"', args.timeout)
+                wait_for_log(log_path, "regex: external search started", args.timeout)
+                wait_for_log(log_path, "regex: external match id=", args.timeout)
+                wait_for_log(log_path, "range=5,11", args.timeout)
+                execute(x11, window, "Raku /needle/", 60, 52, args.timeout, log_path, 2)
+                wait_for_log(log_path, "range=25,31", args.timeout)
+                execute(x11, window, "Raku /needle/", 60, 52, args.timeout, log_path, 3)
+                wait_for_log(log_path, "range=5,11", args.timeout, 2)
+            else:
+                wait_for_log(log_path, "regex: native fallback", args.timeout)
+                wait_for_log(log_path, "range=5,11", args.timeout)
+                if "regex: external search started" in log_path.read_text(encoding="utf-8", errors="replace"):
+                    raise HarnessFailure("native fallback unexpectedly spawned Raku")
+            x11.tap(0xFF1B)
+            wait_for_exit(process, args.timeout, log_path)
+            process = None
+            return log_path.read_text(encoding="utf-8", errors="replace")
     finally:
         if process is not None and process.poll() is None:
             process.terminate()
@@ -624,6 +693,22 @@ def main() -> int:
                 x11.tap(0xFF1B)
                 wait_for_exit(process, args.timeout, invoke_log_path)
                 process = None
+
+            # M09.11: the explicit regex verb uses real Raku when available and
+            # the native engine only when the executable is absent.
+            native_regex_log = run_regex_case(args, binary, sandbox, x11, False)
+            if "regex: native fallback" not in native_regex_log:
+                raise HarnessFailure("Raku verb did not use native fallback without a PATH engine")
+            print("PASS: Raku regex verb falls back to native search when Raku is absent")
+            if shutil.which("raku") is not None:
+                external_regex_log = run_regex_case(args, binary, sandbox, x11, True)
+                echo_pos = external_regex_log.find('regex: echo "/needle/"')
+                start_pos = external_regex_log.find("regex: external search started")
+                if echo_pos < 0 or start_pos < 0 or echo_pos > start_pos:
+                    raise HarnessFailure("external regex echo did not precede the job start")
+                print("PASS: real Raku regex searches forward, wraps, and returns UTF-8 byte selections")
+            else:
+                print("SKIP: real Raku regex execution (raku is not installed)")
 
             # M09.13: external commands run in the shell — synchronously by
             # default (output to +Errors), `Async <cmd>` for the job service.
