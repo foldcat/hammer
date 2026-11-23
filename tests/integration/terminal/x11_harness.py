@@ -9,6 +9,7 @@ decoded and reaped end to end.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 from pathlib import Path
 import re
@@ -18,6 +19,7 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
 from x11_harness import ClipboardOwner, HarnessFailure, X11, wait_for_exit  # noqa: E402
 
@@ -78,6 +80,12 @@ def main() -> int:
     sandbox = Path(tempfile.mkdtemp(prefix="hammer-m10-06-terminal-"))
     source = sandbox / "source.txt"
     source.write_bytes(b"alpha\n")
+    for index in range(180):
+        (sandbox / f"entry-{index:03d}-directory-listing.txt").write_bytes(b"")
+    dense = sandbox / "dense"
+    dense.mkdir()
+    for index in range(180):
+        (dense / f"a{index:05d}").write_bytes(b"")
     log_path = sandbox / "hammer.log"
     process: subprocess.Popen[bytes] | None = None
     clipboard_owner: ClipboardOwner | None = None
@@ -100,9 +108,13 @@ def main() -> int:
             window = x11.find_window(args.timeout)
             x11.lib.XMapRaised(x11.display, window)
             x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+            x11.lib.XResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint]
+            x11.lib.XResizeWindow(x11.display, window, 1200, 600)
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
             wait_for_log(log_path, "file: opened source.txt", args.timeout)
+            wait_for_log(log_path, "directory: opened ", args.timeout)
+            directory_pixels = x11.pixels(window, 605, 1190, 66, 590)
 
             execute(x11, window, "Win", 10, 10, args.timeout, log_path)
             wait_for_log(log_path, "terminal: opened", args.timeout)
@@ -116,6 +128,27 @@ def main() -> int:
 
             wait_for_log(log_path, "terminal: resize", args.timeout)
             print("PASS: the terminal grid resizes to the window (SIGWINCH)")
+
+            execute(x11, window, "Del", 60, 52, args.timeout, log_path)
+            wait_for_log(log_path, "view: closed window 1", args.timeout)
+            click(x11, window, 1, 100, 200)
+            time.sleep(0.3)
+            type_text(x11, "ls dense")
+            x11.tap(0xFF0D)
+            time.sleep(0.8)
+            if x11.pixels(window, 605, 1190, 66, 590) != directory_pixels:
+                raise HarnessFailure("dense terminal output removed glyphs from the directory window")
+            x11.button(4, True)
+            x11.button(4, False)
+            time.sleep(0.3)
+            if x11.pixels(window, 605, 1190, 66, 590) != directory_pixels:
+                raise HarnessFailure("scrolling up in the terminal changed the directory window")
+            x11.button(5, True)
+            x11.button(5, False)
+            time.sleep(0.3)
+            if x11.pixels(window, 605, 1190, 66, 590) != directory_pixels:
+                raise HarnessFailure("scrolling down in the terminal changed the directory window")
+            print("PASS: terminal output and scrolling do not starve the directory window of glyphs")
 
             pasted_command = "printf terminal-paste-ok > terminal-paste-result"
             pasted_path = sandbox / "external-terminal-paste.txt"
@@ -209,7 +242,10 @@ def main() -> int:
             x11.close()
         if succeeded:
             for path in sandbox.iterdir():
-                path.unlink()
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
             sandbox.rmdir()
 
 

@@ -67,7 +67,7 @@ Glyph_Draw :: struct {
 	body:  layout.Rect,
 }
 
-MAX_TEXT_GLYPHS_PER_FRAME :: 2048
+MAX_TEXT_GLYPHS_PER_FRAME :: 32768
 MAX_TEXT_QUADS_PER_FRAME :: MAX_QUADS_PER_DRAW - 2
 MAX_VISIBLE_TEXT_LINES :: 4096
 TEXT_PADDING :: f32(4)
@@ -80,6 +80,8 @@ text_sampler: sg.Sampler
 text_vertices: [dynamic]Glyph_Vertex
 text_draws: [dynamic]Glyph_Draw
 text_draw_body: layout.Rect
+text_document_glyph_start: int
+text_document_glyph_budget: int
 text_render_error_logged := false
 
 text_render_setup :: proc() {
@@ -161,12 +163,16 @@ text_render_destroy :: proc() {
 text_render_begin :: proc() {
 	text_vertices = make([dynamic]Glyph_Vertex, context.temp_allocator)
 	text_draws = make([dynamic]Glyph_Draw, context.temp_allocator)
+	// Reserve a share for every document so an earlier dense view cannot starve later views.
+	document_count := max(1, 1 + editor.workspace.column_count + 2 * editor.views.view_count)
+	text_document_glyph_budget = max(1, MAX_TEXT_GLYPHS_PER_FRAME / document_count)
 }
 
 text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbers: bool, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, first_row: int, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, styles: []console.Style_Run, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	if doc == nil || text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 || first_row < 0 {
 		return
 	}
+	text_document_glyph_start = len(text_vertices)
 	selected := fonts.face(&font_set, .Body)
 	if selected == nil {
 		return
@@ -628,7 +634,8 @@ text_collect_glyphs :: proc(
 			continue
 		}
 		for glyph in run.glyphs {
-			if len(text_vertices) / 6 >= MAX_TEXT_GLYPHS_PER_FRAME {
+			document_glyphs := (len(text_vertices) - text_document_glyph_start) / 6
+			if len(text_vertices) / 6 >= MAX_TEXT_GLYPHS_PER_FRAME || document_glyphs >= text_document_glyph_budget {
 				return
 			}
 			glyph_x := f32(glyph.x) / (64 * state.dpi.scale)
