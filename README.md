@@ -17,6 +17,34 @@ features and improved text rendering. It is cross platform (mainly X11, the othe
 platforms are secondary targets). This text editor hopefully has the ability to
 handle all the coding tasks you throw at it.
 
+If you don't know what `acme` is, it turns your editor into a shell. You can do the following:
+
+- Type the compile command on the tagbar, highlight it and midclick to run, command output
+  appears, you right click on the error position as denoted by the compiler, the cursor
+  instantly jumps there
+- Right click a path and just jump there
+- Pipe the entire buffer into a command line util and get the return of it, like using `jq`
+  to format the JSON in the buffer
+- Don't forget a literal terminal emulator is built in
+- Turn every single buffer into a scratchpad
+- Debug in the editor without needing an extra terminal: run `curl`, start `docker compose`,
+  and more commands
+- You can rearrange and tile buffers intuitively
+
+Hammer also has plenty more features if you know `acme`
+
+- Keybinds that you expect, like control + c or control + s
+- Tweakable colorscheme, dark mode by default
+- Clipboard integration that works
+- Autopair
+- GPU rendered text
+- The ability to use different fonts and render weird unicode characters
+- Ligature support
+- The ability to scale the font size
+- A terminal emulator that renders most escape sequences
+- Simple Raku language wrapper
+- Basic Windows support
+
 It is currently not completed yet, though it is usable.
 
 ## Is Hammer for me?
