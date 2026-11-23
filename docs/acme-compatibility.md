@@ -113,9 +113,10 @@ Acme behavior, not an implementation to copy mechanically.
 - Window tags protect their generated commands (`Del`, `Put`) from typing,
   deletion, and indentation while keeping the leftmost filepath editable; `Get`
   reads that filepath, so editing the name and running `Get` opens a different
-  file. Blank (untitled) buffers have no filepath to protect, so their whole tag
-  stays editable; typing a path into an untitled buffer offers `Put`, and
-  running `Put` writes the new file there (no-clobber). Covered by `tag-test`.
+  file or replaces the window with a directory listing. Blank (untitled) buffers
+  have no filepath to protect, so their whole tag stays editable; typing a path
+  into an untitled buffer offers `Put`, and running `Put` writes the new file
+  there (no-clobber). Covered by `tag-test`.
 
 ## Unsupported or deferred behavior
 

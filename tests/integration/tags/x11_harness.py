@@ -257,6 +257,61 @@ def main() -> int:
                 process.wait(timeout=2)
                 process = None
 
+            # A file window's editable filepath may name a directory. Get must
+            # replace the file with that directory's listing instead of sending
+            # the path through the regular-file loader.
+            listing = sandbox / "listing"
+            listing.mkdir()
+            (listing / "inside.txt").write_bytes(b"inside\n")
+            directory_log = sandbox / "directory-hammer.log"
+            with directory_log.open("wb") as log:
+                process = subprocess.Popen(
+                    [str(binary), "a.txt"],
+                    cwd=sandbox,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    env=environment,
+                )
+                window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, window)
+                x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                time.sleep(0.3)
+
+                x11.move(window, 22, 52)
+                x11.button(1, True)
+                x11.button(1, False)
+                x11.key(0xFFE1, True)
+                for _ in range(5):
+                    x11.tap(0xFF53)
+                x11.key(0xFFE1, False)
+                type_tag_text(x11, "listing")
+                x11.move(window, 180, 52)
+                x11.button(1, True)
+                x11.button(1, False)
+                type_tag_text(x11, "Get")
+                x11.key(0xFFE1, True)
+                for _ in range(3):
+                    x11.tap(0xFF51)
+                x11.key(0xFFE1, False)
+                x11.move(window, 180, 52)
+                x11.button(2, True)
+                x11.button(2, False)
+                wait_for_log(directory_log, f"directory: reloaded {listing}", args.timeout)
+                wait_for_log(
+                    directory_log,
+                    f'tag: window 1 generated "{listing}/ Del Get | "',
+                    args.timeout,
+                )
+                if "is not a regular file" in directory_log.read_text(encoding="utf-8", errors="replace"):
+                    raise HarnessFailure("Get sent a directory through the regular-file loader")
+                print("PASS: Get loads a directory named in a file window's tag")
+
+                process.terminate()
+                process.wait(timeout=2)
+                process = None
+
             # M09.detour-1 (blank buffer): an untitled buffer has no real
             # filepath, so its whole tag is editable — including the generated
             # commands region.

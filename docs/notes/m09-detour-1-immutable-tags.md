@@ -20,8 +20,9 @@ text mutation:
 - The leftmost filepath token stays editable, so a new name/path can be typed.
 
 `Get` (with no argument) reads the leftmost filepath token from the tag and
-reloads that file, so editing the name and running `Get` opens a different file.
-`Get <arg>` is unchanged.
+reloads that file or directory. A directory destination replaces the file
+window with its listing and adopts the normalized directory path. Explicit
+`Get <arg>` uses the same destination-type handling.
 
 Blank (untitled) file buffers — `New` with no path — have no real filepath to
 protect, so their whole tag is editable, including the generated commands region
@@ -66,7 +67,8 @@ blocking later input.
 `deletion_allowed`, `filepath`, the unlocked (blank) tag, and `refresh_commands`
 (name/caret preservation and the no-op path). The `tag-test` X11 harness covers:
 typing, backspace, and Tab are blocked in the commands region; editing the
-filepath then `Get` reloads the new file; a blank buffer's whole tag is
+filepath then `Get` reloads the new file; changing a file tag to a directory
+then running `Get` loads the directory listing; a blank buffer's whole tag is
 editable; and typing a path then middle-clicking `Put` writes the new file.
 
 ## Validation

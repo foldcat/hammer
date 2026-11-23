@@ -26,8 +26,10 @@ existing exact-name dispatcher:
   buffer's file name. Dirty content blocks replacement. File/directory data is
   loaded into temporary ownership first; only a successful load reaches a whole-
   buffer `.Reload` transaction. Same-name reloads update capture/metadata and the
-  saved checkpoint. Different-name reloads remain dirty for a later Put to the
-  original path. Failures leave the editable buffer and dirty state intact.
+  saved checkpoint. Different-name file reloads remain dirty for a later Put to
+  the original path; file-to-directory reloads adopt the normalized directory
+  path and directory buffer kind. Failures leave the editable buffer and dirty
+  state intact.
 - **Putall** visits each buffer once, skipping clean, untitled, directory, error,
   and non-regular-file targets. Dirty existing regular files use the same safe
   save helper as Put, including external-change checks. Failures are reported

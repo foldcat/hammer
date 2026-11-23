@@ -999,7 +999,15 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 	lifecycle.close_guard_reset(&editor.close_guard)
 
 	loaded: Editor_Buffer
+	load_directory := buffer.kind == .Directory
 	if buffer.kind == .File {
+		info, stat_err := os.stat(path, context.temp_allocator)
+		if stat_err == nil {
+			load_directory = info.type == .Directory
+			os.file_info_delete(info, context.temp_allocator)
+		}
+	}
+	if !load_directory {
 		if err := editor_buffer_init(&loaded, 0, path); !errs.ok(err) {
 			return err
 		}
@@ -1014,6 +1022,17 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 		if init_err := txn.doc_init_from_bytes(&loaded.doc, content, {}, permanent()); !errs.ok(init_err) {
 			return init_err
 		}
+		listing_path := path
+		owned_path := ""
+		if !strings.has_suffix(listing_path, os.Path_Separator_String) {
+			owned_path = strings.concatenate({listing_path, os.Path_Separator_String}, context.temp_allocator)
+			listing_path = owned_path
+		}
+		defer if owned_path != "" {
+			delete(owned_path, context.temp_allocator)
+		}
+		loaded.kind = .Directory
+		loaded.path = strings.clone(listing_path, permanent())
 	}
 	defer txn.doc_destroy(&loaded.doc)
 	defer delete(loaded.path, permanent())
@@ -1051,6 +1070,15 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 			other.horizontal_offset = 0
 		}
 	}
+	if load_directory && buffer.kind != .Directory {
+		delete(buffer.path, permanent())
+		buffer.path = loaded.path
+		loaded.path = ""
+		buffer.kind = .Directory
+		buffer.capture = {}
+		buffer.metadata = {}
+		buffer.saved_revision = txn.doc_revision(&buffer.doc)
+	}
 	buffer.regex_history = {}
 	if path == buffer.path {
 		buffer.capture = loaded.capture
@@ -1058,7 +1086,11 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 		buffer.saved_revision = txn.doc_revision(&buffer.doc)
 	}
 	editor_refresh_window_tags()
-	log.infof("file: reloaded %s window=%d buffer=%d revision=%d", path, u64(item.window_id), u64(buffer.id), txn.doc_revision(&buffer.doc))
+	if load_directory {
+		log.infof("directory: reloaded %s window=%d buffer=%d bytes=%d", path, u64(item.window_id), u64(buffer.id), new_total)
+	} else {
+		log.infof("file: reloaded %s window=%d buffer=%d revision=%d", path, u64(item.window_id), u64(buffer.id), txn.doc_revision(&buffer.doc))
+	}
 	return {}
 }
 
