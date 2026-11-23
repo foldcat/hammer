@@ -474,16 +474,12 @@ def main() -> int:
             wait_for_log(log_path, "has unsaved text; reload blocked", args.timeout)
             if source.read_bytes() != b"newer\n":
                 raise HarnessFailure("dirty Get changed the file on disk")
-            click(x11, window, 1, 60, 100)
-            x11.key(0xFFE3, True)
-            x11.tap(ord("z"))
-            x11.key(0xFFE3, False)
-            run("Get", 60, 52)
+            click(x11, window, 2, 60, 52)
             wait_for_log(log_path, "file: reloaded source.txt", args.timeout, 2)
             run("Get other.txt", 60, 52)
             wait_for_log(log_path, "file: reloaded ", args.timeout, 3)
             append_text(x11, window, 60, 100, "!")
-            print("PASS: Get reloads clean buffers, blocks dirty replacement, and accepts another path")
+            print("PASS: Get reloads clean buffers, confirms dirty replacement on a second middle-click, and accepts another path")
 
             run("Putall", 10, 10)
             wait_for_log(log_path, "file: saved source.txt", args.timeout)

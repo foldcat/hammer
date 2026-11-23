@@ -975,26 +975,42 @@ editor_reload_buffer :: proc(item: ^view.View, path: string) -> errs.Error {
 		return errs.new(.Unsupported, "get: output windows cannot be reloaded", allocator = permanent())
 	}
 
-	editor_cancel_close_review()
-	snapshot := lifecycle.Buffer_Snapshot{
-		id = u64(buffer.id),
-		generation = buffer.generation,
-		revision = txn.doc_revision(&buffer.doc),
-		view_count = view.buffer_view_count(&editor.views, buffer.id),
-		dirty = editor_buffer_dirty(buffer),
+	confirmed := false
+	if editor.close_guard.phase == .Await_Decision && editor.close_guard.request.kind == .Close_Buffer &&
+		editor.close_guard.request.buffer_id == u64(buffer.id) &&
+		editor.close_guard.request.buffer_generation == buffer.generation {
+		pending := lifecycle.close_pending(&editor.close_guard)
+		if len(pending) == 1 && pending[0].id == u64(buffer.id) && pending[0].generation == buffer.generation &&
+			pending[0].revision == txn.doc_revision(&buffer.doc) {
+			if err := lifecycle.close_decision(&editor.close_guard, .Discard_All); !errs.ok(err) {
+				return err
+			}
+			confirmed = true
+			log.infof("get: reload confirmed buffer=%d", buffer.id)
+		}
 	}
-	request := lifecycle.Close_Request{
-		kind = .Close_Buffer,
-		origin = .Tag_Command,
-		buffer_id = snapshot.id,
-		buffer_generation = snapshot.generation,
-	}
-	if err := lifecycle.close_request(&editor.close_guard, request, []lifecycle.Buffer_Snapshot{snapshot}); !errs.ok(err) {
-		return err
-	}
-	if !lifecycle.close_guard_ready(&editor.close_guard) {
-		log.warnf("get: %s has unsaved text; reload blocked", buffer.path)
-		return {}
+	if !confirmed {
+		editor_cancel_close_review()
+		snapshot := lifecycle.Buffer_Snapshot{
+			id = u64(buffer.id),
+			generation = buffer.generation,
+			revision = txn.doc_revision(&buffer.doc),
+			view_count = view.buffer_view_count(&editor.views, buffer.id),
+			dirty = editor_buffer_dirty(buffer),
+		}
+		request := lifecycle.Close_Request{
+			kind = .Close_Buffer,
+			origin = .Tag_Command,
+			buffer_id = snapshot.id,
+			buffer_generation = snapshot.generation,
+		}
+		if err := lifecycle.close_request(&editor.close_guard, request, []lifecycle.Buffer_Snapshot{snapshot}); !errs.ok(err) {
+			return err
+		}
+		if !lifecycle.close_guard_ready(&editor.close_guard) {
+			log.warnf("get: %s has unsaved text; reload blocked", buffer.path)
+			return {}
+		}
 	}
 	lifecycle.close_guard_reset(&editor.close_guard)
 

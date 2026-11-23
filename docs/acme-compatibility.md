@@ -60,8 +60,10 @@ Acme behavior, not an implementation to copy mechanically.
 - `Del`, `Delcol`, `Get`, `New`, `Newcol`, `Put`, `Putall`, `Zerox`, `Undo`,
   `Redo`, `Look`, and the implemented clipboard commands operate through their
   ordinary editor paths. Get loads into temporary storage before a transactional
-  replacement and blocks dirty data loss; Delcol validates all buffers before
-  removing any view; Putall saves each dirty named regular-file buffer once.
+  replacement; its first invocation blocks dirty data loss and a second
+  middle-click explicitly discards the unsaved text before reloading. Delcol
+  validates all buffers before removing any view; Putall saves each dirty named
+  regular-file buffer once.
   A bounded parser and exact-name registry dispatch commands with revalidated
   source and argument snapshots; a command that matches no built-in or named
   filter runs directly in the shell. `builtin-test` covers the window/file

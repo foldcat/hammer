@@ -146,6 +146,7 @@ Requirements:
 - Untitled buffers containing user work are included.
 - Closing the last view of a dirty buffer triggers the same protection.
 - Dirty review selects the whole buffer; a second middle-clicked `Del` explicitly discards it, and quit reviews each dirty buffer in turn.
+- A dirty `Get` leaves the buffer unchanged on the first middle-click; a second middle-click on the unchanged buffer explicitly discards its unsaved text and reloads from disk.
 - Closing one of several views does not necessarily destroy the buffer.
 - IPC and filesystem-driven close requests use the same protection.
 - Running jobs are handled separately from dirty buffers.
