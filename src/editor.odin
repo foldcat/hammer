@@ -119,6 +119,9 @@ editor_destroy_buffer :: proc(buffer: ^Editor_Buffer) {
 	if buffer == nil || buffer.id == 0 {
 		return
 	}
+	if buffer.kind == .Job_Output {
+		editor_job_output_close(buffer)
+	}
 	if buffer.kind == .Terminal {
 		editor_terminal_destroy(buffer)
 	}
@@ -390,8 +393,7 @@ editor_workspace_init :: proc() -> errs.Error {
 
 editor_destroy :: proc() {
 	for &output in editor.job_outputs {
-		process.output_destroy(&output.output)
-		delete(output.pending_error, permanent())
+		editor_job_output_reset(&output)
 	}
 	if err := process.job_service_destroy(&editor.jobs); !errs.ok(err) {
 		editor_report(err)
@@ -1381,7 +1383,7 @@ editor_append_error :: proc(message: string) -> errs.Error {
 
 // editor_append_error_bytes appends raw bytes to the +Errors buffer, creating
 // it if needed, and truncates oversized input to the window budget. It is the
-// single path used for both error messages and synchronous command output.
+// single path used for editor error messages.
 editor_append_error_bytes :: proc(data: []byte) -> errs.Error {
 	if len(data) == 0 {
 		return {}

@@ -13,6 +13,8 @@ Exited
 FailedToStart
 ```
 
+Every external shell command starts as a job; there is no synchronous external-command mode or `Async` command prefix. Built-in editor actions remain immediate UI operations. Each job has at most one bounded live `+Job <id>` output window. Closing that window drains subsequent output without killing the job or reopening the window, so `Jobs` and `Kill <id>` remain available.
+
 Each job records:
 
 - Command.

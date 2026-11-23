@@ -98,11 +98,12 @@ Acme behavior, not an implementation to copy mechanically.
   project definitions load only after explicit `Cmds project` trust. Covered by
   command unit tests and the `builtin-test` discovery scenario.
 - `>`, `<`, and `|` prefix commands and plain unknown commands run through the
-  configured shell (default `sh`/`cmd.exe`), synchronously by default with
-  output appended to a single `+Errors` buffer; `Async <cmd>` runs through the
-  job service instead. There is no shell trust gate: the user typed the command
-  and chose to run it. Covered by `builtin-test` external-command scenarios.
-- `Jobs` lists running async jobs in a `+Jobs` buffer and `Kill <id>` stops one
+  configured shell (default `sh`/`cmd.exe`) as jobs. There is no `Async` prefix
+  or synchronous external-command mode. Each invocation has one bounded live
+  `+Job <id>` output window; closing it drains later output without killing the
+  job or reopening the window. There is no shell trust gate: the user typed the
+  command and chose to run it. Covered by `builtin-test` external-command scenarios.
+- `Jobs` lists running jobs in a `+Jobs` buffer and `Kill <id>` stops one
   by id (or by a button-1 chord selection). Covered by `builtin-test`.
 - Window tags protect their generated commands (`Del`, `Put`) from typing,
   deletion, and indentation while keeping the leftmost filepath editable; `Get`

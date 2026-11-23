@@ -35,6 +35,25 @@ editor_job_output_reset :: proc(state: ^Editor_Job_Output) {
 	state^ = {}
 }
 
+editor_job_output_close :: proc(buffer: ^Editor_Buffer) {
+	if buffer == nil {
+		return
+	}
+	for index in 0 ..< process.MAX_JOBS {
+		state := &editor.job_outputs[index]
+		if state.buffer != buffer {
+			continue
+		}
+		if job := process.job_find(&editor.jobs, state.id); job != nil {
+			job.discard_output = true
+			job.attachment = 0
+			log.infof("job: output closed id=%d; draining remaining output", u64(job.id))
+		}
+		editor_job_output_reset(state)
+		return
+	}
+}
+
 editor_job_output_init :: proc(state: ^Editor_Job_Output, job: ^process.Job) -> errs.Error {
 	if editor.workspace.column_count == 0 {
 		return errs.new(.NotFound, "job: no column is available for output", allocator = permanent())

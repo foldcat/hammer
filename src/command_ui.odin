@@ -132,24 +132,8 @@ editor_execute_mouse :: proc(action: mouse.Execute) {
 		return
 	}
 
-	// `Async <cmd>` runs the external command through the job service instead
-	// of blocking the editor. Async is only meaningful for external commands;
-	// built-ins and filters ignore it.
-	async := false
-	if strings.has_prefix(command_text, "Async") {
-		rest := command_text[len("Async"):]
-		if rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r' || rest[0] == '\n' {
-			async = true
-			command_text = strings.trim_space(rest)
-			if command_text == "" {
-				editor_report(errs.new(.Invalid_Input, "command: Async requires a command to run", allocator = permanent()))
-				return
-			}
-		}
-	}
-
 	if routing, pipe_text, is_pipe := command.pipe_parse(command_text); is_pipe {
-		editor_execute_external(target, range, routing, pipe_text, async)
+		editor_execute_external(target, range, routing, pipe_text)
 		return
 	}
 
@@ -169,7 +153,7 @@ editor_execute_mouse :: proc(action: mouse.Execute) {
 		filter_handled, filter_err := editor_invoke_filter(&cmd_context, invocation)
 		if !filter_handled {
 			// Unknown command: run it directly in the shell.
-			editor_execute_external(target, range, .Plain, command_text, async)
+			editor_execute_external(target, range, .Plain, command_text)
 			return
 		}
 		editor_report(filter_err)
