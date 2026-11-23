@@ -43,16 +43,22 @@ editor_poll_body_clipboard :: proc(item: ^view.View, result: ^platform.Clipboard
 			editor_cancel_delayed_paste(&item.delayed_paste)
 		} else {
 			editor.typing_group = 0
-			previous_revision := txn.doc_revision(&editor_buffer_for_view(item).doc)
-			apply_err := editing.delayed_paste_apply(
-				&item.delayed_paste,
-				&editor_buffer_for_view(item).doc,
-				&item.selection,
-				u64(item.buffer_id),
-				editor_buffer_for_view(item).generation,
-				u64(result.id),
-				result.data,
-			)
+			buffer := editor_buffer_for_view(item)
+			previous_revision := txn.doc_revision(&buffer.doc)
+			apply_err: errs.Error
+			if buffer.kind == .Terminal {
+				apply_err = editor_terminal_paste(buffer, &item.delayed_paste, u64(result.id), result.data)
+			} else {
+				apply_err = editing.delayed_paste_apply(
+					&item.delayed_paste,
+					&buffer.doc,
+					&item.selection,
+					u64(item.buffer_id),
+					buffer.generation,
+					u64(result.id),
+					result.data,
+				)
+			}
 			applied = errs.ok(apply_err)
 			editor_finish_edit(item, previous_revision, apply_err)
 		}

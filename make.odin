@@ -783,6 +783,7 @@ main :: proc() {
 				"-out:" + BINARY_PATH,
 				"-debug",
 			})
+			run_odin([]string{"odin", "build", SPIKE_CLIPBOARD_DIR, "-vet", "-out:" + CLIPBOARD_SPIKE_PATH})
 			run_odin([]string {
 				"xvfb-run",
 				"-a",
@@ -790,6 +791,8 @@ main :: proc() {
 				TERMINAL_TEST_HARNESS,
 				"--binary",
 				BINARY_PATH,
+				"--clipboard-peer",
+				CLIPBOARD_SPIKE_PATH,
 			}, true)
 		} else {
 			fmt.eprintln("[Test] terminal-test currently requires Linux/X11")

@@ -5,9 +5,11 @@ import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "core:unicode/utf8"
 
 import command "core/command"
 import console "core/console"
+import editing "core/editing"
 import coords "core/coords"
 import errs "core/errs"
 import input "core/input"
@@ -595,6 +597,12 @@ editor_terminal_input :: proc(event: input.Event) -> bool {
 			editor_copy_selection()
 			return true
 		}
+		// Ctrl+Shift+V pastes into the child instead of sending Ctrl+V. The
+		// clipboard result is routed back to this terminal by request identity.
+		if e.key == .V && e.modifiers == {.Ctrl, .Shift} {
+			editor_begin_paste()
+			return true
+		}
 		// Shift+PageUp/PageDown navigate the scrollback without reaching the
 		// shell, so a user can read earlier output while the shell stays live.
 		if .Shift in e.modifiers {
@@ -674,6 +682,36 @@ editor_terminal_write_bytes :: proc(t: ^Editor_Terminal, data: []byte) {
 	if written != len(data) {
 		log.debugf("terminal: partial write %d/%d (status %v)", written, len(data), status)
 	}
+}
+
+editor_terminal_paste :: proc(
+	buffer: ^Editor_Buffer,
+	paste: ^editing.Delayed_Paste,
+	request_id: u64,
+	data: []byte,
+) -> errs.Error {
+	if buffer == nil || buffer.kind != .Terminal {
+		return errs.new(.Invalid_Input, "terminal: paste target is not a terminal", allocator = permanent())
+	}
+	if paste == nil || !paste.pending {
+		return errs.new(.Conflict, "terminal: paste result is late or already consumed", allocator = permanent())
+	}
+	target := paste.target
+	if target.buffer_id != u64(buffer.id) || target.generation != buffer.generation {
+		return errs.new(.Conflict, "terminal: delayed-paste target does not match the terminal", allocator = permanent())
+	}
+	if err := editing.delayed_paste_cancel(paste, request_id, permanent()); !errs.ok(err) {
+		return err
+	}
+	if !buffer.terminal.live || buffer.terminal.done {
+		return errs.new(.Conflict, "terminal: paste target is no longer live", allocator = permanent())
+	}
+	if !utf8.valid_string(string(data)) {
+		return errs.new(.Invalid_Input, "terminal: clipboard payload is not valid UTF-8", allocator = permanent())
+	}
+	editor_terminal_write_bytes(&buffer.terminal, data)
+	log.infof("terminal: pasted buffer=%d bytes=%d", u64(buffer.id), len(data))
+	return {}
 }
 
 // --- Terminal mouse reporting (M10.07d) ---------------------------------

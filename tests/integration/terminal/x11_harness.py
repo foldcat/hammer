@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Real X11 terminal (`Win`) smoke test for M10.06 slice 2.
 
-Validates that `Win` opens a PTY-backed terminal window, that typing reaches
-the shell (input forwarding), and that the shell's output and exit are decoded
-and reaped end to end.
+Validates that `Win` opens a PTY-backed terminal window, that typing and native
+clipboard paste reach the shell, and that the shell's output and exit are
+decoded and reaped end to end.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import tempfile
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
-from x11_harness import HarnessFailure, X11, wait_for_exit  # noqa: E402
+from x11_harness import ClipboardOwner, HarnessFailure, X11, wait_for_exit  # noqa: E402
 
 
 def click(x11: X11, window: int, button: int, x: int, y: int) -> None:
@@ -65,19 +65,22 @@ def execute(x11: X11, window: int, command: str, x: int, y: int, timeout: float,
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--clipboard-peer", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=20.0)
     args = parser.parse_args()
     if not 1.0 <= args.timeout <= 60.0:
         parser.error("--timeout must be between 1 and 60 seconds")
     binary = args.binary.resolve()
-    if not binary.is_file():
-        parser.error("--binary must name an executable")
+    clipboard_peer = args.clipboard_peer.resolve()
+    if not binary.is_file() or not clipboard_peer.is_file():
+        parser.error("--binary and --clipboard-peer must name executables")
 
     sandbox = Path(tempfile.mkdtemp(prefix="hammer-m10-06-terminal-"))
     source = sandbox / "source.txt"
     source.write_bytes(b"alpha\n")
     log_path = sandbox / "hammer.log"
     process: subprocess.Popen[bytes] | None = None
+    clipboard_owner: ClipboardOwner | None = None
     x11: X11 | None = None
     succeeded = False
     try:
@@ -113,6 +116,27 @@ def main() -> int:
 
             wait_for_log(log_path, "terminal: resize", args.timeout)
             print("PASS: the terminal grid resizes to the window (SIGWINCH)")
+
+            pasted_command = "printf terminal-paste-ok > terminal-paste-result"
+            pasted_path = sandbox / "external-terminal-paste.txt"
+            pasted_path.write_text(pasted_command, encoding="utf-8")
+            clipboard_owner = ClipboardOwner(clipboard_peer, pasted_path, sandbox, args.timeout)
+            x11.key(0xFFE3, True)
+            x11.key(0xFFE1, True)
+            x11.tap(ord("v"))
+            x11.key(0xFFE1, False)
+            x11.key(0xFFE3, False)
+            wait_for_log(log_path, "terminal: pasted", args.timeout)
+            x11.tap(0xFF0D)
+            paste_result = sandbox / "terminal-paste-result"
+            deadline = time.monotonic() + args.timeout
+            while not paste_result.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not paste_result.exists() or paste_result.read_bytes() != b"terminal-paste-ok":
+                raise HarnessFailure(f"Ctrl+Shift+V did not paste the external clipboard into the terminal; log: {log_path}")
+            clipboard_owner.stop()
+            clipboard_owner = None
+            print("PASS: Ctrl+Shift+V pastes the native clipboard into the terminal")
 
             type_text(x11, "echo terminal-ok")
             x11.tap(0xFF0D)
@@ -172,6 +196,8 @@ def main() -> int:
         print(f"FAIL: {error}; preserved sandbox: {sandbox}", file=sys.stderr)
         return 1
     finally:
+        if clipboard_owner is not None:
+            clipboard_owner.stop()
         if process is not None and process.poll() is None:
             process.terminate()
             try:
