@@ -44,6 +44,17 @@ editor_active_view :: proc() -> ^view.View {
 	return item
 }
 
+editor_view_caret :: proc(item: ^view.View, doc: ^txn.Doc) -> int {
+	if item == nil || doc == nil {
+		return 0
+	}
+	if item.has_caret_override && item.caret_override_revision == txn.doc_revision(doc) &&
+		item.caret_override_selection == item.selection {
+		return clamp(item.caret_override, 0, rope.tree_byte_count(&doc.tree))
+	}
+	return item.selection.active
+}
+
 editor_active_tag :: proc() -> ^tagstate.State {
 	switch editor.active_text_kind {
 	case .Body:

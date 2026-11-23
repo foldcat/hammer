@@ -172,7 +172,7 @@ render_frame :: proc() {
 				// suppressed for terminal bodies. Selection highlighting (used by
 				// Ctrl+Shift+C copy) still applies.
 				text_active := body_active && !is_terminal
-				text_render_document(text_window, gutter, item.line_numbers, doc, item.selection, item.first_line, item.first_row, text_active, 0, item.wrap_mode, &item.horizontal_offset, styles, phys, &verts)
+				text_render_document(text_window, gutter, item.line_numbers, doc, item.selection, editor_view_caret(item, doc), item.first_line, item.first_row, text_active, 0, item.wrap_mode, &item.horizontal_offset, styles, phys, &verts)
 				if buffer := editor_buffer_for_view(item); buffer != nil && buffer.kind == .Terminal && buffer.terminal.live {
 					render_terminal_cursor(buffer, item, text, phys, &cursor_verts)
 				}
@@ -206,7 +206,7 @@ tag_content_rect :: proc(tag, control: layout.Rect) -> layout.Rect {
 
 text_render_tag :: proc(rect: layout.Rect, doc: ^txn.Doc, selection: txn.Selection, active: bool, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	win := layout.Window{body = rect}
-	text_render_document(win, {}, false, doc, selection, 0, 0, active, rect.height, .Truncate, nil, nil, fb, quads)
+	text_render_document(win, {}, false, doc, selection, -1, 0, 0, active, rect.height, .Truncate, nil, nil, fb, quads)
 }
 
 current_layout :: proc() -> (layout.Geometry, coords.Physical_Size, bool) {

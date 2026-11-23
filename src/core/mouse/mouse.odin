@@ -74,6 +74,12 @@ Execute :: struct {
 	with_argument: bool,
 }
 
+Execute_Update :: struct {
+	target: Target_ID,
+	anchor: int,
+	active: int,
+}
+
 Look :: struct {
 	target: Target_ID,
 	anchor: int,
@@ -106,6 +112,7 @@ Action :: union {
 	Select_Update,
 	Select_Finish,
 	Execute,
+	Execute_Update,
 	Look,
 	Chord_Cut,
 	Chord_Paste,
@@ -254,7 +261,7 @@ modifier_down :: proc(state: ^State, button: input.Mouse_Button) -> Action {
 	return chord_button(state, button)
 }
 
-move :: proc(state: ^State, offset: int, pos: coords.Logical_Point, buttons: input.Mouse_Buttons) -> Action {
+move :: proc(state: ^State, offset: int, pos: coords.Logical_Point, buttons: input.Mouse_Buttons, force_drag := false) -> Action {
 	if state == nil || state.buttons == {} {
 		return {}
 	}
@@ -265,17 +272,20 @@ move :: proc(state: ^State, offset: int, pos: coords.Logical_Point, buttons: inp
 	}
 	was_moved := state.moved
 	drag_threshold := threshold(state)
-	if abs(pos.x - state.origin.x) > drag_threshold || abs(pos.y - state.origin.y) > drag_threshold {
+	if force_drag || abs(pos.x - state.origin.x) > drag_threshold || abs(pos.y - state.origin.y) > drag_threshold {
 		state.moved = true
 	}
 	if state.canceled {
 		return {}
 	}
-	if !state.chorded {
+	if !state.chorded && (state.mode != .Execute || state.moved) {
 		state.active = offset
 	}
-	if state.mode == .Select && .Left in state.buttons {
-		return Select_Update{target = state.target, offset = state.active, drag_started = !was_moved && state.moved}
+	if state.mode == .Select && .Left in state.buttons && state.moved {
+		return Select_Update{target = state.target, offset = state.active, drag_started = !was_moved}
+	}
+	if state.mode == .Execute && .Middle in state.buttons && state.moved && !state.chorded {
+		return Execute_Update{target = state.target, anchor = state.anchor, active = state.active}
 	}
 	return {}
 }
@@ -288,7 +298,7 @@ up :: proc(state: ^State, button: input.Mouse_Button, offset: int, pos: coords.L
 	if abs(pos.x - state.origin.x) > drag_threshold || abs(pos.y - state.origin.y) > drag_threshold {
 		state.moved = true
 	}
-	if !state.chorded {
+	if !state.chorded && (state.mode != .Execute || state.moved) {
 		state.active = offset
 	}
 	state.buttons -= {button}

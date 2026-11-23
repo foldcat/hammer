@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
 from x11_harness import ClipboardOwner, HarnessFailure, X11, read_external_clipboard, wait_for_exit  # noqa: E402
 
@@ -449,6 +450,65 @@ def main() -> int:
                 print("PASS: Ctrl during a held selection cuts (laptop 1-2 chord)")
                 x11.quit()
                 wait_for_exit(process, args.timeout, modchord_log)
+                process = None
+
+            gestures = sandbox / "gestures.txt"
+            gestures.write_bytes(b"alpha beta\nPut\n")
+            gestures_log = sandbox / "gestures.log"
+            clipboard_owner = ClipboardOwner(clipboard_peer, payload, sandbox, args.timeout)
+            with gestures_log.open("wb") as log:
+                process = subprocess.Popen(
+                    [str(binary), str(gestures)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    env=environment,
+                )
+                window = x11.find_window(args.timeout)
+                x11.lib.XMapRaised(x11.display, window)
+                x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+                x11.lib.XSync(x11.display, 0)
+                time.sleep(0.3)
+
+                x11.move(window, 105, 76)
+                x11.button(1, True)
+                x11.button(1, False)
+                time.sleep(0.05)
+                x11.button(1, True)
+                x11.button(1, False)
+                x11.key(0xFFE3, True)
+                x11.tap(ord("c"))
+                x11.key(0xFFE3, False)
+                time.sleep(0.3)
+                double_clicked = sandbox / "double-clicked.txt"
+                read_external_clipboard(clipboard_peer, double_clicked, args.timeout)
+                if double_clicked.read_bytes() != b"beta":
+                    raise HarnessFailure(f"double-click selected {double_clicked.read_bytes()!r}, want the whole word b'beta'")
+                print("PASS: double-click release preserves the whole expanded word")
+
+                x11.move(window, 46, 96)
+                x11.button(2, True)
+                x11.move(window, 75, 96)
+                time.sleep(0.2)
+                if x11.selection_pixels(window, 90, 110) < 20:
+                    raise HarnessFailure("middle-drag did not highlight the command range")
+                x11.button(2, False)
+                wait_for_log(gestures_log, 'mouse: execute "Put" target=3001 argument_chord=false', args.timeout)
+                print("PASS: middle-drag highlights and executes the dragged command range")
+
+                x11.move(window, 46, 96)
+                x11.button(2, True)
+                x11.move(window, 47, 96)
+                x11.button(2, False)
+                wait_for_log(
+                    gestures_log,
+                    'mouse: execute "Put" target=3001 argument_chord=false',
+                    args.timeout,
+                    occurrence=2,
+                )
+                print("PASS: subthreshold middle-click motion still expands and executes Put")
+                x11.quit()
+                wait_for_exit(process, args.timeout, gestures_log)
                 process = None
             succeeded = True
             return 0

@@ -115,7 +115,9 @@ editor_reveal_caret :: proc(item: ^view.View) {
 		return
 	}
 	_, _, text := editor_body_parts(item, &buffer.doc, win.body)
-	caret_x, caret_ok := text_caret_x(&buffer.doc, item.selection, text)
+	caret_selection := item.selection
+	caret_selection.active = editor_view_caret(item, &buffer.doc)
+	caret_x, caret_ok := text_caret_x(&buffer.doc, caret_selection, text)
 	if !caret_ok {
 		return
 	}

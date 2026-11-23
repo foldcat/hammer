@@ -316,7 +316,7 @@ editor_continue_selection_at :: proc(pos: coords.Logical_Point) {
 		return
 	}
 	target.selection.affinity = hit.affinity
-	action := mouse.move(&editor.mouse_gesture, hit.offset, pos, editor.mouse_gesture.buttons)
+	action := mouse.move(&editor.mouse_gesture, hit.offset, pos, editor.mouse_gesture.buttons, true)
 	editor_dispatch_mouse_action(action)
 }
 
@@ -594,7 +594,7 @@ editor_dispatch_mouse_action :: proc(action: mouse.Action) {
 		if target.selection == nil {
 			return
 		}
-		if !a.chorded {
+		if !a.chorded && !editor.mouse_expanded {
 			target.selection.active = a.active
 			target.selection.visual_column = 0
 		}
@@ -602,6 +602,13 @@ editor_dispatch_mouse_action :: proc(action: mouse.Action) {
 		editor.mouse_expanded = false
 	case mouse.Execute:
 		editor_execute_mouse(a)
+	case mouse.Execute_Update:
+		target := editor_text_target_by_id(a.target)
+		if target.selection == nil {
+			editor_cancel_pointer_gesture()
+			return
+		}
+		target.selection^ = txn.Selection{anchor = a.anchor, active = a.active, affinity = target.selection.affinity}
 	case mouse.Look:
 		editor_look_mouse(a)
 	case mouse.Chord_Cut:

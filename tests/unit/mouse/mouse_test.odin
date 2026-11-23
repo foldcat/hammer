@@ -70,6 +70,37 @@ test_execute_drag_and_argument_chord :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_middle_click_tolerance_and_drag_highlight :: proc(t: ^testing.T) {
+	state: mouse.State
+	mouse.down(&state, .Middle, 3, 2, point(), {}, 0)
+	action := mouse.move(&state, 3, point(11), {.Middle})
+	testing.expect(t, action == nil)
+	action = mouse.up(&state, .Middle, 3, point(11), 1)
+	execute, ok := action.(mouse.Execute)
+	testing.expect(t, ok && execute.anchor == 2 && execute.active == 2)
+
+	mouse.down(&state, .Middle, 3, 2, point(), {}, 10)
+	action = mouse.move(&state, 8, point(30), {.Middle})
+	update, update_ok := action.(mouse.Execute_Update)
+	testing.expect(t, update_ok && update.anchor == 2 && update.active == 8)
+	action = mouse.up(&state, .Middle, 8, point(30), 11)
+	execute, ok = action.(mouse.Execute)
+	testing.expect(t, ok && execute.anchor == 2 && execute.active == 8)
+}
+
+@(test)
+test_double_click_ignores_subthreshold_motion :: proc(t: ^testing.T) {
+	state: mouse.State
+	mouse.down(&state, .Left, 1, 2, point(), {}, 100)
+	mouse.up(&state, .Left, 2, point(), 110)
+	action := mouse.down(&state, .Left, 1, 2, point(), {}, 300)
+	start, ok := action.(mouse.Select_Start)
+	testing.expect(t, ok && start.expand)
+	action = mouse.move(&state, 3, point(11), {.Left})
+	testing.expect(t, action == nil)
+}
+
+@(test)
 test_execute_and_lookup_cancellation :: proc(t: ^testing.T) {
 	state: mouse.State
 	mouse.down(&state, .Middle, 3, 2, point(), {}, 0)

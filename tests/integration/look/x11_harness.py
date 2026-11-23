@@ -11,8 +11,27 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
 from x11_harness import HarnessFailure, X11, wait_for_exit  # noqa: E402
+
+
+def caret_column(x11: X11, window: int) -> tuple[int, int]:
+    image = x11.image(window)
+    try:
+        best_x, best_run = 0, 0
+        for x in range(40, 180):
+            run = 0
+            for y in range(480, 530):
+                if int(x11.lib.XGetPixel(image, x, y)) & 0xFFFFFF == 0xF2F4F8:
+                    run += 1
+                    if run > best_run:
+                        best_x, best_run = x, run
+                else:
+                    run = 0
+        return best_x, best_run
+    finally:
+        x11.lib.XDestroyImage(image)
 
 
 def wait_for_log(log_path: Path, needle: str, timeout: float, occurrence: int = 1) -> None:
@@ -122,24 +141,28 @@ def main() -> int:
                 raise HarnessFailure("saving the source buffer modified a Look-opened file")
             print("PASS: source and Look-opened buffers edit and save independently")
 
-            x11.move(window, 46, 148)
+            x11.move(window, 46, 170)
             x11.button(3, True)
             x11.button(3, False)
             wait_for_log(log_path, f"look: opened {coltarget} window=5 buffer=5 line=1 col=5", args.timeout)
+            time.sleep(0.2)
+            caret_x, caret_run = caret_column(x11, window)
+            if not 75 <= caret_x <= 95 or caret_run < 15:
+                raise HarnessFailure(f"file:line:col caret rendered at x={caret_x} with run={caret_run}, want column 5")
             x11.tap(ord("x"))
             x11.key(0xFFE3, True)
             x11.tap(ord("s"))
             x11.key(0xFFE3, False)
             wait_for_log(log_path, f"file: saved {coltarget}", args.timeout)
-            if coltarget.read_bytes() != b"x456789\n":
-                raise HarnessFailure(f"file:line:col did not select the line up to the column: {coltarget.read_bytes()!r}")
+            if coltarget.read_bytes() != b"x\n":
+                raise HarnessFailure(f"file:line:col did not select the whole line: {coltarget.read_bytes()!r}")
             if source.read_bytes() != expected_source:
                 raise HarnessFailure("opening a file:line:col reference changed the source document")
-            print("PASS: file:line:col Look finds the file in a subdirectory, highlights up to the column, and places the caret there")
+            print("PASS: file:line:col Look highlights the whole line and keeps the addressed caret")
 
             missing_start = len(f"starget.txt:2\n{unicode_target}\n".encode())
             missing_end = missing_start + len(b"missing-token")
-            x11.move(window, 101, 116)
+            x11.move(window, 101, 140)
             x11.button(3, True)
             x11.button(3, False)
             wait_for_log(

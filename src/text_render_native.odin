@@ -168,7 +168,7 @@ text_render_begin :: proc() {
 	text_document_glyph_budget = max(1, MAX_TEXT_GLYPHS_PER_FRAME / document_count)
 }
 
-text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbers: bool, doc: ^txn.Doc, selection: txn.Selection, first_line: rope.Line_Index, first_row: int, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, styles: []console.Style_Run, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
+text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbers: bool, doc: ^txn.Doc, selection: txn.Selection, caret: int, first_line: rope.Line_Index, first_row: int, active: bool, line_height_override: f32, wrap_mode: config.Wrap_Mode, horizontal_offset: ^f32, styles: []console.Style_Run, fb: coords.Physical_Size, quads: ^[dynamic]Vertex) {
 	if doc == nil || text_pipeline.id == 0 || text_vertex_buffer.id == 0 || !glyph_cache_ready || win.body.width <= 0 || win.body.height <= 0 || first_line < 0 || first_row < 0 {
 		return
 	}
@@ -200,7 +200,11 @@ text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbe
 	bounded_selection := selection
 	bounded_selection.anchor = clamp(bounded_selection.anchor, 0, byte_count)
 	bounded_selection.active = clamp(bounded_selection.active, 0, byte_count)
-	caret_line, line_err := rope.tree_byte_to_line(&doc.tree, bounded_selection.active)
+	bounded_caret := bounded_selection.active
+	if caret >= 0 {
+		bounded_caret = clamp(caret, 0, byte_count)
+	}
+	caret_line, line_err := rope.tree_byte_to_line(&doc.tree, bounded_caret)
 	if !errs.ok(line_err) {
 		text_render_error(line_err)
 		return
@@ -237,6 +241,7 @@ text_render_document :: proc(win: layout.Window, gutter: layout.Rect, line_numbe
 			doc,
 			rope.Line_Index(line_index),
 			caret_line,
+			bounded_caret,
 			bounded_selection,
 			active,
 			preedit,
@@ -295,6 +300,7 @@ text_render_line :: proc(
 	doc: ^txn.Doc,
 	line_index: rope.Line_Index,
 	caret_line: rope.Line_Index,
+	caret: int,
 	selection: txn.Selection,
 	active: bool,
 	preedit: ime.Snapshot,
@@ -332,11 +338,11 @@ text_render_line :: proc(
 		return 0
 	}
 	composing := active && preedit.active && caret_line == line_index &&
-		selection.active >= start && selection.active <= start + len(line_bytes)
+		caret >= start && caret <= start + len(line_bytes)
 	display := string(expansion.text[:])
 	caret_offset := 0
 	if caret_line == line_index {
-		mapped, mapped_ok := shaping.tab_display_offset(expansion, selection.active - start)
+		mapped, mapped_ok := shaping.tab_display_offset(expansion, caret - start)
 		if !mapped_ok {
 			return 0
 		}
