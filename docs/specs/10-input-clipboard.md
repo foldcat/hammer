@@ -88,6 +88,7 @@ Use keydown actions for shortcuts and text-input events for inserted text.
 | Ctrl+P             | Fuzzy file finder           |
 | Ctrl+W             | Close current window safely |
 | Ctrl+Q             | Request quit safely         |
+| Escape             | Cancel Edit; does not quit  |
 | Backspace          | Delete previous grapheme    |
 | Ctrl/Shift+Backspace | Same as ordinary Backspace |
 | Alt+Backspace      | Delete previous word        |

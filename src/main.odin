@@ -270,11 +270,9 @@ event :: proc "c" (ev: ^sapp.Event) {
 		editor_consume_input(e)
 		if kd, is_down := e.(input.Key_Down); is_down && !kd.repeat && kd.key == .Escape {
 			// A live terminal forwards Escape to the child (so it reaches
-			// vim/htop/less); only a non-terminal body cancels/quits here.
+			// vim/htop/less). Elsewhere it only cancels an in-progress edit.
 			if !editor_active_terminal() {
-				if !editor_cancel_edit() {
-					editor_request_close(.Quit, .Keyboard)
-				}
+				editor_cancel_edit()
 			}
 		}
 	case .QUIT_REQUESTED:

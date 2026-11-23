@@ -226,6 +226,11 @@ class X11:
         self.key(keysym, False)
         self.lib.XSync(self.display, 0)
 
+    def quit(self) -> None:
+        self.key(0xFFE3, True)
+        self.tap(ord("q"))
+        self.key(0xFFE3, False)
+
     def move(self, window: int, x: int, y: int) -> None:
         self.lib.XWarpPointer(self.display, 0, window, 0, 0, 0, 0, x, y)
         self.lib.XSync(self.display, 0)
@@ -317,23 +322,27 @@ class X11:
             self.lib.XDestroyImage(image)
 
 
+def wait_for_log(log_path: Path, needle: str, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if needle in log_path.read_text(encoding="utf-8", errors="replace"):
+            return
+        time.sleep(0.05)
+    raise HarnessFailure(f"timed out waiting for {needle!r}; log: {log_path}")
+
+
 def open_untitled(x11: X11, window: int, log_path: Path, timeout: float) -> None:
     x11.move(window, 40, 30)
     x11.button(2, True)
     x11.button(2, False)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if "view: New window=" in log_path.read_text(encoding="utf-8", errors="replace"):
-            return
-        time.sleep(0.05)
-    raise HarnessFailure(f"timed out creating an untitled buffer; log: {log_path}")
+    wait_for_log(log_path, "view: New window=", timeout)
 
 
 def wait_for_exit(process: subprocess.Popen[bytes], timeout: float, log_path: Path) -> None:
     try:
         result = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired as error:
-        raise HarnessFailure("Hammer did not exit after a clean Escape") from error
+        raise HarnessFailure("Hammer did not exit after Ctrl+Q") from error
     if result != 0:
         raise HarnessFailure(f"Hammer exited {result}; log: {log_path}")
 
@@ -377,6 +386,11 @@ def main() -> int:
             time.sleep(0.3)
             open_untitled(x11, window, log_path, args.timeout)
             initial = x11.pixels(window)
+            x11.tap(0xFF1B)
+            time.sleep(0.2)
+            if process.poll() is not None or x11.pixels(window) != initial:
+                raise HarnessFailure("Escape requested quit or changed the document")
+            print("PASS: Escape does not request quit")
 
             for keysym in (ord("a"), ord("b"), ord("c"), 0xFF0D, ord("d")):
                 x11.tap(keysym)
@@ -790,17 +804,24 @@ def main() -> int:
 
             x11.tap(ord("x"))
             time.sleep(0.2)
-            x11.tap(0xFF1B)
-            time.sleep(0.3)
-            if process.poll() is not None:
-                raise HarnessFailure("dirty buffer quit was not blocked")
-            print("PASS: Escape preserved unsaved text and kept the editor open")
+            x11.move(window, 65, 52)
+            x11.button(2, True)
+            x11.button(2, False)
+            wait_for_log(log_path, "edit: unsaved buffer=2 window=3 selected", args.timeout)
+            if process.poll() is not None or x11.selection_pixels(window, 66, 130) == 0:
+                raise HarnessFailure("first Del did not select the dirty buffer and keep it open")
+            print("PASS: first Del highlights the entire dirty buffer without closing it")
 
-            x11.key(0xFFE3, True)
-            x11.tap(ord("z"))
-            x11.key(0xFFE3, False)
-            time.sleep(0.2)
-            x11.tap(0xFF1B)
+            x11.move(window, 65, 52)
+            x11.button(2, True)
+            x11.button(2, False)
+            wait_for_log(log_path, "edit: discarded buffer=2", args.timeout)
+            wait_for_log(log_path, "view: closed window 3; 1 views remain", args.timeout)
+            if process.poll() is not None:
+                raise HarnessFailure("double Del quit the application instead of only closing the dirty view")
+            print("PASS: second middle-clicked Del explicitly discards the dirty view")
+
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
@@ -848,7 +869,7 @@ def main() -> int:
             time.sleep(0.5)
             if save_path.read_bytes() != original_bytes + b"x":
                 raise HarnessFailure("CLI open/Ctrl+S did not preserve the loaded bytes, BOM, and CRLF newlines")
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, save_log_path)
             process = None
         print("PASS: hammer filename loads a relative path and Ctrl+S saves BOM/newline-exact text")
@@ -887,7 +908,7 @@ def main() -> int:
             time.sleep(0.5)
             if save_path.read_bytes() != b"external\r\n":
                 raise HarnessFailure("Ctrl+S overwrote an external change instead of reporting a conflict")
-            x11.tap(0xFF1B)
+            x11.quit()
             time.sleep(0.3)
             if process.poll() is not None:
                 raise HarnessFailure("a failed save cleared dirty state and allowed lossy close")
@@ -895,7 +916,7 @@ def main() -> int:
             x11.tap(ord("z"))
             x11.key(0xFFE3, False)
             time.sleep(0.2)
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, reopen_log_path)
             process = None
         print("PASS: reopen/save round-trip and external-change failure preserve dirty-close protection")

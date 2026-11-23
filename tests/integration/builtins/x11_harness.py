@@ -203,7 +203,7 @@ def run_external_case(
                 wait_for_log(log_path, "errors: opened", args.timeout)
                 if "shell: selection replaced" in log_path.read_text(encoding="utf-8", errors="replace"):
                     raise HarnessFailure(f"{command!r} replaced the selection instead of writing +Errors")
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
             return source.read_bytes(), log_path.read_text(encoding="utf-8", errors="replace")
@@ -259,7 +259,7 @@ def run_async_case(
             wait_for_log(log_path, "job: selection replaced", args.timeout)
             execute(x11, window, "Putall", 10, 10, args.timeout, log_path, 1)
             wait_for_log(log_path, f"file: saved {source.name}", args.timeout)
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
             return source.read_bytes()
@@ -329,7 +329,7 @@ def run_regex_case(
                 wait_for_log(log_path, "range=5,11", args.timeout)
                 if "regex: external search started" in log_path.read_text(encoding="utf-8", errors="replace"):
                     raise HarnessFailure("native fallback unexpectedly spawned Raku")
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
             return log_path.read_text(encoding="utf-8", errors="replace")
@@ -520,7 +520,7 @@ def main() -> int:
                 x11.lib.XSetInputFocus(x11.display, pipe_window, 1, 0)
                 x11.lib.XSync(x11.display, 0)
                 wait_for_log(pipe_log_path, "job: selection test helper started", args.timeout)
-                x11.tap(0xFF1B)
+                x11.quit()
                 wait_for_log(pipe_log_path, "job: quit blocked on 1 job(s)", args.timeout)
                 execute(x11, pipe_window, "Wait", 10, 10, args.timeout, pipe_log_path, 1)
                 wait_for_log(pipe_log_path, "job: selection replaced", args.timeout)
@@ -533,7 +533,7 @@ def main() -> int:
                 if pipe_source.read_bytes() != "filtered:pipe α β\n".encode("utf-8"):
                     raise HarnessFailure(f"selection pipe wrote unexpected bytes: {pipe_source.read_bytes()!r}")
                 print("PASS: Wait drains selection output and still enforces the dirty-buffer quit review")
-                x11.tap(0xFF1B)
+                x11.quit()
                 wait_for_exit(process, args.timeout, pipe_log_path)
                 process = None
 
@@ -574,7 +574,7 @@ def main() -> int:
                 if pipe_source.read_bytes() != expected:
                     raise HarnessFailure(f"explicit Apply wrote unexpected bytes: {pipe_source.read_bytes()!r}")
                 print("PASS: conflicted output preserves newer edits and Apply uses the current selection")
-                x11.tap(0xFF1B)
+                x11.quit()
                 wait_for_exit(process, args.timeout, conflict_log_path)
                 process = None
 
@@ -622,7 +622,7 @@ def main() -> int:
                 if marker.exists():
                     raise HarnessFailure("command discovery executed a filter body")
                 print("PASS: Cmd/Cmds enumerates trusted user and explicit project definitions without execution")
-                x11.tap(0xFF1B)
+                x11.quit()
                 wait_for_exit(process, args.timeout, filter_log_path)
                 process = None
 
@@ -787,7 +787,7 @@ def main() -> int:
                     execute(x11, invoke_window, "Putall", 10, 10, args.timeout, invoke_log_path, 3)
                     wait_for_log(invoke_log_path, "file: saved invoke.txt", args.timeout, 3)
 
-                x11.tap(0xFF1B)
+                x11.quit()
                 wait_for_exit(process, args.timeout, invoke_log_path)
                 process = None
 
@@ -878,7 +878,7 @@ def main() -> int:
                 execute(x11, jobs_window, "Jobs", 10, 10, args.timeout, jobs_log_path, 2)
                 wait_for_log(jobs_log_path, "job: listed 0 running job(s)", args.timeout)
                 print("PASS: Jobs lists running async commands and Kill stops one by id")
-                x11.tap(0xFF1B)
+                x11.quit()
                 wait_for_exit(process, args.timeout, jobs_log_path)
                 process = None
 

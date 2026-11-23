@@ -218,7 +218,7 @@ def run_mode(binary: Path, sandbox: Path, mode: str) -> None:
         print(f"PASS: {mode} viewport and line numbers remain correct after resize")
 
         save(x11)
-        x11.tap(0xFF1B)
+        x11.quit()
         wait_for_exit(process, 20.0, log_path)
     finally:
         stop(process, x11)
@@ -235,7 +235,7 @@ def run_dpi(binary: Path, sandbox: Path) -> None:
         if line_number_pixels(x11, window, 66, 86, 2.0) <= 0:
             raise HarnessFailure("line numbers did not render after the 200% DPI transition")
         print("PASS: line numbers remain visible after runtime DPI transitions through 200%")
-        x11.tap(0xFF1B)
+        x11.quit()
         wait_for_exit(process, 20.0, log_path)
     finally:
         stop(process, x11)

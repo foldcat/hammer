@@ -154,7 +154,7 @@ def main() -> int:
                 raise HarnessFailure("closing one of several views exited the editor")
             print("PASS: closing one view preserves the other independent buffers")
 
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
 
@@ -191,7 +191,7 @@ def main() -> int:
             wait_for_log(empty_log, "view: Newcol column=", args.timeout)
             print("PASS: closing the last window keeps the editor open for Newcol")
 
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, empty_log)
             process = None
 

@@ -183,7 +183,7 @@ def run_soft(binary: Path, sandbox: Path) -> None:
         if not data.endswith(b"\nnext\n"):
             raise HarnessFailure("wrapped-row editing damaged the following logical line")
         print(f"PASS: clicking the second visual row inserts at wrapped source byte {insertion}")
-        x11.tap(0xFF1B)
+        x11.quit()
         wait_for_exit(process, 20.0, log_path)
     finally:
         stop(process, x11)
@@ -232,7 +232,7 @@ def run_truncate(binary: Path, sandbox: Path) -> None:
         if not 3 <= insertion <= 15:
             raise HarnessFailure(f"scrolled hit inserted at {insertion}, expected a horizontally displaced source position")
         print(f"PASS: horizontal hit-testing inserts at scrolled source byte {insertion}")
-        x11.tap(0xFF1B)
+        x11.quit()
         wait_for_exit(process, 20.0, log_path)
     finally:
         stop(process, x11)
@@ -264,7 +264,7 @@ def run_cursor_reveal(binary: Path, sandbox: Path) -> None:
         if source.read_bytes() != expected:
             raise HarnessFailure("caret was not at the long-line end after right-arrow scrolling")
         print(f"PASS: right-arrow movement reveals the truncated caret at offset {offsets[-1]}")
-        x11.tap(0xFF1B)
+        x11.quit()
         wait_for_exit(process, 20.0, log_path)
     finally:
         stop(process, x11)
@@ -311,7 +311,7 @@ def run_right_column_cursor_reveal(binary: Path, sandbox: Path) -> None:
         if source.read_bytes() != f";{LONG_TEXT}\n;next\n".encode():
             raise HarnessFailure("Left movement did not reveal the current buffer's long-line start")
         print("PASS: right-column caret reveal crosses line boundaries, scrolls left, and never paints over the left buffer")
-        x11.tap(0xFF1B)
+        x11.quit()
         wait_for_exit(process, 20.0, log_path)
     finally:
         stop(process, x11)

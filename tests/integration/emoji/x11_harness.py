@@ -143,7 +143,7 @@ def main() -> int:
                 chord(x11, 0xFFE3, ord("z"))
             if x11.pixels(window) != initial:
                 raise HarnessFailure("undo after emoji edits did not restore the initial document")
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
 

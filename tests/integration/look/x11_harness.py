@@ -155,7 +155,7 @@ def main() -> int:
             x11.move(window, 46, 356)
             x11.button(1, True)
             x11.button(1, False)
-            x11.tap(0xFF1B)
+            x11.quit()
             time.sleep(0.3)
             if process.poll() is not None:
                 raise HarnessFailure("quit discarded a dirty buffer while another buffer was active")
@@ -168,7 +168,7 @@ def main() -> int:
             x11.key(0xFFE3, True)
             x11.tap(ord("z"))
             x11.key(0xFFE3, False)
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
             succeeded = True

@@ -176,7 +176,7 @@ def main() -> int:
                 )
             print("PASS: global tag strip is full height (text not clipped)")
 
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
 
@@ -252,7 +252,7 @@ def main() -> int:
 
                 # The cross-file reload leaves the buffer dirty (existing
                 # Get <path> behavior), so terminate directly rather than
-                # expecting a clean Escape.
+                # expecting a clean Ctrl+Q.
                 process.terminate()
                 process.wait(timeout=2)
                 process = None

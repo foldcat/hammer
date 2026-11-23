@@ -138,7 +138,7 @@ def run_case(
             print(f"PASS: {label} product selection wrapping and quote policy")
 
             reset_document(x11, window, initial, label)
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, timeout, log_path)
             process = None
     finally:

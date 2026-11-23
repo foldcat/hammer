@@ -52,7 +52,7 @@ def run_case(x11: X11, binary: Path, label: str, sandbox: Path, timeout: float) 
             time.sleep(0.3)
             if x11.pixels(window) != initial:
                 raise HarnessFailure(f"{label}: undo did not restore the initial pixels; log: {log_path}")
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, timeout, log_path)
             process = None
     finally:

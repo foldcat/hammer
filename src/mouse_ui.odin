@@ -461,7 +461,9 @@ editor_pointer_down :: proc(event: input.Pointer_Down) {
 	}
 	target.selection.affinity = hit.affinity
 	editor.typing_group = 0
-	editor_cancel_close_review()
+	if event.button != .Middle || area.kind != .Window_Tag {
+		editor_cancel_close_review()
+	}
 	editor.mouse_revision = txn.doc_revision(target.doc)
 	editor.mouse_generation = target.generation
 	action := mouse.down(&editor.mouse_gesture, event.button, target.id, hit.offset, event.pos, event.modifiers, mouse_now_ms())

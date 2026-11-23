@@ -108,26 +108,32 @@ def main() -> int:
             print("PASS: directory errors reuse +Errors without stealing the originating window")
 
             click(x11, window, 1, 60, 76)
-            x11.tap(ord("q"))
+            x11.tap(ord("s"))
             click(x11, window, 1, 60, 356)
-            x11.tap(0xFF1B)
-            time.sleep(0.3)
-            if process.poll() is not None:
-                raise HarnessFailure("quit discarded an inactive dirty Look-opened buffer")
+            x11.tap(ord("q"))
+            click(x11, window, 1, 500, 360)
+            x11.quit()
             wait_for_log(log_path, "edit: unsaved text; close blocked", args.timeout)
-            print("PASS: quit inspects inactive dirty windows after layout and error operations")
+            wait_for_log(log_path, "edit: unsaved buffer=1 window=1 selected", args.timeout)
+            if process.poll() is not None or x11.selection_pixels(window, 300, 400) == 0:
+                raise HarnessFailure("quit did not select the first inactive dirty buffer")
+            print("PASS: quit selects the first dirty buffer even when another buffer was active")
 
-            click(x11, window, 1, 60, 76)
-            x11.key(0xFFE3, True)
-            x11.tap(ord("z"))
-            x11.key(0xFFE3, False)
             click(x11, window, 2, 130, 330)
-            wait_for_log(log_path, "view: closed window 1; 3 views remain", args.timeout)
-            x11.tap(0xFF1B)
+            wait_for_log(log_path, "edit: discarded buffer=1", args.timeout)
+            wait_for_log(log_path, "edit: unsaved buffer=3 window=3 selected", args.timeout)
+            if process.poll() is not None:
+                raise HarnessFailure("first explicit discard exited before the second dirty buffer was reviewed")
+            print("PASS: discarding one buffer advances quit review to the next dirty buffer")
+
+            click(x11, window, 2, 130, 52)
+            wait_for_log(log_path, "edit: discarded buffer=3", args.timeout)
             wait_for_exit(process, args.timeout, log_path)
             process = None
+            if source.read_bytes() != b"x\nchild.txt\n" or child.read_bytes() != b"child\n":
+                raise HarnessFailure("explicit discard wrote unsaved edits to disk")
             succeeded = True
-            print("PASS: undo restores clean state and button-2 Del uses the safe close path")
+            print("PASS: second explicit discard exits without saving either dirty buffer")
             return 0
     finally:
         if process is not None and process.poll() is None:

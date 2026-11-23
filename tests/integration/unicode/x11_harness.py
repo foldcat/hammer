@@ -143,7 +143,7 @@ def main() -> int:
             print("PASS: combining, complex-script, bidi, and symbol text round-trips byte-exactly")
 
             chord(x11, 0xFFE3, ord("z"))
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
 

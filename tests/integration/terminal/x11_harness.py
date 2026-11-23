@@ -186,7 +186,7 @@ def main() -> int:
             else:
                 print("SKIP: RakuRepl execution (raku is not installed)")
 
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
         succeeded = True

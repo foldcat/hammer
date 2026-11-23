@@ -145,7 +145,7 @@ def main() -> int:
                 raise HarnessFailure("horizontal pair drag did not shrink the dragged right column")
             print("PASS: horizontal drag resizes the adjacent column pair")
 
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             succeeded = True
             return 0

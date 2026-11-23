@@ -348,7 +348,7 @@ def main() -> int:
             wait_for_log(log_path, "view: closed window 1; 1 views remain", args.timeout)
             print("PASS: button-2 Del in a window tag uses the safe per-view close path")
 
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
 
@@ -408,7 +408,7 @@ def main() -> int:
                 if "render-text:" in cut_log.read_text(encoding="utf-8", errors="replace"):
                     raise HarnessFailure(f"cut left a stale selection that aborted rendering; log: {cut_log}")
                 print("PASS: ten document-end cut/undo cycles preserve the unselected prefix")
-                x11.tap(0xFF1B)
+                x11.quit()
                 wait_for_exit(process, args.timeout, cut_log)
                 process = None
 
@@ -447,7 +447,7 @@ def main() -> int:
                 if modchord.read_bytes() != b"alpha  alpha":
                     raise HarnessFailure(f"modifier chord cut wrote unexpected bytes: {modchord.read_bytes()!r}")
                 print("PASS: Ctrl during a held selection cuts (laptop 1-2 chord)")
-                x11.tap(0xFF1B)
+                x11.quit()
                 wait_for_exit(process, args.timeout, modchord_log)
                 process = None
             succeeded = True

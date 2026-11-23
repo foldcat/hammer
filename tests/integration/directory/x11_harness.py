@@ -126,7 +126,7 @@ def main() -> int:
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("e"))
-            x11.tap(0xFF1B)
+            x11.quit()
             wait_for_exit(process, args.timeout, log_path)
             process = None
             print("PASS: editing an output window is disposable and does not block quit")

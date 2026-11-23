@@ -1077,7 +1077,85 @@ editor_cancel_job_quit :: proc() {
 	log.infof("job: quit canceled (origin=%v)", origin)
 }
 
+editor_close_if_ready :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close_Origin) -> bool {
+	if !lifecycle.close_guard_ready(&editor.close_guard) {
+		return false
+	}
+	if kind == .Quit && !lifecycle.job_quit_guard_ready(&editor.job_quit) {
+		return false
+	}
+	if kind == .Close_View {
+		editor_close_active_view(origin)
+	} else {
+		request_quit(.User_Request, "editor-close")
+	}
+	return true
+}
+
+editor_show_close_review :: proc() {
+	current, ok := lifecycle.close_current(&editor.close_guard)
+	if !ok {
+		return
+	}
+	buffer := editor_buffer_by_id(view.Buffer_ID(current.id))
+	item := editor_first_view_for_buffer(view.Buffer_ID(current.id))
+	if buffer == nil || item == nil {
+		return
+	}
+	editor_activate_window(item.window_id)
+	editing.select_all(&buffer.doc, &item.selection)
+	item.first_line = 0
+	item.first_row = 0
+	item.wheel_remainder = 0
+	item.horizontal_offset = 0
+	log.infof("edit: unsaved buffer=%d window=%d selected; middle-click Del again to discard", current.id, u64(item.window_id))
+}
+
+editor_continue_close_review :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close_Origin) {
+	if editor_close_if_ready(kind, origin) {
+		return
+	}
+	if kind == .Quit || kind == .Close_View {
+		editor_show_close_review()
+	}
+}
+
+editor_discard_close_review :: proc(origin: lifecycle.Close_Origin) -> bool {
+	if editor.close_guard.phase != .Reviewing {
+		return false
+	}
+	kind := editor.close_guard.request.kind
+	if kind != .Quit && kind != .Close_View {
+		return false
+	}
+	current, ok := lifecycle.close_current(&editor.close_guard)
+	if !ok || editor.buffer == nil || current.id != u64(editor.buffer.id) ||
+		current.generation != editor.buffer.generation || current.revision != txn.doc_revision(&editor.buffer.doc) {
+		return false
+	}
+	if err := lifecycle.close_decision(&editor.close_guard, .Discard_Current); !errs.ok(err) {
+		editor_report(err)
+		return true
+	}
+	log.infof("edit: discarded buffer=%d", current.id)
+	editor_continue_close_review(kind, origin)
+	return true
+}
+
 editor_request_close :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close_Origin) {
+	if kind == .Close_View && origin == .Tag_Command && editor_discard_close_review(origin) {
+		return
+	}
+	if kind == .Quit && editor.close_guard.request.kind == .Quit {
+		if editor.close_guard.phase == .Reviewing {
+			editor_continue_close_review(.Quit, origin)
+			return
+		}
+		if editor.close_guard.phase == .Ready {
+			editor_close_if_ready(.Quit, origin)
+			return
+		}
+	}
 	editor_cancel_close_review()
 	if kind != .Quit {
 		editor_cancel_job_quit()
@@ -1129,18 +1207,18 @@ editor_request_close :: proc(kind: lifecycle.Close_Kind, origin: lifecycle.Close
 			return
 		}
 	}
-	close_ready := lifecycle.close_guard_ready(&editor.close_guard)
-	jobs_ready := kind != .Quit || lifecycle.job_quit_guard_ready(&editor.job_quit)
-	if close_ready && jobs_ready {
-		if kind == .Close_View {
-			editor_close_active_view(origin)
-		} else {
-			request_quit(.User_Request, "editor-close")
-		}
+	if editor_close_if_ready(kind, origin) {
 		return
 	}
-	if !close_ready {
+	if !lifecycle.close_guard_ready(&editor.close_guard) {
 		log.warn("edit: unsaved text; close blocked until it is saved or explicitly discarded")
+		if kind == .Quit || kind == .Close_View {
+			if err := lifecycle.close_decision(&editor.close_guard, .Review_Unsaved); !errs.ok(err) {
+				editor_report(err)
+				return
+			}
+			editor_show_close_review()
+		}
 	}
 	if kind == .Quit && editor.job_quit.phase == .Await_Decision {
 		log.warnf(
