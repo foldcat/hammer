@@ -173,7 +173,7 @@ editor_window_commands :: proc(buffer: ^Editor_Buffer, item: ^view.View) -> stri
 	}
 	switch buffer.kind {
 	case .Job_Output:
-		return "Del Stop"
+		return "Stop Del"
 	case .Directory:
 		return "Del Get"
 	case .File:
