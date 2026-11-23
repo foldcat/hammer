@@ -28,20 +28,23 @@ editor_execute_external :: proc(target: Mouse_Text_Target, command_range: rope.B
 	editor_report(err)
 }
 
-// editor_run_external resolves the source body window, builds the shell
-// command vector and an immutable context snapshot, then starts a job.
+// editor_run_external builds the shell command vector and an immutable context
+// snapshot. Selection routing requires a source body; plain commands do not.
 editor_run_external :: proc(cmd_context: ^command.Context, routing: command.Pipe_Routing, command_text: string) -> errs.Error {
 	if command_text == "" {
 		return errs.new(.Invalid_Input, "shell: command text is empty", allocator = permanent())
 	}
 	target := editor_command_source_target(cmd_context.source)
 	body := editor_target_body(target)
-	if body.doc == nil || body.selection == nil || body.item == nil {
-		return errs.new(.NotFound, "shell: no body window for the external command", allocator = permanent())
-	}
-	buffer := editor_buffer_for_view(body.item)
-	if buffer == nil {
-		return errs.new(.Internal, "shell: source window has no buffer", allocator = permanent())
+	buffer: ^Editor_Buffer
+	if routing != .Plain {
+		if body.doc == nil || body.selection == nil || body.item == nil {
+			return errs.new(.NotFound, "shell: selection routing requires a body window", allocator = permanent())
+		}
+		buffer = editor_buffer_for_view(body.item)
+		if buffer == nil {
+			return errs.new(.Internal, "shell: source window has no buffer", allocator = permanent())
+		}
 	}
 
 	argv, argv_err := command.pipe_shell_command(editor_external_shell(), command_text, context.temp_allocator)

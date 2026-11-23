@@ -99,9 +99,11 @@ Acme behavior, not an implementation to copy mechanically.
   command unit tests and the `builtin-test` discovery scenario.
 - `>`, `<`, and `|` prefix commands and plain unknown commands run through the
   configured shell (default `sh`/`cmd.exe`) as jobs. There is no `Async` prefix
-  or synchronous external-command mode. Each invocation has one bounded live
-  `+Job <id>` output window; closing it drains later output without killing the
-  job or reopening the window. There is no shell trust gate: the user typed the
+  or synchronous external-command mode. Plain commands also run from global or
+  column tags without a body window. Each invocation has one bounded live
+  `+Job <id>` output window at the bottom of the rightmost column, creating a
+  column when none exist; closing it drains later output without killing the job
+  or reopening the window. There is no shell trust gate: the user typed the
   command and chose to run it. Covered by `builtin-test` external-command scenarios.
 - `Jobs` lists running jobs in a `+Jobs` buffer and `Kill <id>` stops one
   by id (or by a button-1 chord selection). Covered by `builtin-test`.

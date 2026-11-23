@@ -55,9 +55,27 @@ editor_job_output_close :: proc(buffer: ^Editor_Buffer) {
 }
 
 editor_job_output_init :: proc(state: ^Editor_Job_Output, job: ^process.Job) -> errs.Error {
-	if editor.workspace.column_count == 0 {
-		return errs.new(.NotFound, "job: no column is available for output", allocator = permanent())
+	created_column := editor.workspace.column_count == 0
+	column_id: layout.Column_ID
+	if created_column {
+		id, column_err := layout.add_column(&editor.workspace)
+		if !errs.ok(column_err) {
+			return column_err
+		}
+		column_id = id
+		if tag_err := editor_init_column_tag(column_id); !errs.ok(tag_err) {
+			layout.remove_column(&editor.workspace, column_id)
+			return tag_err
+		}
+	} else {
+		column_id = editor.workspace.columns[editor.workspace.column_count - 1].id
 	}
+	keep_column := false
+	defer if created_column && !keep_column {
+		editor_destroy_column_tag(column_id)
+		layout.remove_column(&editor.workspace, column_id)
+	}
+
 	buffer, alloc_err := editor_alloc_buffer_content("", nil, .Job_Output)
 	if !errs.ok(alloc_err) {
 		return alloc_err
@@ -72,15 +90,15 @@ editor_job_output_init :: proc(state: ^Editor_Job_Output, job: ^process.Job) -> 
 		editor_destroy_buffer(buffer)
 		return err
 	}
-	column_id := editor.workspace.columns[editor.workspace.column_count - 1].id
 	item, open_err := editor_open_buffer_in_column(buffer, column_id)
 	if !errs.ok(open_err) {
 		process.output_destroy(&output)
 		return open_err
 	}
+	keep_column = true
 	state^ = {id = job.id, buffer = buffer, output = output}
 	job.attachment = u64(item.window_id)
-	log.infof("job: output opened id=%d window=%d buffer=%d", u64(job.id), u64(item.window_id), u64(buffer.id))
+	log.infof("job: output opened id=%d window=%d buffer=%d column=%d", u64(job.id), u64(item.window_id), u64(buffer.id), u64(column_id))
 	return {}
 }
 

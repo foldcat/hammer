@@ -13,7 +13,7 @@ Exited
 FailedToStart
 ```
 
-Every external shell command starts as a job; there is no synchronous external-command mode or `Async` command prefix. Built-in editor actions remain immediate UI operations. Each job has at most one bounded live `+Job <id>` output window. Closing that window drains subsequent output without killing the job or reopening the window, so `Jobs` and `Kill <id>` remain available.
+Every external shell command starts as a job; there is no synchronous external-command mode or `Async` command prefix. Built-in editor actions remain immediate UI operations. Plain commands can run from global, column, or window tags without a body window; selection-routing forms still require their source body. Each job has at most one bounded live `+Job <id>` output window, appended at the bottom of the rightmost column. If no columns exist, output creation adds a column for that window. Closing the output window drains subsequent output without killing the job or reopening the window, so `Jobs` and `Kill <id>` remain available.
 
 Each job records:
 

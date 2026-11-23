@@ -203,6 +203,9 @@ def run_external_case(
             log_text = log_path.read_text(encoding="utf-8", errors="replace")
             if log_text.count("job: output opened") != 1 or "errors: opened" in log_text:
                 raise HarnessFailure(f"{command!r} did not produce exactly one job output window and no +Errors window")
+            output_match = re.search(r"job: output opened id=\d+ window=\d+ buffer=\d+ column=(\d+)", log_text)
+            if output_match is None or output_match.group(1) != "2":
+                raise HarnessFailure(f"{command!r} did not append its output window to the rightmost column")
             if not expect_replace and "job: selection replaced" in log_text:
                 raise HarnessFailure(f"{command!r} unexpectedly replaced the selection")
             x11.quit()
@@ -218,6 +221,69 @@ def run_external_case(
                 process.kill()
                 process.wait(timeout=2)
 
+
+
+def run_global_external_case(
+    args: argparse.Namespace,
+    binary: Path,
+    sandbox: Path,
+    x11: X11,
+    job_helper: Path,
+) -> None:
+    """Runs a plain command from the global tag after all columns are deleted."""
+    log_path = sandbox / "route-global-hammer.log"
+    environment = os.environ.copy()
+    environment["HAMMER_LOG"] = ""
+    environment["PATH"] = f"{job_helper.parent}{os.pathsep}{environment.get('PATH', '')}"
+    environment["XDG_STATE_HOME"] = str(sandbox / "route-global-state")
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                [str(binary)],
+                cwd=sandbox,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+            )
+            window = x11.find_window(args.timeout)
+            x11.lib.XMapRaised(x11.display, window)
+            x11.lib.XSetInputFocus(x11.display, window, 1, 0)
+            x11.lib.XSync(x11.display, 0)
+            wait_for_log(log_path, "startup: columns=2", args.timeout)
+            execute(x11, window, "Delcol", 10, 10, args.timeout, log_path, 1)
+            wait_for_log(log_path, "view: deleted column 2; 1 columns", args.timeout)
+            execute(x11, window, "Delcol", 10, 10, args.timeout, log_path, 2)
+            wait_for_log(log_path, "view: deleted column 1; 0 columns and 0 views remain", args.timeout)
+
+            command = f"{job_helper.name} echo"
+            click(x11, window, 1, 10, 10)
+            select_all(x11)
+            type_pipe_text(x11, command)
+            select_all(x11)
+            click(x11, window, 2, 10, 10)
+            wait_for_log(log_path, f'mouse: execute "{command}" routing=plain', args.timeout)
+            wait_for_log(log_path, "shell: started command id=", args.timeout)
+            wait_for_log(log_path, "job: output opened", args.timeout)
+            wait_for_log(log_path, "job: released id=", args.timeout)
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            output_match = re.search(r"job: output opened id=\d+ window=\d+ buffer=\d+ column=(\d+)", log_text)
+            if output_match is None or output_match.group(1) != "3":
+                raise HarnessFailure("global command did not create its output window in a replacement column")
+            if "no body window for the external command" in log_text:
+                raise HarnessFailure("plain global-tag command still requires a body window")
+            x11.quit()
+            wait_for_exit(process, args.timeout, log_path)
+            process = None
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
 
 
 def run_regex_case(
@@ -760,7 +826,10 @@ def main() -> int:
             plain_result, plain_log = run_external_case(args, binary, sandbox, x11, job_helper, f"{job_helper.name} echo", f"{job_helper.name} echo", "plain", route_content, False)
             if plain_result != route_content:
                 raise HarnessFailure(f"plain command modified the source file: {plain_result!r}")
-            print("PASS: plain command runs asynchronously with one live job output window")
+            print("PASS: plain command runs asynchronously with one live job output window in the rightmost column")
+
+            run_global_external_case(args, binary, sandbox, x11, job_helper)
+            print("PASS: global-tag command runs without a body and recreates a column for its output")
 
             pipe_result, pipe_log = run_external_case(args, binary, sandbox, x11, job_helper, f"|{job_helper.name} pipe", f"{job_helper.name} pipe", "pipe", route_content, True)
             if pipe_result != "filtered:route α β\n".encode("utf-8"):
