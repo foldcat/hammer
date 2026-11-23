@@ -81,9 +81,10 @@ Acme behavior, not an implementation to copy mechanically.
 - Errors are both logged and displayed in `+Errors`. Error-window creation does
   not interrupt work by changing the active document.
 - Selection-pipe results transform through non-overlapping edits. True range or
-  history conflicts preserve stdout in the job window, whose explicit `Apply`
-  command replaces the source view's current selection rather than stale text.
-  Covered by process unit tests and the `builtin-test` conflict scenario.
+  history conflicts preserve stdout on the source buffer without changing it;
+  the source window's explicit `Apply` command replaces its current selection
+  rather than stale text. Covered by process unit tests and the `builtin-test`
+  conflict scenario.
 - Quit decisions inspect running jobs separately from dirty buffers. `Wait`
   allows jobs and output to finish, `Stop` cancels them before quitting, and
   ordinary editing cancels exit. OS close uses the same guards and cannot bypass
@@ -99,12 +100,14 @@ Acme behavior, not an implementation to copy mechanically.
   command unit tests and the `builtin-test` discovery scenario.
 - `>`, `<`, and `|` prefix commands and plain unknown commands run through the
   configured shell (default `sh`/`cmd.exe`) as jobs. There is no `Async` prefix
-  or synchronous external-command mode. Plain commands also run from global or
-  column tags without a body window. Each invocation has one bounded live
-  `+Job <id>` output window at the bottom of the rightmost column, creating a
-  column when none exist; closing it drains later output without killing the job
-  or reopening the window. There is no shell trust gate: the user typed the
-  command and chose to run it. Covered by `builtin-test` external-command scenarios.
+  or synchronous external-command mode. Selection forms replace the source
+  selection directly without opening job windows. Plain commands also run from
+  global or column tags without a body window. Their bounded `+Job <id>` output
+  appears at the bottom of the rightmost column, creating a column when none
+  exist; rerunning the same command in the same directory clears and reuses that
+  window. Closing it drains later output without killing the job or reopening
+  the window. There is no shell trust gate: the user typed the command and chose
+  to run it. Covered by `builtin-test` external-command scenarios.
 - `Jobs` lists running jobs in a `+Jobs` buffer and `Kill <id>` stops one
   by id (or by a button-1 chord selection). Covered by `builtin-test`.
 - Window tags protect their generated commands (`Del`, `Put`) from typing,

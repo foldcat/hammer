@@ -35,6 +35,44 @@ test_output_append_trims_scrollback_and_collapses_history :: proc(t: ^testing.T)
 }
 
 @(test)
+test_output_clear_replaces_content_and_decoder_state :: proc(t: ^testing.T) {
+	doc: txn.Doc
+	expect_ok(t, txn.doc_init(&doc, {}, context.allocator))
+	defer txn.doc_destroy(&doc)
+	output: process.Output_Buffer
+	expect_ok(t, process.output_init(&output, &doc, {}, context.allocator))
+	defer process.output_destroy(&output)
+
+	expect_ok(t, process.output_append(&output, transmute([]byte)string("first\n")))
+	expect_ok(t, process.output_append(&output, transmute([]byte)string("discarded partial")))
+	previous_revision := txn.doc_revision(&doc)
+	expect_ok(t, process.output_clear(&output))
+	testing.expect(t, output.has_update && output.update.end == 0)
+	testing.expect(t, rope.tree_byte_count(&doc.tree) == 0)
+	testing.expect(t, txn.doc_revision(&doc) > previous_revision)
+	testing.expect(t, txn.doc_log_len(&doc) == 0)
+	testing.expect(t, output.dropped_bytes == 0)
+
+	expect_ok(t, process.output_append(&output, transmute([]byte)string("second\n")))
+	expect_ok(t, process.output_finish(&output))
+	content, read_err := rope.tree_read_all(&doc.tree, {0, rope.tree_byte_count(&doc.tree)}, context.allocator)
+	expect_ok(t, read_err)
+	defer delete(content, context.allocator)
+	testing.expect(t, string(content) == "second\n")
+
+	empty_revision := txn.doc_revision(&doc)
+	expect_ok(t, process.output_clear(&output))
+	testing.expect(t, output.has_update)
+	testing.expect(t, txn.doc_revision(&doc) > empty_revision)
+	testing.expect(t, rope.tree_byte_count(&doc.tree) == 0)
+
+	empty_revision = txn.doc_revision(&doc)
+	expect_ok(t, process.output_clear(&output))
+	testing.expect(t, !output.has_update)
+	testing.expect(t, txn.doc_revision(&doc) == empty_revision)
+}
+
+@(test)
 test_output_flood_is_ordered_and_bounded :: proc(t: ^testing.T) {
 	handle, spawn_err := process.spawn({command = {HELPER, "flood"}}, context.allocator)
 	if !expect_ok(t, spawn_err) {

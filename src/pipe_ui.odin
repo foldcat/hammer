@@ -3,7 +3,6 @@ package main
 import "core:log"
 
 import command "core/command"
-import editing "core/editing"
 import errs "core/errs"
 import process "core/process"
 import rope "core/rope"
@@ -62,9 +61,9 @@ editor_run_external :: proc(cmd_context: ^command.Context, routing: command.Pipe
 	return editor_run_external_job(argv, &snapshot, routing, body, buffer)
 }
 
-// editor_run_external_job starts the command through the job service. Replace
-// and pipe output replaces the selection after validation; every job also has
-// one bounded live output window unless its output is explicitly discarded.
+// editor_run_external_job starts the command through the job service. Replace,
+// feed, and pipe output replaces the selection after validation. Plain commands
+// use reusable output windows; explicitly discarded jobs have no output.
 editor_run_external_job :: proc(argv: []string, snapshot: ^process.Context_Snapshot, routing: command.Pipe_Routing, body: Mouse_Text_Target, buffer: ^Editor_Buffer) -> errs.Error {
 	desc := process.Description{command = argv, working_dir = snapshot.working_dir, environment = snapshot.environment}
 	switch routing {
@@ -90,12 +89,7 @@ editor_run_external_job :: proc(argv: []string, snapshot: ^process.Context_Snaps
 		}
 		log.infof("shell: started replace id=%d", u64(id))
 	case .Feed:
-		input, read_err := editor_pipe_feed_input(body)
-		if !errs.ok(read_err) {
-			return read_err
-		}
-		defer delete(input, context.temp_allocator)
-		id, start_err := process.job_start_context(&editor.jobs, argv, snapshot, input, u64(body.window_id))
+		id, start_err := process.job_start_selection(&editor.jobs, desc, &buffer.doc, body.selection^, u64(buffer.id), buffer.generation, u64(body.window_id))
 		if !errs.ok(start_err) {
 			return start_err
 		}
@@ -105,22 +99,13 @@ editor_run_external_job :: proc(argv: []string, snapshot: ^process.Context_Snaps
 		if !errs.ok(start_err) {
 			return start_err
 		}
+		job := process.job_find(&editor.jobs, id)
+		if job == nil {
+			return errs.new(.Internal, "shell: started command has no job slot", allocator = permanent())
+		}
+		job.reuse_output = true
+		editor_job_output_detach_reused(job)
 		log.infof("shell: started command id=%d", u64(id))
 	}
 	return {}
-}
-
-// editor_pipe_feed_input reads the body selection as the stdin snapshot,
-// bounded by the selection-input budget.
-editor_pipe_feed_input :: proc(body: Mouse_Text_Target) -> ([]byte, errs.Error) {
-	range := editing.selection_range(body.selection^)
-	if range.end - range.start > process.MAX_SELECTION_INPUT_BYTES {
-		return nil, errs.newf(
-			.Resource_Limit,
-			"shell: selection exceeds the %d-byte input budget",
-			process.MAX_SELECTION_INPUT_BYTES,
-			allocator = permanent(),
-		)
-	}
-	return rope.tree_read_all(&body.doc.tree, range, context.temp_allocator)
 }

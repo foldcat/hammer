@@ -53,6 +53,7 @@ Job :: struct {
 	regex_search:    Regex_Search,
 	has_regex_search: bool,
 	discard_output:  bool,
+	reuse_output:    bool,
 	handle:          Handle,
 	pump:            Pump,
 	exit_status:     Exit_Status,

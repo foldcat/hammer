@@ -54,7 +54,105 @@ editor_job_output_close :: proc(buffer: ^Editor_Buffer) {
 	}
 }
 
+editor_job_output_reusable_buffer :: proc(job: ^process.Job) -> ^Editor_Buffer {
+	if job == nil || !job.reuse_output {
+		return nil
+	}
+	for index in 0 ..< view.MAX_VIEWS {
+		buffer := &editor.buffers[index]
+		if buffer.id != 0 && buffer.kind == .Job_Output && buffer.job_command == job.command &&
+			buffer.job_working_dir == job.working_dir && editor_first_view_for_buffer(buffer.id) != nil {
+			return buffer
+		}
+	}
+	return nil
+}
+
+editor_job_output_detach_reused :: proc(job: ^process.Job) {
+	buffer := editor_job_output_reusable_buffer(job)
+	if buffer == nil {
+		return
+	}
+	for index in 0 ..< process.MAX_JOBS {
+		state := &editor.job_outputs[index]
+		if state.buffer != buffer {
+			continue
+		}
+		if previous := process.job_find(&editor.jobs, state.id); previous != nil && previous.id != job.id {
+			previous.discard_output = true
+			previous.attachment = 0
+			if process.job_active(previous) {
+				_, stop_err := process.job_stop(&editor.jobs, previous.id, mouse_now_ms())
+				editor_report(stop_err)
+				log.infof("job: rerun stopping id=%d replacement=%d", u64(previous.id), u64(job.id))
+			}
+		}
+		editor_job_output_reset(state)
+	}
+}
+
+editor_job_output_copy_reuse_key :: proc(buffer: ^Editor_Buffer, job: ^process.Job) -> errs.Error {
+	if !job.reuse_output {
+		return {}
+	}
+	command, command_err := strings.clone(job.command, permanent())
+	if command_err != nil {
+		return errs.new(.Resource_Limit, "job: cannot copy output reuse command", allocator = permanent())
+	}
+	working_dir, working_dir_err := strings.clone(job.working_dir, permanent())
+	if working_dir_err != nil {
+		delete(command, permanent())
+		return errs.new(.Resource_Limit, "job: cannot copy output reuse directory", allocator = permanent())
+	}
+	buffer.job_command = command
+	buffer.job_working_dir = working_dir
+	return {}
+}
+
+editor_job_output_init_reused :: proc(state: ^Editor_Job_Output, job: ^process.Job, buffer: ^Editor_Buffer) -> errs.Error {
+	item := editor_first_view_for_buffer(buffer.id)
+	if item == nil {
+		return errs.new(.NotFound, "job: reused output buffer has no view", allocator = permanent())
+	}
+	name := fmt.aprintf("+Job %d", u64(job.id), allocator = permanent())
+	if name == "" {
+		return errs.new(.Resource_Limit, "job: cannot allocate output-window name", allocator = permanent())
+	}
+	output: process.Output_Buffer
+	if err := process.output_init(&output, &buffer.doc, {}, permanent()); !errs.ok(err) {
+		delete(name, permanent())
+		return err
+	}
+	state^ = {id = job.id, buffer = buffer, output = output}
+	was_dirty, follow := editor_job_output_snapshot(state)
+	cleared := rope.tree_byte_count(&buffer.doc.tree)
+	if err := process.output_clear(&state.output); !errs.ok(err) {
+		editor_job_output_reset(state)
+		delete(name, permanent())
+		return err
+	}
+	editor_job_output_apply(state, was_dirty, follow)
+	for index in 0 ..< view.MAX_VIEWS {
+		view_item := &editor.views.views[index]
+		if view_item.window_id != 0 && view_item.buffer_id == buffer.id {
+			view_item.first_line = 0
+			view_item.first_row = 0
+			view_item.wheel_remainder = 0
+			view_item.horizontal_offset = 0
+		}
+	}
+	delete(buffer.job_name, permanent())
+	buffer.job_name = name
+	job.attachment = u64(item.window_id)
+	editor_refresh_window_tags()
+	log.infof("job: output reused id=%d window=%d buffer=%d cleared=%d", u64(job.id), u64(item.window_id), u64(buffer.id), cleared)
+	return {}
+}
+
 editor_job_output_init :: proc(state: ^Editor_Job_Output, job: ^process.Job) -> errs.Error {
+	if buffer := editor_job_output_reusable_buffer(job); buffer != nil {
+		return editor_job_output_init_reused(state, job, buffer)
+	}
 	created_column := editor.workspace.column_count == 0
 	column_id: layout.Column_ID
 	if created_column {
@@ -84,6 +182,10 @@ editor_job_output_init :: proc(state: ^Editor_Job_Output, job: ^process.Job) -> 
 	if buffer.job_name == "" {
 		editor_destroy_buffer(buffer)
 		return errs.new(.Resource_Limit, "job: cannot allocate output-window name", allocator = permanent())
+	}
+	if err := editor_job_output_copy_reuse_key(buffer, job); !errs.ok(err) {
+		editor_destroy_buffer(buffer)
+		return err
 	}
 	output: process.Output_Buffer
 	if err := process.output_init(&output, &buffer.doc, {}, permanent()); !errs.ok(err) {
@@ -274,11 +376,11 @@ editor_job_poll_regex :: proc(job: ^process.Job, state: ^Editor_Job_Output, rema
 	}
 }
 
-editor_job_apply_conflict :: proc(output_buffer: ^Editor_Buffer) -> errs.Error {
-	if output_buffer == nil || !output_buffer.has_conflict_pipe || output_buffer.conflict_pipe.state != .Conflict {
+editor_job_apply_conflict :: proc(source_buffer: ^Editor_Buffer) -> errs.Error {
+	if source_buffer == nil || !source_buffer.has_conflict_pipe || source_buffer.conflict_pipe.state != .Conflict {
 		return errs.new(.NotFound, "job: no preserved selection conflict is available", allocator = permanent())
 	}
-	pipe := &output_buffer.conflict_pipe
+	pipe := &source_buffer.conflict_pipe
 	item, found := view.find(&editor.views, layout.Window_ID(pipe.target.window_id))
 	if !found || u64(item.buffer_id) != pipe.target.id {
 		return errs.new(.Conflict, "job: selection source view is no longer available", allocator = permanent())
@@ -303,7 +405,7 @@ editor_job_apply_conflict :: proc(output_buffer: ^Editor_Buffer) -> errs.Error {
 	item.selection = pipe.transaction.after_selection
 	editor_finish_edit(item, previous_revision, {})
 	process.selection_pipe_destroy(pipe)
-	output_buffer.has_conflict_pipe = false
+	source_buffer.has_conflict_pipe = false
 	log.infof(
 		"job: selection conflict applied id=%d window=%d buffer=%d revision=%d bytes=%d",
 		request_id,
@@ -315,22 +417,83 @@ editor_job_apply_conflict :: proc(output_buffer: ^Editor_Buffer) -> errs.Error {
 	return {}
 }
 
-// The output buffer takes ownership of a fully replayed conflict so the job
-// slot can be released without losing the explicit Apply action.
-editor_job_preserve_conflict :: proc(state: ^Editor_Job_Output, job: ^process.Job) {
-	assert(state != nil && state.buffer != nil && job != nil && job.has_selection_pipe)
-	assert(!state.buffer.has_conflict_pipe)
-	state.buffer.conflict_pipe = job.selection_pipe
-	state.buffer.has_conflict_pipe = true
+// The source buffer owns a preserved conflict after its job slot is released.
+// Apply subsequently targets that source view's current selection.
+editor_job_preserve_source_conflict :: proc(job: ^process.Job) {
+	pipe := &job.selection_pipe
+	item, found := view.find(&editor.views, layout.Window_ID(pipe.target.window_id))
+	if !found || u64(item.buffer_id) != pipe.target.id {
+		editor_report(errs.new(.Conflict, "job: cannot preserve conflicted output without its source view", allocator = permanent()))
+		return
+	}
+	buffer := editor_buffer_by_id(item.buffer_id)
+	if buffer == nil || buffer.generation != pipe.target.generation {
+		editor_report(errs.new(.Conflict, "job: cannot preserve conflicted output without its source buffer", allocator = permanent()))
+		return
+	}
+	if buffer.has_conflict_pipe {
+		editor_report(errs.new(.Resource_Limit, "job: source buffer already has conflicted output to Apply", allocator = permanent()))
+		return
+	}
+	buffer.conflict_pipe = job.selection_pipe
+	buffer.has_conflict_pipe = true
 	job.selection_pipe = {}
 	job.has_selection_pipe = false
 	editor_refresh_window_tags()
 	log.infof(
 		"job: selection conflict preserved id=%d window=%d bytes=%d",
 		u64(job.id),
-		job.attachment,
-		state.buffer.conflict_pipe.output_len,
+		u64(item.window_id),
+		buffer.conflict_pipe.output_len,
 	)
+}
+
+editor_poll_selection_job :: proc(job: ^process.Job, state: ^Editor_Job_Output, remaining: ^int) {
+	if state.id != job.id {
+		editor_job_output_reset(state)
+		state.id = job.id
+	}
+	pipe := &job.selection_pipe
+	if pipe.state == .Collecting && remaining^ > 0 {
+		consumed, consume_err := process.selection_pipe_consume(pipe, &job.pump, nil, remaining^)
+		remaining^ -= consumed
+		if !errs.ok(consume_err) {
+			editor_report(consume_err)
+			if process.job_active(job) {
+				_, stop_err := process.job_stop(&editor.jobs, job.id, mouse_now_ms())
+				editor_report(stop_err)
+			}
+		}
+	}
+	output_done := process.pump_drained(&job.pump)
+	if pipe.state == .Collecting && ((job.state == .Exited && output_done) || job.state == .FailedToStart) {
+		if job.state == .Exited && job.exit_status.success && job.err.kind == .None {
+			process.selection_pipe_ready(pipe)
+		} else {
+			process.selection_pipe_abort(pipe)
+		}
+	}
+	if pipe.state == .Ready {
+		apply_err := editor_job_apply_selection(job)
+		if !errs.ok(apply_err) {
+			log.warnf("job: selection apply failed id=%d kind=%v message=%s", u64(job.id), apply_err.kind, apply_err.message)
+			errs.destroy(&apply_err)
+		}
+	}
+	if process.job_releasable(job) {
+		if job.err.kind != .None && !state.error_reported {
+			state.error_reported = true
+			editor_report(errs.new(job.err.kind, job.err.message, allocator = permanent()))
+		}
+		if job.has_selection_pipe && pipe.state == .Conflict {
+			editor_job_preserve_source_conflict(job)
+		}
+		id := job.id
+		release_err := process.job_release(&editor.jobs, id)
+		editor_report(release_err)
+		log.infof("job: released id=%d", u64(id))
+		editor_job_output_reset(state)
+	}
 }
 
 editor_job_quit_pending_count :: proc() -> int {
@@ -369,13 +532,15 @@ editor_poll_jobs :: proc() {
 		if job.id == 0 {
 			continue
 		}
+		if job.has_selection_pipe {
+			editor_poll_selection_job(job, state, &remaining)
+			editor.job_output_cursor = (index + 1) % process.MAX_JOBS
+			continue
+		}
 		if job.discard_output {
 			editor_job_drain_records(job)
 		} else if state.failed_id == job.id {
 			editor_job_drain_records(job)
-			if job.has_selection_pipe {
-				process.selection_pipe_abort(&job.selection_pipe)
-			}
 			if job.has_regex_search {
 				process.regex_search_abort(&job.regex_search)
 			}
@@ -392,48 +557,6 @@ editor_poll_jobs :: proc() {
 			if state.id == job.id {
 				if job.has_regex_search {
 					editor_job_poll_regex(job, state, &remaining)
-				} else if job.has_selection_pipe {
-					pipe := &job.selection_pipe
-					if pipe.state == .Collecting && remaining > 0 {
-						was_dirty, follow := editor_job_output_snapshot(state)
-						consumed, consume_err := process.selection_pipe_consume(pipe, &job.pump, &state.output, remaining)
-						remaining -= consumed
-						editor_job_output_apply(state, was_dirty, follow)
-						if !errs.ok(consume_err) {
-							editor_job_queue_error(state, consume_err.message)
-							errs.destroy(&consume_err)
-							if process.job_active(job) {
-								_, stop_err := process.job_stop(&editor.jobs, job.id, mouse_now_ms())
-								editor_report(stop_err)
-							}
-						}
-					}
-					output_done := process.pump_drained(&job.pump)
-					if pipe.state == .Collecting && ((job.state == .Exited && output_done) || job.state == .FailedToStart) {
-						if job.state == .Exited && job.exit_status.success && job.err.kind == .None {
-							process.selection_pipe_ready(pipe)
-						} else {
-							process.selection_pipe_abort(pipe)
-						}
-					}
-					if pipe.state == .Ready {
-						apply_err := editor_job_apply_selection(job)
-						if !errs.ok(apply_err) {
-							log.warnf("job: selection apply failed id=%d kind=%v message=%s", u64(job.id), apply_err.kind, apply_err.message)
-							editor_job_queue_error(state, apply_err.message)
-							errs.destroy(&apply_err)
-						}
-					}
-					if (pipe.state == .Conflict || pipe.state == .Failed) && remaining > 0 && !process.selection_pipe_replay_done(pipe) {
-						was_dirty, follow := editor_job_output_snapshot(state)
-						replayed, replay_err := process.selection_pipe_replay(pipe, &state.output, remaining)
-						remaining -= replayed
-						editor_job_output_apply(state, was_dirty, follow)
-						if !errs.ok(replay_err) {
-							editor_report(replay_err)
-							pipe.replay_offset = pipe.output_len
-						}
-					}
 				} else if remaining > 0 {
 					was_dirty, follow := editor_job_output_snapshot(state)
 					consumed, consume_err := process.output_consume(&state.output, &job.pump, min(remaining, process.DEFAULT_OUTPUT_BATCH_BYTES))
@@ -459,18 +582,9 @@ editor_poll_jobs :: proc() {
 			}
 			if !job.discard_output && state.failed_id != job.id {
 				can_release = editor_job_flush_error(state, &remaining)
-				if job.has_selection_pipe {
-					pipe := &job.selection_pipe
-					if (pipe.state == .Conflict || pipe.state == .Failed) && !process.selection_pipe_replay_done(pipe) {
-						can_release = false
-					}
-				}
 			}
 			if can_release {
 				id := job.id
-				if !job.discard_output && state.failed_id != id && job.has_selection_pipe && job.selection_pipe.state == .Conflict {
-					editor_job_preserve_conflict(state, job)
-				}
 				if !job.discard_output && state.failed_id != id {
 					was_dirty, follow := editor_job_output_snapshot(state)
 					finish_err := process.output_finish(&state.output)

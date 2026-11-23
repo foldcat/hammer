@@ -9,14 +9,15 @@ Every external shell command now starts through the job service immediately.
 The blocking `os.process_exec` executor and the `Async` command prefix are gone.
 Built-in editor actions remain immediate UI operations. Plain commands and the
 `>`, `<`, and `|` routing forms retain their selection/stdin semantics, with
-revision-validated asynchronous replacement for `<` and `|`.
+revision-validated asynchronous replacement for all three selection forms.
 
-Each invocation has one bounded live `+Job <id>` output window rather than
-routing plain/feed output to `+Errors`. Closing a live output window switches
-the job to bounded output draining: the window is not reopened, the process is
-not killed, and `Jobs` still lists it so `Kill <id>` can stop it. This also
-removes the dangling output-buffer pointer that closing a job window previously
-left behind.
+Plain commands have a bounded live `+Job <id>` output window rather than routing
+output to `+Errors`; reruns of the same command in the same directory reuse it.
+Selection forms write stdout directly to the source buffer and open no job
+window. Closing a live plain-command output window switches the job to bounded
+output draining: the window is not reopened, the process is not killed, and
+`Jobs` still lists it so `Kill <id>` can stop it. This also removes the dangling
+output-buffer pointer that closing a job window previously left behind.
 
 ## Implementation
 
@@ -34,9 +35,9 @@ left behind.
 
 The built-in X11 scenario now checks:
 
-- Plain, pipe, replace, and feed commands each create exactly one job output
-  window and no `+Errors` output window.
-- `<` and `|` replace selections asynchronously with the expected file bytes.
+- Plain commands create one job output window, and an identical rerun reuses it.
+- Pipe, replace, and feed commands create no job or `+Errors` output window.
+- `>`, `<`, and `|` replace selections asynchronously with the expected file bytes.
 - `Async` has no special prefix behavior and is passed to the shell as text.
 - A long-running plain command stays active after its output window is closed,
   does not reopen that window, appears in `Jobs`, and is killed by ID.

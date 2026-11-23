@@ -13,9 +13,9 @@ fixed 1 MiB default buffer with a validated 16 MiB hard limit; exceeding the
 limit fails the pipe without applying partial output.
 
 Pump consumption remains nonblocking and bounded by the caller's frame budget.
-Stdout is collected for replacement while stderr continues through the existing
-transactional job-output buffer. A pipe becomes ready only after successful
-process exit and complete pump drainage.
+Stdout is collected for replacement while stderr is drained without creating a
+job-output buffer. A pipe becomes ready only after successful process exit and
+complete pump drainage.
 
 ## Transactional replacement and conflicts
 
@@ -26,15 +26,13 @@ and preserves the original direction. Other views of the buffer transform their
 selections through the ordinary view path.
 
 Stale identity/revision and unavailable source-view conflicts leave the document
-unchanged. Failed, cancelled, stale, or overflowing pipes replay captured stdout
-into the bounded job-output window before release, so unapplied output is not
-silently discarded. Explicit reapplication and richer stale-target behavior are
-M09.07, not part of this slice.
+unchanged. A complete conflicted result transfers to the source buffer for
+explicit `Apply`; failed, cancelled, and overflowing pipes do not apply partial
+output or open a job window. Errors use the ordinary editor error path.
 
-The source window is stored in the selection target rather than `job.attachment`:
-opening the output window deliberately reassigns the latter for Stop routing.
-Ordinary external command invocation remains M09.10; the only product launch
-added here is the explicit `HAMMER_TEST_PIPE_JOB` integration hook.
+The source window is stored in the selection target and remains the job's Stop
+attachment. Ordinary external command invocation remains M09.10; the only product
+launch added here is the explicit `HAMMER_TEST_PIPE_JOB` integration hook.
 
 ## Tests
 

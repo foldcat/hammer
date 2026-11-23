@@ -21,14 +21,13 @@ document, selections, or undo history.
 
 ## Preserved output and explicit Apply
 
-Conflicted stdout is still replayed into the bounded job-output window. Once
-replay and error output drain, ownership of the complete `Selection_Pipe` moves
-from the finished job to that output buffer. The process slot can therefore be
-released without losing the fixed-capacity output or target metadata. Destroying
-the output buffer releases an unapplied conflict; successful application releases
-it immediately.
+Once output drains, ownership of a conflicted `Selection_Pipe` moves from the
+finished job to the source buffer without changing that buffer's text or opening
+a job window. The process slot can therefore be released without losing the
+fixed-capacity output or target metadata. Destroying the source buffer releases
+an unapplied conflict; successful application releases it immediately.
 
-A conflicted job window offers `Del Apply`. `Apply` revalidates the source window,
+A conflicted source window offers `Del Apply`. `Apply` revalidates the source window,
 buffer identity/generation, request ID, and current selection bounds. It replaces
 the source view's **current** selection at the current revision, never the stale
 range, so only text explicitly selected by the user is overwritten. The result is
@@ -44,8 +43,9 @@ undo. Allocator tracking is clean.
 
 `tests/integration/builtins/x11_harness.py` starts a delayed purpose-built filter,
 replaces the source selection before completion, and waits for the conflict. It
-saves and checks the newer text, executes `Apply` in the real job window, saves
+saves and checks the newer text, executes `Apply` in the source window, saves
 again, and checks that the preserved output was inserted at the current caret.
+The scenario also verifies that no job window opens.
 
 ## Validation
 

@@ -9,7 +9,7 @@ A command executed by middle-click now runs directly in the shell:
 
 - `|command` — pipe: selection becomes stdin, stdout replaces the selection.
 - `<command` — replace: stdin is empty, stdout replaces the selection.
-- `>command` — feed: selection becomes stdin, stdout goes to `+Errors`.
+- `>command` — feed: selection becomes stdin, stdout replaces the selection.
 - `command` (plain, matching no built-in or named filter) — stdin is empty,
   stdout/stderr go to `+Errors`.
 

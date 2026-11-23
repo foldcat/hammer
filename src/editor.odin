@@ -56,6 +56,8 @@ Editor_Buffer :: struct {
 	saved_revision: u64,
 	regex_history:  address.Regex_History,
 	job_name:       string,
+	job_command:    string,
+	job_working_dir: string,
 	conflict_pipe:  process.Selection_Pipe,
 	has_conflict_pipe: bool,
 	terminal:       Editor_Terminal,
@@ -129,6 +131,8 @@ editor_destroy_buffer :: proc(buffer: ^Editor_Buffer) {
 	txn.doc_destroy(&buffer.doc)
 	delete(buffer.path, permanent())
 	delete(buffer.job_name, permanent())
+	delete(buffer.job_command, permanent())
+	delete(buffer.job_working_dir, permanent())
 	buffer^ = {}
 	editor.buffer_count -= 1
 }

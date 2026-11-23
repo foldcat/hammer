@@ -164,6 +164,7 @@ def run_external_case(
     route_name: str,
     content: bytes,
     expect_replace: bool,
+    rerun: bool = False,
 ) -> tuple[bytes, str]:
     """Runs one external command in a fresh editor and returns the file bytes and log text."""
     source = sandbox / f"route-{route_name}.txt"
@@ -198,14 +199,34 @@ def run_external_case(
                 wait_for_log(log_path, "job: selection replaced", args.timeout)
                 execute(x11, window, "Putall", 10, 10, args.timeout, log_path, 1)
                 wait_for_log(log_path, f"file: saved {source.name}", args.timeout)
-            wait_for_log(log_path, "job: output opened", args.timeout)
+            if route_name == "plain":
+                wait_for_log(log_path, "job: output opened", args.timeout)
             wait_for_log(log_path, "job: released id=", args.timeout)
+            if rerun:
+                execute_pipe(x11, window, command)
+                wait_for_log(log_path, f'mouse: execute "{body}" routing={route_name}', args.timeout, 2)
+                wait_for_log(log_path, "shell: started command id=", args.timeout, 2)
+                wait_for_log(log_path, "job: output reused", args.timeout)
+                wait_for_log(log_path, "job: released id=", args.timeout, 2)
             log_text = log_path.read_text(encoding="utf-8", errors="replace")
-            if log_text.count("job: output opened") != 1 or "errors: opened" in log_text:
-                raise HarnessFailure(f"{command!r} did not produce exactly one job output window and no +Errors window")
-            output_match = re.search(r"job: output opened id=\d+ window=\d+ buffer=\d+ column=(\d+)", log_text)
-            if output_match is None or output_match.group(1) != "2":
-                raise HarnessFailure(f"{command!r} did not append its output window to the rightmost column")
+            if "errors: opened" in log_text:
+                raise HarnessFailure(f"{command!r} unexpectedly opened +Errors")
+            if route_name != "plain":
+                if "job: output opened" in log_text:
+                    raise HarnessFailure(f"{command!r} opened a job window instead of replacing the source selection")
+            else:
+                if log_text.count("job: output opened") != 1:
+                    raise HarnessFailure(f"{command!r} did not produce exactly one job output window")
+                output_match = re.search(r"job: output opened id=\d+ window=\d+ buffer=\d+ column=(\d+)", log_text)
+                if output_match is None or output_match.group(1) != "2":
+                    raise HarnessFailure(f"{command!r} did not append its output window to the rightmost column")
+            if rerun:
+                opened = re.search(r"job: output opened id=(\d+) window=(\d+) buffer=(\d+)", log_text)
+                reused = re.search(r"job: output reused id=(\d+) window=(\d+) buffer=(\d+) cleared=(\d+)", log_text)
+                if opened is None or reused is None or opened.group(1) == reused.group(1) or opened.groups()[1:] != reused.groups()[1:3]:
+                    raise HarnessFailure("plain command rerun did not reuse the same output window and buffer with a new job")
+                if int(reused.group(4)) <= 0 or log_text.count("job: output reused") != 1:
+                    raise HarnessFailure("plain command rerun did not clear the previous output exactly once")
             if not expect_replace and "job: selection replaced" in log_text:
                 raise HarnessFailure(f"{command!r} unexpectedly replaced the selection")
             x11.quit()
@@ -573,13 +594,16 @@ def main() -> int:
                 select_all(x11)
                 type_text(x11, "newer")
                 wait_for_log(conflict_log_path, "job: selection conflict preserved", args.timeout)
-                if "job: selection replaced" in conflict_log_path.read_text(encoding="utf-8", errors="replace"):
+                conflict_log = conflict_log_path.read_text(encoding="utf-8", errors="replace")
+                if "job: selection replaced" in conflict_log:
                     raise HarnessFailure("conflicted selection output replaced newer edits")
+                if "job: output opened" in conflict_log:
+                    raise HarnessFailure("conflicted selection output opened a job window instead of staying on the source buffer")
                 execute(x11, conflict_window, "Putall", 10, 10, args.timeout, conflict_log_path, 1)
                 wait_for_log(conflict_log_path, "file: saved pipe.txt", args.timeout, 1)
                 if pipe_source.read_bytes() != b"newer":
                     raise HarnessFailure(f"conflict did not preserve newer edits: {pipe_source.read_bytes()!r}")
-                execute(x11, conflict_window, "Apply", 540, 330, args.timeout, conflict_log_path, 1)
+                execute(x11, conflict_window, "Apply", 60, 52, args.timeout, conflict_log_path, 1)
                 wait_for_log(conflict_log_path, "job: selection conflict applied", args.timeout)
                 execute(x11, conflict_window, "Putall", 10, 10, args.timeout, conflict_log_path, 2)
                 wait_for_log(conflict_log_path, "file: saved pipe.txt", args.timeout, 2)
@@ -703,7 +727,9 @@ def main() -> int:
                 start_pos = log_text.find("filter: invoke-pipe started replace-selection")
                 if echo_pos < 0 or start_pos < 0 or echo_pos > start_pos:
                     raise HarnessFailure("filter echo did not precede the job start")
-                print("PASS: replace-selection filter pipes the body selection and echoes before run")
+                if "job: output opened" in log_text:
+                    raise HarnessFailure("replace-selection filter opened a job window")
+                print("PASS: replace-selection filter pipes the body selection directly and echoes before run")
 
                 execute(x11, invoke_window, "invoke-out", 60, 52, args.timeout, invoke_log_path, 1)
                 wait_for_log(invoke_log_path, "filter: invoke-out started output-window", args.timeout)
@@ -794,9 +820,9 @@ def main() -> int:
                     after_log = invoke_log_path.read_text(encoding="utf-8", errors="replace")
                     if after_log.count("errors: opened") != errors_opened_before or after_log.count("errors: appended") != errors_appended_before:
                         raise HarnessFailure("Raku spawned or wrote to a redundant +Errors window")
-                    if after_log.count("job: output opened") - job_windows_before != 4:
-                        raise HarnessFailure("Raku did not create exactly one job window per invocation")
-                    print("PASS: Raku spawns one job window only and no +Errors echo; temp files are reclaimed")
+                    if after_log.count("job: output opened") - job_windows_before != 3:
+                        raise HarnessFailure("Raku selection replacement opened a job window or output jobs were not isolated")
+                    print("PASS: Raku replacement writes directly, output jobs stay isolated, and temp files are reclaimed")
                     execute(x11, invoke_window, "Putall", 10, 10, args.timeout, invoke_log_path, 3)
                     wait_for_log(invoke_log_path, "file: saved invoke.txt", args.timeout, 3)
 
@@ -823,10 +849,10 @@ def main() -> int:
             # M10.detour-2: every external command runs through the job service.
             route_content = "route α β\n".encode("utf-8")
 
-            plain_result, plain_log = run_external_case(args, binary, sandbox, x11, job_helper, f"{job_helper.name} echo", f"{job_helper.name} echo", "plain", route_content, False)
+            plain_result, plain_log = run_external_case(args, binary, sandbox, x11, job_helper, f"{job_helper.name} echo", f"{job_helper.name} echo", "plain", route_content, False, rerun=True)
             if plain_result != route_content:
                 raise HarnessFailure(f"plain command modified the source file: {plain_result!r}")
-            print("PASS: plain command runs asynchronously with one live job output window in the rightmost column")
+            print("PASS: plain command runs asynchronously and reruns replace output in the same window")
 
             run_global_external_case(args, binary, sandbox, x11, job_helper)
             print("PASS: global-tag command runs without a body and recreates a column for its output")
@@ -841,10 +867,11 @@ def main() -> int:
                 raise HarnessFailure(f"< command wrote unexpected bytes: {replace_result!r}")
             print("PASS: < replaces the selection with command output over empty stdin")
 
-            feed_result, feed_log = run_external_case(args, binary, sandbox, x11, job_helper, f">{job_helper.name} echo", f"{job_helper.name} echo", "feed", route_content, False)
-            if feed_result != route_content:
-                raise HarnessFailure(f"> command modified the source file: {feed_result!r}")
-            print("PASS: > feeds the selection to a job output window without replacing it")
+            feed_result, feed_log = run_external_case(args, binary, sandbox, x11, job_helper, f">{job_helper.name} echo", f"{job_helper.name} echo", "feed", route_content, True)
+            expected_feed = b"stdout=" + route_content + b"\n"
+            if feed_result != expected_feed:
+                raise HarnessFailure(f"> command wrote unexpected bytes: {feed_result!r}")
+            print("PASS: > feeds the selection and replaces it directly without a job window")
 
             for log_text in (plain_log, pipe_log, feed_log):
                 if "pipe: echo" in log_text:

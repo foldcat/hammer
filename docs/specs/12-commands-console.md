@@ -13,7 +13,7 @@ Exited
 FailedToStart
 ```
 
-Every external shell command starts as a job; there is no synchronous external-command mode or `Async` command prefix. Built-in editor actions remain immediate UI operations. Plain commands can run from global, column, or window tags without a body window; selection-routing forms still require their source body. Each job has at most one bounded live `+Job <id>` output window, appended at the bottom of the rightmost column. If no columns exist, output creation adds a column for that window. Closing the output window drains subsequent output without killing the job or reopening the window, so `Jobs` and `Kill <id>` remain available.
+Every external shell command starts as a job; there is no synchronous external-command mode or `Async` command prefix. Built-in editor actions remain immediate UI operations. Plain commands can run from global, column, or window tags without a body window; selection-routing forms still require their source body. Plain commands and explicitly output-routed jobs have at most one bounded live `+Job <id>` output window, appended at the bottom of the rightmost column. Repeating a plain command in the same working directory reuses and clears its existing output window. If no columns exist, output creation adds a column for that window. Closing the output window drains subsequent output without killing the job or reopening the window, so `Jobs` and `Kill <id>` remain available. Selection-routing jobs write successful stdout directly to their source buffer and do not open job windows.
 
 Each job records:
 
@@ -80,7 +80,11 @@ Support the documented Acme meanings of:
 |command
 ```
 
-Typically these correspond to feeding selected text to a process, replacing from process output, and piping selected text through a process—but use the compatibility specification for exact details.
+- `>command` feeds the selection to stdin and replaces it with stdout.
+- `<command` provides empty stdin and replaces the selection with stdout.
+- `|command` feeds the selection to stdin and replaces it with stdout.
+
+All three collect bounded stdout asynchronously and apply one transaction directly to the source buffer. They do not open `+Job` windows; stderr is drained without creating an output window.
 
 ### Asynchronous replacement rule
 
@@ -94,8 +98,8 @@ When a command starts:
 If the user edits that range while the command runs:
 
 - Do not overwrite the new work.
-- Preserve command output in an output window.
-- Offer explicit application/replacement.
+- Preserve command output on the source buffer without changing its text.
+- Offer explicit `Apply` from the source window to replace its current selection.
 
 Successful replacement is one undo transaction.
 

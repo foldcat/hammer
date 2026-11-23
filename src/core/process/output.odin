@@ -144,6 +144,46 @@ output_append_decoded :: proc(buffer: ^Output_Buffer) -> errs.Error {
 	return {}
 }
 
+// output_clear starts a new output generation in the same document. The clear
+// is one transaction; decoder state and pending partial lines are replaced only
+// after that transaction succeeds.
+output_clear :: proc(buffer: ^Output_Buffer) -> errs.Error {
+	if buffer == nil || buffer.doc == nil {
+		return errs.new(.Invalid_Input, "process: invalid output clear input")
+	}
+	stream: console.Stream
+	if err := console.stream_init(&stream, buffer.allocator); !errs.ok(err) {
+		return err
+	}
+	buffer.has_update = false
+	end := rope.tree_byte_count(&buffer.doc.tree)
+	if end > 0 {
+		buffer.ops[0] = txn.Delete{range = {0, end}}
+		buffer.update = {
+			transaction = {
+				source = .Command_Output,
+				base_revision = txn.doc_revision(buffer.doc),
+				ops = buffer.ops[:1],
+				after_selection = {},
+			},
+			end = 0,
+			trimmed = 0,
+		}
+		if err := txn.doc_apply(buffer.doc, &buffer.update.transaction, buffer.allocator); !errs.ok(err) {
+			console.stream_destroy(&stream)
+			return err
+		}
+		buffer.has_update = true
+		txn.doc_collapse_history(buffer.doc)
+	}
+	console.stream_destroy(&buffer.stream)
+	buffer.stream = stream
+	buffer.pending_len = 0
+	resize(&buffer.decoded, 0)
+	buffer.dropped_bytes = 0
+	return {}
+}
+
 // output_finish flushes the console stream's trailing state — a truncated
 // UTF-8 replacement and any partial trailing line — into the document. Call it
 // once the pump has drained and no further output is expected. It is

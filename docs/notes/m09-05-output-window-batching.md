@@ -27,7 +27,12 @@ unchanged. Pending data is retained for retry if transaction application fails.
 
 ## Editor integration
 
-Each job receives a separate `+Job <id>` output window without changing focus.
+Each new command receives a `+Job <id>` output window without changing focus.
+Rerunning a plain shell command with the same command text and working directory
+reuses that window: any previous run is cancelled and detached, and the retained
+output is cleared in one transaction before the new job streams into it. Other
+plain commands and working directories keep separate output. Selection-routing
+jobs write successful stdout directly to the source buffer without a job window.
 `Job_Output` is distinct from `+Errors`: it cannot use file save/reload paths,
 its tag offers `Del Stop`, and its window becomes the job's Stop attachment. The
 log remains visible after the process slot is released. Failed starts and stream
@@ -53,7 +58,10 @@ oversized writes.
 `tests/integration/builtins/x11_harness.py` now starts both the ignore and flood
 helpers. It requires the flood job to release through the real output-window
 path, checks updated view IDs/counts, and retains the existing built-in and Stop
-scenarios. The explicit `HAMMER_TEST_FLOOD_JOB` hook is test-only; ordinary
+scenarios. The plain-command case also runs the same command twice and verifies
+that a new job ID reuses the original window and buffer while clearing its old
+content. The output unit tests cover decoder-state reset and transactional
+clearing. The explicit `HAMMER_TEST_FLOOD_JOB` hook is test-only; ordinary
 external command routing remains M09.10.
 
 ## Validation

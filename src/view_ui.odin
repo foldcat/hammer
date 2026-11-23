@@ -157,13 +157,12 @@ editor_window_commands :: proc(buffer: ^Editor_Buffer, item: ^view.View) -> stri
 	if buffer == nil {
 		return "Del"
 	}
+	if buffer.has_conflict_pipe && buffer.conflict_pipe.state == .Conflict {
+		return "Del Apply"
+	}
 	switch buffer.kind {
 	case .Job_Output:
-		commands := "Del Stop"
-		if buffer.has_conflict_pipe && buffer.conflict_pipe.state == .Conflict {
-			commands = "Del Apply"
-		}
-		return commands
+		return "Del Stop"
 	case .Directory:
 		return "Del Get"
 	case .File:

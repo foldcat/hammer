@@ -172,8 +172,8 @@ editor_command_apply :: proc(cmd_context: ^command.Context, invocation: command.
 		return errs.new(.NotFound, "job: Apply requires a conflicted job output window", allocator = permanent())
 	}
 	buffer := editor_buffer_for_view(body.item)
-	if buffer == nil || buffer.kind != .Job_Output {
-		return errs.new(.Unsupported, "job: Apply is available only in a job output window", allocator = permanent())
+	if buffer == nil {
+		return errs.new(.Internal, "job: Apply source window has no buffer", allocator = permanent())
 	}
 	return editor_job_apply_conflict(buffer)
 }
