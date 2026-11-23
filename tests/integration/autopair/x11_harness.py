@@ -14,7 +14,7 @@ import time
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "typing"))
-from x11_harness import HarnessFailure, X11, read_external_clipboard, wait_for_exit
+from x11_harness import HarnessFailure, X11, open_untitled, read_external_clipboard, wait_for_exit
 
 
 def copy_document(
@@ -73,6 +73,7 @@ def run_case(
             x11.lib.XSetInputFocus(x11.display, window, 1, 0)
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
+            open_untitled(x11, window, log_path, timeout)
             initial = x11.pixels(window)
 
             for keysym in (ord("("), ord(")"), 0xFF51, 0xFF08, ord("z")):

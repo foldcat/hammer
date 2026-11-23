@@ -14,7 +14,7 @@ import time
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "typing"))
-from x11_harness import ClipboardOwner, HarnessFailure, X11, read_external_clipboard, wait_for_exit
+from x11_harness import ClipboardOwner, HarnessFailure, X11, open_untitled, read_external_clipboard, wait_for_exit
 
 FULL_TEXT = "A👩\u200d💻👍🏽👨\u200d👩\u200d👧\u200d👦❤️🇨🇦1️⃣B"
 
@@ -94,6 +94,7 @@ def main() -> int:
             x11.lib.XSetInputFocus(x11.display, window, 1, 0)
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
+            open_untitled(x11, window, log_path, args.timeout)
             initial = x11.pixels(window)
 
             clipboard_owner = ClipboardOwner(clipboard_peer, payload_path, sandbox, args.timeout)

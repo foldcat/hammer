@@ -11,8 +11,9 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
-from x11_harness import HarnessFailure, X11, wait_for_exit  # noqa: E402
+from x11_harness import HarnessFailure, X11, open_untitled, wait_for_exit  # noqa: E402
 
 
 def wait_for_log(log_path: Path, needle: str, timeout: float) -> None:
@@ -175,8 +176,12 @@ def main() -> int:
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
 
+            wait_for_log(empty_log, "startup: columns=2 windows=1 buffers=1 active_window=2", args.timeout)
+            wait_for_log(empty_log, f"directory: opened {sandbox}/ buffer=1", args.timeout)
+            print("PASS: no-argument startup has two columns and only the working-directory explorer")
+            open_untitled(x11, window, empty_log, args.timeout)
             execute(x11, window, "Del", 60, 52)
-            wait_for_log(empty_log, "view: closed window 1; 1 views remain", args.timeout)
+            wait_for_log(empty_log, "view: closed window 3; 1 views remain", args.timeout)
             execute(x11, window, "Del", 500, 52)
             wait_for_log(empty_log, "view: closed window 2; 0 views remain", args.timeout)
             if process.poll() is not None:

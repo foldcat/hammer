@@ -317,6 +317,18 @@ class X11:
             self.lib.XDestroyImage(image)
 
 
+def open_untitled(x11: X11, window: int, log_path: Path, timeout: float) -> None:
+    x11.move(window, 40, 30)
+    x11.button(2, True)
+    x11.button(2, False)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if "view: New window=" in log_path.read_text(encoding="utf-8", errors="replace"):
+            return
+        time.sleep(0.05)
+    raise HarnessFailure(f"timed out creating an untitled buffer; log: {log_path}")
+
+
 def wait_for_exit(process: subprocess.Popen[bytes], timeout: float, log_path: Path) -> None:
     try:
         result = process.wait(timeout=timeout)
@@ -363,6 +375,7 @@ def main() -> int:
             x11.lib.XSetInputFocus(x11.display, window, 1, 0)
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
+            open_untitled(x11, window, log_path, args.timeout)
             initial = x11.pixels(window)
 
             for keysym in (ord("a"), ord("b"), ord("c"), 0xFF0D, ord("d")):

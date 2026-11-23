@@ -11,8 +11,9 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
-from x11_harness import HarnessFailure, X11, wait_for_exit  # noqa: E402
+from x11_harness import HarnessFailure, X11, open_untitled, wait_for_exit  # noqa: E402
 
 
 def wait_for_log(log_path: Path, needle: str, timeout: float) -> None:
@@ -69,6 +70,7 @@ def main() -> int:
             x11.lib.XSetInputFocus(x11.display, window, 1, 0)
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
+            open_untitled(x11, window, log_path, args.timeout)
 
             body_initial = x11.pixels(window, 2, 390, 66, 320)
             window_tag_initial = x11.pixels(window, 22, 390, 46, 66)
@@ -89,7 +91,7 @@ def main() -> int:
             x11.button(1, True)
             x11.button(1, False)
             x11.tap(ord("A"))
-            wait_for_log(log_path, 'tag: window 1 generated "New Del Put | "', args.timeout)
+            wait_for_log(log_path, 'tag: window 3 generated "New Del Put | "', args.timeout)
             if x11.pixels(window, 2, 390, 66, 320) == body_initial:
                 raise HarnessFailure("body typing did not change the body")
             print("PASS: dirty body state generates Put in the window tag")
@@ -97,7 +99,7 @@ def main() -> int:
             x11.key(0xFFE3, True)
             x11.tap(ord("z"))
             x11.key(0xFFE3, False)
-            wait_for_log(log_path, 'tag: window 1 generated "New Del | "', args.timeout)
+            wait_for_log(log_path, 'tag: window 3 generated "New Del | "', args.timeout)
             if x11.pixels(window, 2, 390, 66, 320) != body_initial:
                 raise HarnessFailure("body undo did not restore the body")
             print("PASS: clean body state removes generated Put without undoing the tag")
@@ -273,6 +275,7 @@ def main() -> int:
                 x11.lib.XSetInputFocus(x11.display, window, 1, 0)
                 x11.lib.XSync(x11.display, 0)
                 time.sleep(0.3)
+                open_untitled(x11, window, blank_log, args.timeout)
 
                 # The blank tag is "New Del | ". Typing inside the generated
                 # commands region is allowed.
@@ -309,6 +312,7 @@ def main() -> int:
                 x11.lib.XSetInputFocus(x11.display, window, 1, 0)
                 x11.lib.XSync(x11.display, 0)
                 time.sleep(0.3)
+                open_untitled(x11, window, save_log, args.timeout)
 
                 # Replace the placeholder name "New" with a real path.
                 x11.move(window, 22, 52)

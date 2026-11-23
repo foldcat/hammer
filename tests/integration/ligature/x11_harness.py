@@ -14,7 +14,7 @@ import time
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "typing"))
-from x11_harness import HarnessFailure, X11, wait_for_exit
+from x11_harness import HarnessFailure, X11, open_untitled, wait_for_exit
 
 
 def run_case(x11: X11, binary: Path, label: str, sandbox: Path, timeout: float) -> bytes:
@@ -37,6 +37,7 @@ def run_case(x11: X11, binary: Path, label: str, sandbox: Path, timeout: float) 
             x11.lib.XSetInputFocus(x11.display, window, 1, 0)
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
+            open_untitled(x11, window, log_path, timeout)
             initial = x11.pixels(window)
             x11.tap(ord("f"))
             x11.tap(ord("i"))

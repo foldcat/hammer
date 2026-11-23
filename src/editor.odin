@@ -273,11 +273,13 @@ editor_alloc_path_buffer :: proc(path: string) -> (^Editor_Buffer, errs.Error) {
 editor_init :: proc(path := "") -> errs.Error {
 	process.job_service_init(&editor.jobs, {}, permanent())
 	editor.next_buffer_id = 1
-	buffer, err := editor_alloc_path_buffer(path)
-	if !errs.ok(err) {
-		return err
+	if path != "" {
+		buffer, err := editor_alloc_path_buffer(path)
+		if !errs.ok(err) {
+			return err
+		}
+		editor.buffer = buffer
 	}
-	editor.buffer = buffer
 	if close_err := lifecycle.close_guard_init(&editor.close_guard, {}, permanent()); !errs.ok(close_err) {
 		return close_err
 	}
@@ -322,6 +324,7 @@ editor_init :: proc(path := "") -> errs.Error {
 }
 
 editor_workspace_init :: proc() -> errs.Error {
+	startup_buffer := editor.buffer
 	if err := layout.workspace_init(&editor.workspace); !errs.ok(err) {
 		return err
 	}
@@ -331,6 +334,9 @@ editor_workspace_init :: proc() -> errs.Error {
 	}
 	if _, add_err := layout.add_window(&editor.workspace, right); !errs.ok(add_err) {
 		return add_err
+	}
+	if startup_buffer == nil {
+		layout.remove_window(&editor.workspace, editor.workspace.columns[0].windows[0].id)
 	}
 	working_directory, directory_err := os.get_working_directory(context.temp_allocator)
 	if directory_err != nil {
@@ -342,12 +348,13 @@ editor_workspace_init :: proc() -> errs.Error {
 		return explorer_err
 	}
 	first := true
+	active_window := layout.Window_ID(0)
 	for column_index in 0 ..< editor.workspace.column_count {
 		column := &editor.workspace.columns[column_index]
 		for placed in column.windows[:column.window_count] {
-			buffer := editor.buffer
-			if !first {
-				buffer = explorer
+			buffer := explorer
+			if startup_buffer != nil && first {
+				buffer = startup_buffer
 			}
 			first = false
 			if add_err := view.add(&editor.views, placed.id, buffer.id); !errs.ok(add_err) {
@@ -358,13 +365,26 @@ editor_workspace_init :: proc() -> errs.Error {
 			if tag_err := editor_init_window_tag(item); !errs.ok(tag_err) {
 				return tag_err
 			}
+			if active_window == 0 {
+				active_window = placed.id
+			}
 		}
 	}
 	if tag_err := editor_init_global_and_column_tags(); !errs.ok(tag_err) {
 		return tag_err
 	}
-	editor.active_window = editor.workspace.columns[0].windows[0].id
+	if startup_buffer == nil {
+		editor.buffer = explorer
+	}
+	editor.active_window = active_window
 	editor.active_text_kind = .Body
+	log.infof(
+		"startup: columns=%d windows=%d buffers=%d active_window=%d",
+		editor.workspace.column_count,
+		editor.views.view_count,
+		editor.buffer_count,
+		u64(editor.active_window),
+	)
 	return {}
 }
 

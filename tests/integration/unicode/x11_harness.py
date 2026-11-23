@@ -16,7 +16,7 @@ import zlib
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "typing"))
-from x11_harness import ClipboardOwner, HarnessFailure, X11, read_external_clipboard, wait_for_exit
+from x11_harness import ClipboardOwner, HarnessFailure, X11, open_untitled, read_external_clipboard, wait_for_exit
 
 LINES = [
     "A̋e̋i̋őű n͍ s͍ t͍ p̾ b̾ d̾ t̾ g̾ k̾ c̾ m̃ ñ l̃ r̃",
@@ -118,6 +118,7 @@ def main() -> int:
             x11.lib.XSetInputFocus(x11.display, window, 1, 0)
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
+            open_untitled(x11, window, log_path, args.timeout)
 
             clipboard_owner = ClipboardOwner(clipboard_peer, payload_path, sandbox, args.timeout)
             chord(x11, 0xFFE3, ord("v"))

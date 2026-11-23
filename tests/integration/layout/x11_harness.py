@@ -14,7 +14,7 @@ import time
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "typing"))
-from x11_harness import HarnessFailure, X11, wait_for_exit  # noqa: E402
+from x11_harness import HarnessFailure, X11, open_untitled, wait_for_exit  # noqa: E402
 
 
 def wait_for_layout_line(log_path: Path, pattern: str, timeout: float, occurrence: int = 1) -> re.Match[str]:
@@ -66,6 +66,7 @@ def main() -> int:
             x11.lib.XSetInputFocus(x11.display, window, 1, 0)
             x11.lib.XSync(x11.display, 0)
             time.sleep(0.3)
+            open_untitled(x11, window, log_path, args.timeout)
             # Sample from x=2 so the active window's caret (drawn at the body's
             # left edge, x=2) is captured. The buffer is empty, so moving the
             # active window changes only the caret position; the default region
@@ -92,7 +93,7 @@ def main() -> int:
             print("PASS: resize controls select horizontal/vertical X11 cursors and restore the default")
 
             x11.drag(window, (5, 50), (600, 100))
-            wait_for_layout_line(log_path, r"layout: window 1 column 2 index 0 weight 1\.0000", args.timeout)
+            wait_for_layout_line(log_path, r"layout: window 3 column 2 index 0 weight 1\.0000", args.timeout)
             time.sleep(0.2)
             if x11.pixels(window, 2, 220, 66, 130) == initial_pixels:
                 raise HarnessFailure("moving the active window did not change rendered pixels")
@@ -101,7 +102,7 @@ def main() -> int:
             x11.drag(window, (403, 50), (403, 100))
             first_resize = wait_for_layout_line(
                 log_path,
-                r"layout: window 1 column 2 index 0 weight (1\.[0-9]*[1-9][0-9]*)",
+                r"layout: window 3 column 2 index 0 weight (1\.[0-9]*[1-9][0-9]*)",
                 args.timeout,
             )
             if float(first_resize.group(1)) <= 1.0:
@@ -111,7 +112,7 @@ def main() -> int:
             x11.drag(window, (403, 50), (403, 25))
             resize = wait_for_layout_line(
                 log_path,
-                r"layout: window 1 column 2 index 0 weight (0\.[0-9]+|1\.[0-9]+)",
+                r"layout: window 3 column 2 index 0 weight (0\.[0-9]+|1\.[0-9]+)",
                 args.timeout,
                 occurrence=3,
             )
@@ -120,7 +121,7 @@ def main() -> int:
             print("PASS: vertical drag resizes the adjacent window pair")
 
             x11.drag(window, (403, 50), (600, 590))
-            wait_for_layout_line(log_path, r"layout: window 1 column 2 index 1 weight ([0-9.]+)", args.timeout)
+            wait_for_layout_line(log_path, r"layout: window 3 column 2 index 1 weight ([0-9.]+)", args.timeout)
             print("PASS: vertical drag reorders windows within a column")
 
             x11.drag(window, (403, 25), (10, 25))
